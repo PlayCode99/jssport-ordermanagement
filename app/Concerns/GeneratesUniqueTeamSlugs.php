@@ -1,8 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Concerns;
 
-use App\Models\Team;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 
 trait GeneratesUniqueTeamSlugs
@@ -15,7 +17,7 @@ trait GeneratesUniqueTeamSlugs
         $defaultSlug = Str::slug($name);
 
         $query = static::withTrashed()
-            ->where(function ($query) use ($defaultSlug) {
+            ->where(function (Builder $query) use ($defaultSlug): void {
                 $query->where('slug', $defaultSlug)
                     ->orWhere('slug', 'like', $defaultSlug.'-%');
             });

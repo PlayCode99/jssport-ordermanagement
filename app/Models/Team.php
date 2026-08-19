@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Models;
@@ -40,13 +41,13 @@ class Team extends Model
     {
         parent::boot();
 
-        static::creating(function (Team $team) {
+        static::creating(function (Team $team): void {
             if (empty($team->slug)) {
                 $team->slug = static::generateUniqueTeamSlug($team->name);
             }
         });
 
-        static::updating(function (Team $team) {
+        static::updating(function (Team $team): void {
             if ($team->isDirty('name')) {
                 $team->slug = static::generateUniqueTeamSlug($team->name, $team->id);
             }
@@ -56,7 +57,7 @@ class Team extends Model
     /**
      * Get the team owner.
      */
-    public function owner(): ?Model
+    public function owner(): ?User
     {
         return $this->members()
             ->wherePivot('role', TeamRole::Owner->value)

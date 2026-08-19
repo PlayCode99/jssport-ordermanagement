@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Actions\Teams;
 
 use App\Enums\TeamRole;
@@ -14,7 +16,7 @@ class CreateTeam
      */
     public function handle(User $user, string $name, bool $isPersonal = false): Team
     {
-        return DB::transaction(function () use ($user, $name, $isPersonal) {
+        return DB::transaction(function () use ($user, $name, $isPersonal): Team {
             $team = Team::create([
                 'name' => $name,
                 'is_personal' => $isPersonal,

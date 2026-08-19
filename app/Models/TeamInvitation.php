@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
 use App\Enums\TeamRole;
@@ -38,7 +40,7 @@ class TeamInvitation extends Model
     {
         parent::boot();
 
-        static::creating(function (TeamInvitation $invitation) {
+        static::creating(function (TeamInvitation $invitation): void {
             if (empty($invitation->code)) {
                 $invitation->code = Str::random(64);
             }
