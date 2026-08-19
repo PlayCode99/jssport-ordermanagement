@@ -10,4 +10,5 @@ parameters:
         - database/
         - routes/
 
+    memoryLimit: 1G
     level: 7
