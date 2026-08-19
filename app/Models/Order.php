@@ -1,8 +1,10 @@
 <?php
+declare(strict_types=1);
 
 namespace App\Models;
 
 use App\Enums\OrderStatus;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,14 +15,27 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
+#[Fillable([
+    'order_code',
+    'customer_id',
+    'branch_id',
+    'creator_user_id',
+    'job_name',
+    'job_type',
+    'delivery_method',
+    'shipping_address',
+    'shipping_delivery_info',
+    'order_date',
+    'due_date',
+    'total_amount',
+    'discount_percent',
+    'discount_amount',
+    'net_amount',
+    'order_status',
+])]
 class Order extends Model implements HasMedia
 {
     use HasFactory, InteractsWithMedia, SoftDeletes;
-
-    /**
-     * @var array<int, string>
-     */
-    protected $guarded = [];
 
     /**
      * @var array<int, string>
