@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Support;
 
 use App\Enums\AccessRole;
@@ -140,6 +142,9 @@ final class UserAccessControl
         return substr($digits, -2);
     }
 
+    /**
+     * @return array<int, array{id: int, branch_code: string, branch_name: string}>
+     */
     public static function branchOptionsVisibleTo(User $user): array
     {
         $query = Branch::query()->select(['id', 'branch_code', 'branch_name'])->orderBy('branch_name');

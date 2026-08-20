@@ -52,7 +52,6 @@ export default function ShirtCatalogPage() {
     const { auth, catalog, rows: initialRows } = usePage<PageProps>().props;
     const dataLabel = catalog.dataLabel ?? 'Shirt Data';
     const parentTitle = catalog.parentTitle ?? 'แบบเสื้อ';
-    const parentPath = catalog.parentPath ?? '/settings/data/shirts';
     const pagePrefix = catalog.pagePrefix ?? parentTitle;
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [newName, setNewName] = useState('');
@@ -106,6 +105,7 @@ export default function ShirtCatalogPage() {
         }
 
         const payload = (await response.json()) as { rows?: CatalogRow[] };
+
         if (Array.isArray(payload.rows)) {
             setRows(payload.rows);
         }
@@ -113,6 +113,7 @@ export default function ShirtCatalogPage() {
 
     const addRow = async () => {
         const name = newName.trim();
+
         if (name.length === 0) {
             return;
         }
@@ -143,6 +144,7 @@ export default function ShirtCatalogPage() {
 
     const saveEdit = async (id: number) => {
         const name = editValue.trim();
+
         if (name.length === 0) {
             return;
         }
@@ -154,6 +156,7 @@ export default function ShirtCatalogPage() {
 
     const deleteRow = async (id: number) => {
         const ok = window.confirm(`ยืนยันการลบ${catalog.title}นี้ใช่หรือไม่`);
+
         if (!ok) {
             return;
         }

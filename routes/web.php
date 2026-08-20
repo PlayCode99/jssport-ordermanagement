@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\GarmentPricingController;
 use App\Http\Controllers\ShirtCatalogController;

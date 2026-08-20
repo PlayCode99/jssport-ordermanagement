@@ -323,10 +323,6 @@ function getSetBundleCount(row: SizeRowForm): number {
     return Math.max(Math.min(row.set_shirt_qty, row.set_pants_qty), 0);
 }
 
-function getSetPieceCount(row: SizeRowForm): number {
-    return getSetBundleCount(row) * 2;
-}
-
 function rowSetTotal(row: SizeRowForm): number {
     return getSetBundleCount(row) * row.set_price;
 }
@@ -484,20 +480,6 @@ function toNumberValue(value: number | string | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toNumberValueFromUnknown(value: unknown): number {
-    if (typeof value === 'number') {
-        return Number.isFinite(value) ? value : 0;
-    }
-
-    if (typeof value === 'string' && value !== '') {
-        const parsed = Number(value);
-
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-
-    return 0;
-}
-
 export function buildEditInitialFormData(order: EditOrderPayload | null | undefined, args: {
     resolvedBranches: BranchOption[];
     resolvedJobTypes: OptionItem[];
@@ -653,25 +635,6 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
                 rows: rows.length > 0 ? rows : [],
             };
         });
-
-    const matrixTable = matrixTables[0] ?? {
-        id: uid('table'),
-        table_type: 'adults',
-        title: 'ตารางไซส์ผู้ใหญ่',
-        rows: [
-            {
-                id: uid('row'),
-                size_label: 'ระบุไซส์',
-                set_shirt_qty: 0,
-                set_pants_qty: 0,
-                set_price: 0,
-                separate_shirt_qty: 0,
-                separate_pants_qty: 0,
-                separate_shirt_price: 0,
-                separate_pants_price: 0,
-            },
-        ],
-    };
 
     const mappedPersonalizationRows = personalizationRows
         .filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
@@ -945,16 +908,23 @@ export default function OrderCreatePage({
 
     useEffect(() => {
         if (!order) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setArtworkPreviewUrls([]);
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setShirtArtworkPreviewUrl(null);
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPantsArtworkPreviewUrl(null);
+
             return;
         }
 
         const previewList = [order.artwork_url, ...(order.reference_designs ?? [])].filter((url): url is string => Boolean(url));
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setArtworkPreviewUrls(previewList);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShirtArtworkPreviewUrl(order.shirt_artwork_url ?? null);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPantsArtworkPreviewUrl(order.pants_artwork_url ?? null);
     }, [order]);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -975,13 +945,6 @@ export default function OrderCreatePage({
 
     const resolvedKidsSizes = kidsSizes ?? [];
     const resolvedAdultSizes = adultSizes ?? [];
-
-    const defaultTableType: SizeTableType = resolvedKidsSizes.length > 0 ? 'kids' : 'adults';
-    const defaultTableSizes = defaultTableType === 'kids' ? resolvedKidsSizes : resolvedAdultSizes;
-    const defaultSizeTable = useMemo(
-        () => createSizeTable(defaultTableType, defaultTableSizes),
-        [defaultTableType, defaultTableSizes],
-    );
 
     const initialFormData = useMemo(
         () => buildEditInitialFormData(order, {
@@ -1022,8 +985,10 @@ export default function OrderCreatePage({
         if (data.artwork_files.length === 0) {
             if (order) {
                 const previewList = [order.artwork_url, ...(order.reference_designs ?? [])].filter((url): url is string => Boolean(url));
+                // eslint-disable-next-line react-hooks/set-state-in-effect
                 setArtworkPreviewUrls(previewList);
             } else {
+                // eslint-disable-next-line react-hooks/set-state-in-effect
                 setArtworkPreviewUrls([]);
             }
 
@@ -1042,6 +1007,7 @@ export default function OrderCreatePage({
 
     useEffect(() => {
         if (!data.shirt_artwork_file) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setShirtArtworkPreviewUrl(order?.shirt_artwork_url ?? null);
 
             return;
@@ -1059,6 +1025,7 @@ export default function OrderCreatePage({
 
     useEffect(() => {
         if (!data.pants_artwork_file) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPantsArtworkPreviewUrl(order?.pants_artwork_url ?? null);
 
             return;

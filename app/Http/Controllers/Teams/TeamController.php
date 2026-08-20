@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Http\Controllers\Teams;
 
 use App\Actions\Teams\CreateTeam;
@@ -57,7 +59,7 @@ class TeamController extends Controller
                 'slug' => $team->slug,
                 'isPersonal' => $team->is_personal,
             ],
-            'members' => $team->members()->get()->map(function (User $member) {
+            'members' => $team->members()->get()->map(function (User $member): array {
                 /** @var Membership $membership */
                 $membership = $member->getRelation('pivot');
 
@@ -92,7 +94,7 @@ class TeamController extends Controller
     {
         Gate::authorize('update', $team);
 
-        $team = DB::transaction(function () use ($request, $team) {
+        $team = DB::transaction(function () use ($request, $team): Team {
             $team = Team::whereKey($team->id)->lockForUpdate()->firstOrFail();
 
             $team->update(['name' => $request->validated('name')]);

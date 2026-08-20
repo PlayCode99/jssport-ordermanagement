@@ -1,4 +1,4 @@
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -108,6 +108,7 @@ export default function ShirtTypesPage() {
 
         if (!payload.code || !payload.name) {
             setError('กรุณากรอกรหัสและชื่อประเภทเสื้อ');
+
             return;
         }
 
@@ -129,6 +130,7 @@ export default function ShirtTypesPage() {
 
         if (!response.ok) {
             setError(body?.message ?? 'บันทึกข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -156,6 +158,7 @@ export default function ShirtTypesPage() {
         });
 
         const body = (await response.json().catch(() => null)) as { rows?: ShirtTypeRow[] } | null;
+
         if (response.ok && Array.isArray(body?.rows)) {
             setRows(body.rows);
         }
@@ -163,6 +166,7 @@ export default function ShirtTypesPage() {
 
     const deleteRow = async (row: ShirtTypeRow) => {
         const ok = window.confirm(`ยืนยันการลบประเภทเสื้อ ${row.name} ใช่หรือไม่`);
+
         if (!ok) {
             return;
         }
@@ -180,6 +184,7 @@ export default function ShirtTypesPage() {
         if (!response.ok) {
             setError(body?.message ?? 'ลบข้อมูลไม่สำเร็จ');
             setIsModalOpen(true);
+
             return;
         }
 
