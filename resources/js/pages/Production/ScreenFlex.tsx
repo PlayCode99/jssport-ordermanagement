@@ -1,4 +1,5 @@
-import { ProductionBoardPage, type ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
+import { ProductionBoardPage } from '@/components/domain/production/ProductionBoardPage';
+import type { ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
 import type { CuttingTeam, Order, ScreenTeam } from '@/types/models';
 
 type ScreenFlexPageProps = {
@@ -43,7 +44,7 @@ export default function ScreenFlexPage({
             screenTeams={screenTeams}
             fabricLookup={fabricLookup}
             specSectionsMap={specSectionsMap}
-            initialDepartmentFilter="screen_flex"
+            initialDepartmentFilter={initialDepartmentFilter}
             showDepartmentFilter={showDepartmentFilter}
             pageTitle={pageTitle}
             hideBillingColumns={true}
