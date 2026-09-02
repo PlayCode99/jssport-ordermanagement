@@ -194,4 +194,44 @@ describe('shirt and pants artwork on the print form', () => {
         expect(page.textContent).toContain('7');
         expect(page.textContent).toContain('3');
     });
+
+    it('leaves the dialog-only summary out of what is sent to the printer', () => {
+        let written = '';
+        const fakeDoc = {
+            open: vi.fn(),
+            write: (html: string) => { written += html; },
+            close: vi.fn(),
+            images: [],
+            querySelectorAll: () => [],
+        };
+        vi.spyOn(window, 'open').mockReturnValue({
+            document: fakeDoc,
+            focus: vi.fn(),
+            print: vi.fn(),
+            close: vi.fn(),
+        } as unknown as Window);
+
+        openDetail(makeOrder({ shirt_artwork_urls: ['/storage/a.webp'] }));
+
+        // The on-screen dialog still shows it.
+        expect(screen.getByText('รายละเอียดสินค้า')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: /Print เอกสาร/ }));
+
+        // ...but it never reaches the print window, so it is absent from the
+        // preview as well as the PDF.
+        // The stylesheet still carries the rule name, so check the document body.
+        const body = written.slice(written.indexOf('<body>'));
+
+        expect(body).not.toContain('รายละเอียดสินค้า');
+        expect(body).not.toContain('p-dialog-only');
+        expect(body).not.toContain('p-preview-only');
+
+        // The actual work sheet is still there in full.
+        expect(written).toContain('ใบสั่งผลิต');
+        expect(written).toContain('ORD-070');
+        expect(written).toContain('สเปกเสื้อ');
+        expect(written).toContain('/images/logo/');
+        expect(written).toContain('size: A4 landscape');
+    });
 });

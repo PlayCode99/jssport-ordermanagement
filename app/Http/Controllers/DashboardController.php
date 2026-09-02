@@ -776,7 +776,9 @@ class DashboardController extends Controller
         // Filters below are applied to this base query only. It is then used twice:
         // once with lean columns to aggregate the floor cards over every matching
         // order, and once paginated with the heavy relations for the visible page.
-        $ordersQuery = Order::query()->latest('order_date');
+        // Newest bill first. The id breaks ties so two orders opened in the same
+        // second cannot swap places between pages and hide or repeat a row.
+        $ordersQuery = Order::query()->latest('order_date')->latest('id');
 
         if ($actor->branch_id !== null) {
             UserAccessControl::applyBranchScope($ordersQuery, $actor);

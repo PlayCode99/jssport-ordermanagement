@@ -879,6 +879,20 @@ export function ProductionBoardPage({
 
         const branchHeaderColor = resolveBranchHeaderColor(detailOrder.branch?.branch_name, DEFAULT_BRANCH_HEADER_COLOR);
 
+        /**
+         * The on-screen summary (รายละเอียดสินค้า and the artwork panel) belongs to
+         * the dialog only. It used to be carried into the print window and hidden
+         * by @media print, which still showed it in the print preview. Dropping it
+         * from the markup keeps it off both the preview and the PDF.
+         */
+        const printableMarkup = (() => {
+            const clone = printRef.current.cloneNode(true) as HTMLElement;
+
+            clone.querySelectorAll('.p-dialog-only, .p-preview-only').forEach((node) => node.remove());
+
+            return clone.innerHTML;
+        })();
+
         const printWindow = window.open('', '_blank', 'width=1200,height=900');
 
         if (!printWindow) {
@@ -993,7 +1007,7 @@ export function ProductionBoardPage({
                         }
                     </style>
                 </head>
-                <body>${printRef.current.innerHTML}</body>
+                <body>${printableMarkup}</body>
             </html>
         `);
         printWindow.document.close();

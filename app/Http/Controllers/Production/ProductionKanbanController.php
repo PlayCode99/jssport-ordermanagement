@@ -29,6 +29,9 @@ class ProductionKanbanController extends Controller
 {
     use ProductionCostCalculation;
 
+    /** Same page size as the counter, so both lists behave the same way. */
+    private const ORDERS_PER_PAGE = 10;
+
     /**
      * @var array<string, array<string, string>>|null
      */
@@ -313,14 +316,17 @@ class ProductionKanbanController extends Controller
             'specification',
         ])
             ->whereNotIn('order_status', [OrderStatus::Completed, OrderStatus::Cancelled])
-            ->latest('due_date');
+            // Newest bill first, matching the counter. The id breaks ties so two
+            // orders opened in the same second keep a stable order across pages.
+            ->latest('order_date')
+            ->latest('id');
 
         if ($initialDepartmentFilter === 'shipping' && $actor !== null) {
             UserAccessControl::applyBranchScope($ordersQuery, $actor);
         }
 
         $ordersPaginator = $ordersQuery
-            ->paginate(15)
+            ->paginate(self::ORDERS_PER_PAGE)
             ->withQueryString();
 
         $orders = collect($ordersPaginator->items());
