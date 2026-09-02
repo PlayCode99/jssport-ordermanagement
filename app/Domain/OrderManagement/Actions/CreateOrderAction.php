@@ -75,6 +75,7 @@ class CreateOrderAction
                 $netAmount = max(0, $subTotalAmount - $discountAmount);
 
                 $customerId = $this->resolveCustomerId($data);
+                $openedAt = now('Asia/Bangkok');
 
                 $order = Order::create([
                     'order_code' => $orderCode,
@@ -85,7 +86,7 @@ class CreateOrderAction
                     'job_type' => (string) $data['job_type'],
                     'delivery_method' => isset($data['delivery_method']) ? (string) $data['delivery_method'] : null,
                     'shipping_address' => isset($data['shipping_address']) ? (string) $data['shipping_address'] : null,
-                    'order_date' => (string) $data['order_date'],
+                    'order_date' => $openedAt,
                     'due_date' => (string) $data['due_date'],
                     'total_amount' => $subTotalAmount,
                     'discount_percent' => $discountPercent,
@@ -142,10 +143,36 @@ class CreateOrderAction
                     }
                 }
 
+                // Form 3 (กีฬาสี): files arrive keyed by colour house index. The
+                // index is stored on the media itself so the artwork can be
+                // handed back to the right house on the printed sheet.
+                foreach (Arr::wrap($data['sports_day_artwork'] ?? []) as $groupIndex => $groupFiles) {
+                    if (! is_numeric($groupIndex)) {
+                        continue;
+                    }
+
+                    foreach (Arr::wrap($groupFiles) as $groupFile) {
+                        if (! $groupFile instanceof UploadedFile) {
+                            continue;
+                        }
+
+                        $order->addMedia($groupFile)
+                            ->withCustomProperties(['sports_day_group' => (int) $groupIndex])
+                            ->toMediaCollection('sports_day_artwork');
+                    }
+                }
+
                 // "เปิดบิลอีกครั้ง": the browser can only re-send files the user
                 // picked just now, so the source order's already-saved artwork is
                 // copied here instead. Copies are added on top of any new upload.
                 $this->copyArtworkFromSourceOrder($order, $data['duplicate_from_id'] ?? null);
+
+                // Lock in what the shop pays for this work today. Editing the
+                // garment operation prices later must not re-price this order.
+                $order->forceFill([
+                    'production_rate_snapshot' => app(\App\Support\Production\ProductionRateSnapshotBuilder::class)
+                        ->forOrder($order->fresh(['items', 'specification'])),
+                ])->save();
 
                 $stationNames = $this->resolveRoutingStations($data);
 
@@ -229,7 +256,7 @@ class CreateOrderAction
             return;
         }
 
-        foreach (['artwork', 'shirt_artwork', 'pants_artwork', 'reference_designs'] as $collection) {
+        foreach (['artwork', 'shirt_artwork', 'pants_artwork', 'sports_day_artwork', 'reference_designs'] as $collection) {
             foreach ($source->getMedia($collection) as $media) {
                 $media->copy($order, $collection);
             }
@@ -414,7 +441,11 @@ class CreateOrderAction
         $hasEmbroidery = str_contains($normalizedJobType, 'ปัก') || str_contains($normalizedJobType, 'embroider');
         $hasSublimation = str_contains($normalizedJobType, 'ซับ') || str_contains($normalizedJobType, 'sublimation');
         $hasScreen = str_contains($normalizedJobType, 'สกรีน') || str_contains($normalizedJobType, 'screen');
-        $hasFlex = str_contains($normalizedJobType, 'เฟล็ก') || str_contains($normalizedJobType, 'flex');
+        // "เฟล็กซ์" and "เฟล๊กซ์" are both written in practice (ไม้ไต่คู้ vs ไม้ตรี),
+        // and a mismatch here silently drops the order out of production
+        // routing altogether, so accept the word with any tone mark or none.
+        $hasFlex = preg_match('/เฟล[\x{0E47}-\x{0E4E}]?ก/u', $normalizedJobType) === 1
+            || str_contains($normalizedJobType, 'flex');
         $hasScreenFlex = $hasScreen || $hasFlex;
 
         if (! $hasEmbroidery && ! $hasSublimation && ! $hasScreenFlex) {

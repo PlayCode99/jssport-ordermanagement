@@ -316,6 +316,56 @@ describe('production board timeline sync', () => {
         expect(screen.queryByText('กางเกง', { selector: 'h4' })).not.toBeInTheDocument();
     });
 
+    it('renders Form 2 screen names, numbers, sizes, and quantities in the production document', () => {
+        mockPage.props = {
+            productionPricingMap: {
+                '901': makePricingSummary(60),
+            },
+        };
+
+        const order = {
+            ...makeSpecOrder(901),
+            items: [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 3 }],
+            specification: {
+                screen_print_detail: JSON.stringify({
+                    mode: 'individual',
+                    personalization_rows: [
+                        { name: 'สมชาย', number: '10', size: 'M', quantity: 1 },
+                        { name: 'สมหญิง', number: '25', size: 'L', quantity: 2 },
+                    ],
+                }),
+            },
+        } as Order;
+
+        render(
+            <ProductionBoardPage
+                orders={[order]}
+                branches={[]}
+                initialDepartmentFilter="embroidery"
+                showDepartmentFilter={false}
+                hideBillingColumns={true}
+                pageTitle="ห้องปัก"
+            />,
+        );
+
+        fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
+
+        const personalizationTable = document.querySelector('.p-personalization-table');
+
+        expect(document.querySelectorAll('.p-print-page')).toHaveLength(2);
+        expect(personalizationTable).not.toBeNull();
+        expect(personalizationTable).toHaveTextContent('สกรีนชื่อ');
+        expect(personalizationTable).toHaveTextContent('สมชาย');
+        expect(personalizationTable).toHaveTextContent('10');
+        expect(personalizationTable).toHaveTextContent('M');
+        expect(personalizationTable).toHaveTextContent('สมหญิง');
+        expect(personalizationTable).toHaveTextContent('25');
+        expect(personalizationTable).toHaveTextContent('L');
+        expect(personalizationTable).toHaveTextContent('รวม');
+        expect(personalizationTable).toHaveTextContent('3');
+        expect(document.querySelectorAll('.p-size-bar')).toHaveLength(0);
+    });
+
     it('renders only one job when only shirt adults has real data', () => {
         mockPage.props = {
             productionPricingMap: {
@@ -1032,8 +1082,8 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork');
-        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork');
+        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1');
+        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork-1');
 
         expect(shirtArtwork.getAttribute('src')).toBe('https://example.com/shirt-art.webp');
         expect(pantsArtwork.getAttribute('src')).toBe('https://example.com/pants-art.webp');
@@ -1174,7 +1224,7 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork');
+        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1');
 
         expect(shirtArtwork.getAttribute('src')).toBe('https://example.com/general-art.webp');
     });
@@ -1244,7 +1294,7 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork');
+        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork-1');
 
         expect(pantsArtwork.getAttribute('src')).toBe('https://example.com/general-art.webp');
     });
@@ -1315,8 +1365,8 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        expect(screen.queryByAltText('เสื้อไซต์ผู้ใหญ่-artwork')).not.toBeInTheDocument();
-        expect(screen.queryByAltText('กางเกงผู้ใหญ่-artwork')).not.toBeInTheDocument();
+        expect(screen.queryByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1')).not.toBeInTheDocument();
+        expect(screen.queryByAltText('กางเกงผู้ใหญ่-artwork-1')).not.toBeInTheDocument();
         expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThanOrEqual(2);
     });
 

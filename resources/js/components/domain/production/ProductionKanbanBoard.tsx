@@ -71,6 +71,15 @@ type DeliveryFormState = {
     sender_signature: string;
 };
 
+function escapeHtml(value: string | number | null | undefined): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 const emptyDeliveryFormState = (): DeliveryFormState => ({
     carrier_name: '',
     tracking_no: '',
@@ -155,6 +164,7 @@ export interface OrderTableRow {
     shipping_address?: string | null;
     receipt_code?: string;
     payment_status: 'paid' | 'deposit' | 'pending';
+    net_amount: number;
     has_payment_pdf?: boolean;
     receiver_name: string;
     print_machine?: 'printer_1' | 'printer_2' | 'printer_3' | null;
@@ -1923,6 +1933,7 @@ export function ProductionKanbanBoard({
                         : (order.receipts?.reduce((sum, receipt) => sum + Number(receipt.amount_paid || 0), 0) ?? 0) > 0
                             ? 'deposit'
                             : 'pending',
+                net_amount: Number(order.net_amount || 0),
                 has_payment_pdf: false,
                 receiver_name: inspectorSourceHistory?.user?.name || '-',
                 print_machine: mappedPrintMachine,
@@ -2325,6 +2336,118 @@ export function ProductionKanbanBoard({
         setDeliveryInfoRow(row);
         setDeliveryForm(savedForm ?? emptyDeliveryFormState());
         setIsDeliveryEditing(!hasDeliveryInfo(savedForm));
+    };
+
+    const printDeliveryNote = () => {
+        if (!deliveryInfoRow) {
+            return;
+        }
+
+        const deliveryInfo = deliveryFormsByOrderId[deliveryInfoRow.id] ?? deliveryForm;
+        const deliveryDate = deliveryInfoRow.shipping_completed_at
+            ? formatTableDate(deliveryInfoRow.shipping_completed_at)
+            : '-';
+        const deliveryMethod = deliveryMethodLabel(deliveryInfoRow.delivery_method);
+        const carrierDetails = [deliveryInfo.carrier_name, deliveryInfo.tracking_no]
+            .filter((value) => value.trim() !== '')
+            .join(' / ');
+        const deliveryDetails = deliveryInfoRow.delivery_method === 'onsite'
+            ? [deliveryInfo.onsite_sender_name, deliveryInfo.onsite_vehicle_plate]
+                .filter((value) => value.trim() !== '')
+                .join(' / ')
+            : carrierDetails;
+        const printWindow = window.open('', '_blank', 'width=900,height=1100');
+
+        if (!printWindow) {
+            return;
+        }
+
+        printWindow.document.open();
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <meta charset="utf-8" />
+                    <title>ใบส่งมอบสินค้า ${escapeHtml(deliveryInfoRow.order_code)}</title>
+                    <style>
+                        @page { size: A4 portrait; margin: 8mm; }
+                        * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                        body { margin: 0; color: #172554; font-family: 'TH Sarabun New', 'Noto Sans Thai', Arial, sans-serif; font-size: 15px; }
+                        .note { min-height: 270mm; border: 2px solid #486581; border-radius: 10px; padding: 8px; }
+                        .header { display: grid; grid-template-columns: 1fr 235px; gap: 16px; align-items: start; }
+                        .logo { width: 145px; height: auto; }
+                        .tax-note { margin: 4px 0 0; color: #a04848; font-weight: 700; }
+                        .document-title { border: 2px solid #486581; border-radius: 9px; padding: 7px 10px; text-align: center; font-size: 24px; font-weight: 700; }
+                        .original { margin: 3px 0 0; color: #a04848; text-align: center; font-weight: 700; }
+                        .top-grid { display: grid; grid-template-columns: 1fr 235px; gap: 16px; margin-top: 8px; }
+                        .box { min-height: 116px; border: 2px solid #486581; border-radius: 18px; padding: 10px 14px; }
+                        .customer-line { margin: 0 0 7px; font-size: 17px; }
+                        .meta { display: grid; grid-template-columns: 1fr auto; gap: 5px 14px; margin: 0; font-size: 16px; }
+                        .meta dt, .meta dd { margin: 0; }
+                        .meta dd { text-align: right; font-weight: 700; }
+                        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 8px; border: 2px solid #486581; border-radius: 14px; overflow: hidden; }
+                        th, td { border-right: 1px solid #486581; border-bottom: 1px solid #486581; padding: 6px 8px; vertical-align: top; }
+                        th:last-child, td:last-child { border-right: 0; }
+                        tbody tr:last-child td { border-bottom: 0; }
+                        th { background: #f8fafc; text-align: center; font-weight: 700; }
+                        .number, .quantity, .money { text-align: center; white-space: nowrap; }
+                        .item-row td { height: 270px; }
+                        .summary-label { text-align: right; font-weight: 700; }
+                        .summary-value { text-align: right; font-weight: 700; }
+                        .amount-words { padding: 10px; text-align: center; font-weight: 700; }
+                        .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+                        .signature { min-height: 120px; border: 2px solid #486581; border-radius: 14px; padding: 10px; }
+                        .signature-line { margin: 60px 14px 0; border-bottom: 1px dotted #172554; }
+                        .signature-date { margin-top: 8px; text-align: center; }
+                        @media print { .note { min-height: 281mm; } }
+                    </style>
+                </head>
+                <body>
+                    <main class="note">
+                        <header class="header">
+                            <div>
+                                <img class="logo" src="/images/logo/logo.png" alt="J.S. Sport" />
+                                <p class="tax-note">ไม่ใช่ใบกำกับภาษี</p>
+                            </div>
+                            <div>
+                                <div class="document-title">ใบส่งมอบสินค้า</div>
+                                <p class="original">ต้นฉบับ</p>
+                            </div>
+                        </header>
+                        <section class="top-grid">
+                            <div class="box">
+                                <p class="customer-line"><strong>ลูกค้า</strong> ${escapeHtml(deliveryInfoRow.customer_name || '-')}</p>
+                                <p class="customer-line"><strong>ที่อยู่</strong> ${escapeHtml(deliveryInfoRow.shipping_address || '-')}</p>
+                                <p class="customer-line"><strong>วิธีส่งมอบ</strong> ${escapeHtml(deliveryMethod)}</p>
+                                <p class="customer-line"><strong>รายละเอียดขนส่ง</strong> ${escapeHtml(deliveryDetails || '-')}</p>
+                            </div>
+                            <div class="box">
+                                <dl class="meta">
+                                    <dt>เลขที่ออเดอร์</dt><dd>${escapeHtml(deliveryInfoRow.order_code)}</dd>
+                                    <dt>วันที่ส่งมอบ</dt><dd>${escapeHtml(deliveryDate)}</dd>
+                                    <dt>ชื่องาน</dt><dd>${escapeHtml(deliveryInfoRow.job_name || '-')}</dd>
+                                </dl>
+                            </div>
+                        </section>
+                        <table>
+                            <thead>
+                                <tr><th style="width:9%">ลำดับ</th><th>รายการ</th><th style="width:13%">จำนวน</th><th style="width:18%">จำนวนเงิน</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr class="item-row"><td class="number">1</td><td>${escapeHtml(deliveryInfoRow.job_type || '-')}: ${escapeHtml(deliveryInfoRow.job_name || '-')}</td><td class="quantity">${deliveryInfoRow.order_item_count.toLocaleString('th-TH')}</td><td class="money">${deliveryInfoRow.net_amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+                                <tr><td colspan="2" class="amount-words">ได้รับสินค้าตามรายการข้างบนนี้ถูกต้องแล้ว</td><td class="summary-label">รวม</td><td class="summary-value">${deliveryInfoRow.net_amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+                            </tbody>
+                        </table>
+                        <section class="signatures">
+                            <div class="signature"><strong>ผู้รับสินค้า</strong><div class="signature-line"></div><div class="signature-date">วันที่ ................................</div></div>
+                            <div class="signature"><strong>ผู้ส่งสินค้า</strong><div class="signature-line"></div><div class="signature-date">${escapeHtml(deliveryInfo.sender_signature || '-')}<br />วันที่ ${escapeHtml(deliveryDate)}</div></div>
+                        </section>
+                    </main>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.focus();
+        window.setTimeout(() => printWindow.print(), 250);
     };
 
     const saveDeliveryInfo = () => {

@@ -194,9 +194,14 @@ class ShirtCatalogController extends Controller
         return Inertia::render('settings/data/branches/index');
     }
 
+    public const JOB_TYPES_STORAGE_KEY = 'jssport.job-types';
+
     public function jobTypes(Request $request): Response
     {
-        return Inertia::render('settings/data/job-types/index');
+        return Inertia::render('settings/data/job-types/index', [
+            'rows' => $this->loadCatalogRows(self::JOB_TYPES_STORAGE_KEY),
+            'storageKey' => self::JOB_TYPES_STORAGE_KEY,
+        ]);
     }
 
     public function syncCatalogItems(Request $request): JsonResponse

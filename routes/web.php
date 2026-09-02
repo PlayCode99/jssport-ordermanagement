@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\OwnerDashboardController;
 use App\Http\Controllers\GarmentPricingController;
 use App\Http\Controllers\ShirtCatalogController;
 use App\Http\Controllers\ShirtDataManagementController;
@@ -32,6 +33,7 @@ Route::prefix('{current_team}')
 
 Route::middleware(['auth'])->group(function () {
     Route::get('counter', DashboardController::class)->name('counter.fallback');
+    Route::get('owner-dashboard', OwnerDashboardController::class)->name('owner.dashboard');
     Route::get('invitations/{invitation}/accept', [TeamInvitationController::class, 'accept'])->name('invitations.accept');
     Route::delete('invitations/{invitation}', [TeamInvitationController::class, 'decline'])->name('invitations.decline');
     Route::get('orders/create', [OrderController::class, 'create'])->name('orders.create');

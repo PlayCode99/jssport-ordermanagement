@@ -16,6 +16,7 @@ use App\Models\OrderItem;
 use App\Models\OrderRouting;
 use App\Models\OrderStatusHistory;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -508,7 +509,7 @@ class CreateOrderActionTest extends TestCase
         }
     }
 
-    public function test_it_preserves_the_exact_billing_time_instead_of_resetting_it_to_midnight(): void
+    public function test_it_records_the_server_time_when_the_order_is_created(): void
     {
         $customer = Customer::create([
             'customer_code' => 'CUS-BILL-TIME-1001',
@@ -526,12 +527,18 @@ class CreateOrderActionTest extends TestCase
         ]);
 
         $payload = $this->basePayload($customer->id, $branch->id, 'งานสกรีน');
-        $payload['order_date'] = '2026-07-11 14:37:00';
+        $payload['order_date'] = '2026-01-01 00:00:00';
 
-        $order = (new CreateOrderAction())->execute($payload, $creator->id);
+        Carbon::setTestNow(Carbon::parse('2026-07-11 07:37:42', 'UTC'));
 
-        $this->assertSame('2026-07-11 14:37:00', $order->order_date->format('Y-m-d H:i:s'));
-        $this->assertNotSame('00:00:00', $order->order_date->format('H:i:s'));
+        try {
+            $order = (new CreateOrderAction())->execute($payload, $creator->id);
+
+            $this->assertSame('2026-07-11 14:37:42', $order->order_date->format('Y-m-d H:i:s'));
+            $this->assertNotSame($payload['order_date'], $order->order_date->format('Y-m-d H:i:s'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     /**

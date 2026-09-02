@@ -11,6 +11,7 @@ use App\Models\CatalogItem;
 use App\Models\Order;
 use App\Models\OrderRouting;
 use App\Models\TeamInvitation;
+use App\Support\Orders\OrderCompletion;
 use App\Support\UserAccessControl;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -684,14 +685,7 @@ class DashboardController extends Controller
         $shippingRouting = $requiredRoutings
             ->first(fn (OrderRouting $routing): bool => $routing->station_name === RoutingStationName::Shipping);
 
-        if ($order->order_status === OrderStatus::Completed) {
-            return 'completed';
-        }
-
-        if (
-            $shippingRouting instanceof OrderRouting
-            && in_array($shippingRouting->status, [RoutingStatus::Completed, RoutingStatus::Skipped], true)
-        ) {
+        if (OrderCompletion::isClosed($order)) {
             return 'completed';
         }
 
@@ -941,6 +935,7 @@ class DashboardController extends Controller
                     'branch_name' => $order->branch?->branch_name,
                     'delivery_method' => $order->delivery_method,
                     'shipping_address' => $order->shipping_address,
+                    'shipping_delivery_info' => $order->shipping_delivery_info,
                     'customer' => [
                         'name' => $order->customer?->customer_name,
                         'phone' => $order->customer?->phone,

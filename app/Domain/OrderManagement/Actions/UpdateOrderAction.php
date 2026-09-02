@@ -136,6 +136,25 @@ class UpdateOrderAction
                     }
                 }
 
+                // Form 3 (กีฬาสี): files arrive keyed by colour house index. The
+                // index is stored on the media itself so the artwork can be
+                // handed back to the right house on the printed sheet.
+                foreach (Arr::wrap($data['sports_day_artwork'] ?? []) as $groupIndex => $groupFiles) {
+                    if (! is_numeric($groupIndex)) {
+                        continue;
+                    }
+
+                    foreach (Arr::wrap($groupFiles) as $groupFile) {
+                        if (! $groupFile instanceof \Illuminate\Http\UploadedFile) {
+                            continue;
+                        }
+
+                        $order->addMedia($groupFile)
+                            ->withCustomProperties(['sports_day_group' => (int) $groupIndex])
+                            ->toMediaCollection('sports_day_artwork');
+                    }
+                }
+
                 foreach (Arr::wrap($data['reference_designs'] ?? []) as $referenceDesign) {
                     if ($referenceDesign instanceof \Illuminate\Http\UploadedFile) {
                         $order->addMedia($referenceDesign)->toMediaCollection('reference_designs');

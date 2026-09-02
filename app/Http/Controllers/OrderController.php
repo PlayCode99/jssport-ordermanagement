@@ -169,6 +169,39 @@ class OrderController extends Controller
             ->all();
     }
 
+    /**
+     * Job types are master data in catalog_items. Until that catalog has been
+     * filled in, fall back to the types already used on orders so the form is
+     * never left with an empty dropdown.
+     *
+     * @return \Illuminate\Support\Collection<int, array{id: int, name: string}>
+     */
+    private function jobTypeOptions(): \Illuminate\Support\Collection
+    {
+        $catalogNames = CatalogItem::query()
+            ->where('storage_key', ShirtCatalogController::JOB_TYPES_STORAGE_KEY)
+            ->where('active', true)
+            ->orderBy('item_id')
+            ->pluck('name');
+
+        $names = $catalogNames->isNotEmpty()
+            ? $catalogNames
+            : Order::query()
+                ->select('job_type')
+                ->whereNotNull('job_type')
+                ->where('job_type', '!=', '')
+                ->distinct()
+                ->orderBy('job_type')
+                ->pluck('job_type');
+
+        return $names
+            ->values()
+            ->map(fn (string $jobType, int $index): array => [
+                'id' => $index + 1,
+                'name' => $jobType,
+            ]);
+    }
+
     public function create(Request $request): Response
     {
         $this->authorize('viewAny', Order::class);
@@ -250,18 +283,7 @@ class OrderController extends Controller
             ])
             ->values();
 
-        $jobTypes = Order::query()
-            ->select('job_type')
-            ->whereNotNull('job_type')
-            ->where('job_type', '!=', '')
-            ->distinct()
-            ->orderBy('job_type')
-            ->pluck('job_type')
-            ->values()
-            ->map(fn (string $jobType, int $index): array => [
-                'id' => $index + 1,
-                'name' => $jobType,
-            ]);
+        $jobTypes = $this->jobTypeOptions();
 
         $orderPayload = null;
         if ($order !== null) {

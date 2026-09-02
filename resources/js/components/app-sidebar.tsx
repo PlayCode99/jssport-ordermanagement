@@ -1,10 +1,10 @@
 import { Link, usePage } from '@inertiajs/react';
 import {
+    ChartColumn,
     ClipboardCheck,
     Database,
     DraftingCompass,
     LayoutGrid,
-    Palette,
     Printer,
     Scissors,
     Shirt,
@@ -184,19 +184,20 @@ export function AppSidebar() {
 
     const mainNavItems: NavItem[] = [];
 
+    // Owner-only, matching the server-side guard on the route itself.
+    if (resolvedRole === USER_ACCESS_ROLES.OWNER) {
+        mainNavItems.push({
+            title: 'แดชบอร์ด',
+            href: '/owner-dashboard',
+            icon: ChartColumn,
+        });
+    }
+
     if (canAccessMenu(resolvedRole, USER_MENUS.COUNTER)) {
         mainNavItems.push({
             title: 'เคาว์เตอร์',
             href: mainUrl,
             icon: LayoutGrid,
-        });
-    }
-
-    if (resolvedRole === USER_ACCESS_ROLES.OWNER || resolvedRole === USER_ACCESS_ROLES.ADMIN_SYSTEM) {
-        mainNavItems.push({
-            title: 'ห้องออกแบบ',
-            href: '/orders',
-            icon: Palette,
         });
     }
 

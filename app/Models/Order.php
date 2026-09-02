@@ -32,12 +32,14 @@ class Order extends Model implements HasMedia
         'pants_artwork_url',
         'shirt_artwork_urls',
         'pants_artwork_urls',
+        'sports_day_artwork_urls',
         'reference_designs',
     ];
 
     protected function casts(): array
     {
         return [
+            'production_rate_snapshot' => 'array',
             'order_date' => 'datetime',
             'due_date' => 'datetime',
             'total_amount' => 'float',
@@ -99,6 +101,10 @@ class Order extends Model implements HasMedia
         $this->addMediaCollection('artwork')->singleFile();
         $this->addMediaCollection('shirt_artwork');
         $this->addMediaCollection('pants_artwork');
+        // Form 3 (กีฬาสี). One collection for the whole order; each file carries
+        // a `sports_day_group` custom property naming the colour house it
+        // belongs to, so the artwork follows that house onto its printed sheet.
+        $this->addMediaCollection('sports_day_artwork');
         $this->addMediaCollection('reference_designs');
     }
 
@@ -131,6 +137,29 @@ class Order extends Model implements HasMedia
         return $this->getMedia('shirt_artwork')
             ->map(fn (Media $media): string => $media->getUrl())
             ->toArray();
+    }
+
+    /**
+     * Artwork grouped by colour house, keyed by the house index as a string so
+     * it survives JSON encoding. Houses with no artwork are simply absent.
+     *
+     * @return array<string, array<int, string>>
+     */
+    public function getSportsDayArtworkUrlsAttribute(): array
+    {
+        $grouped = [];
+
+        foreach ($this->getMedia('sports_day_artwork') as $media) {
+            $groupIndex = $media->getCustomProperty('sports_day_group');
+
+            if (! is_numeric($groupIndex)) {
+                continue;
+            }
+
+            $grouped[(string) (int) $groupIndex][] = $media->getUrl();
+        }
+
+        return $grouped;
     }
 
     /**

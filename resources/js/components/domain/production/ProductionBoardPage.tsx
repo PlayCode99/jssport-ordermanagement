@@ -86,7 +86,7 @@ const PRODUCTION_GROUP_THEME_MAP: Record<ProductionGroupKey, ProductionGroupThem
         borderColor: '#5B21B6',
     },
 };
-const PRODUCTION_ARTWORK_CONTAINER_HEIGHT = '54mm';
+const PRODUCTION_ARTWORK_CONTAINER_HEIGHT = '70mm';
 
 function resolveProductionGroupTheme(groupKey: ProductionGroupKey): ProductionGroupTheme {
     return PRODUCTION_GROUP_THEME_MAP[groupKey];
@@ -890,35 +890,35 @@ export function ProductionBoardPage({
                 <head>
                     <title>ใบรับงาน ${detailOrder.order_code}</title>
                     <style>
-                        @page { size: A4 landscape; margin: 7mm; }
+                        @page { size: A4 landscape; margin: 6mm; }
                         * { box-sizing: border-box; }
-                        body { font-family: "Noto Sans Thai", Arial, sans-serif; margin: 0; padding: 0; color: #0f172a; }
+                        body { font-family: "Noto Sans Thai", Arial, sans-serif; margin: 0; padding: 0; color: #0f172a; font-size: 13px; }
                         .p-sheet { width: 100%; }
                         .p-card { border: 1.2px solid #111827; border-radius: 2px; background: #ffffff; }
                         .p-head { border: 1.8px solid #0f172a; background: ${branchHeaderColor}; color: #ffffff; padding: 4px 6px; margin-bottom: 4px; display: grid; grid-template-columns: 1fr auto; gap: 4px; align-items: start; }
-                        .p-head h2 { margin: 0 0 2px; font-size: 15px; line-height: 1.08; }
+                        .p-head h2 { margin: 0 0 3px; font-size: 20px; line-height: 1.1; }
                         .p-head-title { display: inline-block; background: ${branchHeaderColor}; color: #ffffff; padding: 1px 7px; border-radius: 2px; }
-                        .p-head p { margin: 0; font-size: 10px; line-height: 1.15; color: #ffffff; }
+                        .p-head p { margin: 0; font-size: 13px; line-height: 1.3; color: #ffffff; }
                         .p-head strong { color: #ffffff; }
                         .p-head .p-muted { color: #dbeafe; }
                         .p-head-emphasis { display: inline-flex; align-items: center; gap: 3px; border: 1px solid #bfdbfe; background: rgba(255, 255, 255, 0.12); color: #ffffff; padding: 0 6px; border-radius: 999px; font-weight: 700; }
                         .p-head-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px 8px; margin-top: 1px; }
-                        .p-badge { border: 1.2px solid #bfdbfe; border-radius: 2px; padding: 4px 6px; min-width: 145px; text-align: right; font-size: 10px; background: rgba(255, 255, 255, 0.10); color: #ffffff; }
-                        .p-badge strong { display: block; font-size: 16px; line-height: 1.05; color: #ffffff; }
+                        .p-badge { border: 1.2px solid #bfdbfe; border-radius: 2px; padding: 5px 8px; min-width: 165px; text-align: right; font-size: 13px; background: rgba(255, 255, 255, 0.10); color: #ffffff; }
+                        .p-badge strong { display: block; font-size: 21px; line-height: 1.1; color: #ffffff; }
                         .p-barcode-wrap { margin-top: 3px; border: 1px solid #111827; padding: 1px 2px; background: #ffffff; text-align: center; }
-                        .p-barcode-wrap svg { display: block; width: 100%; height: 11mm; }
+                        .p-barcode-wrap svg { display: block; width: 100%; height: 14mm; }
                         .p-barcode-fallback { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; }
                         .p-grid { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 6px; }
                         .p-block { padding: 6px; }
-                        .p-title { margin: 0 0 4px; font-size: 11px; font-weight: 700; border-bottom: 1.2px solid #111827; padding-bottom: 2px; }
-                        .p-muted { color: #334155; font-size: 10px; }
+                        .p-title { margin: 0 0 5px; font-size: 14px; font-weight: 700; border-bottom: 1.2px solid #111827; padding-bottom: 3px; }
+                        .p-muted { color: #334155; font-size: 13px; }
                         .p-image-grid { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
                         .p-image-card { flex: 0 0 180px; border: 1.2px solid #111827; background: #f8fafc; border-radius: 4px; padding: 4px; overflow: hidden; }
                         .p-image-wrap { border: 1.2px solid #cbd5e1; height: 60mm; width: 100%; display: flex; align-items: center; justify-content: center; background: #f8fafc; overflow: hidden; border-radius: 3px; }
                         .p-image-wrap { border: 1.2px solid #cbd5e1; height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; min-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; max-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; width: 100%; display: flex; align-items: center; justify-content: center; background: #f8fafc; overflow: hidden; border-radius: 3px; }
                         .p-image-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
                         table { width: 100%; border-collapse: collapse; }
-                        th, td { border: 1.2px solid #111827; padding: 2px 4px; font-size: 10px; line-height: 1.25; vertical-align: top; }
+                        th, td { border: 1.2px solid #111827; padding: 4px 6px; font-size: 13px; line-height: 1.35; vertical-align: top; }
                         th { background: #eef2f7; font-weight: 700; }
                         .text-right { text-align: right; }
                         .text-center { text-align: center; }
@@ -926,54 +926,58 @@ export function ProductionBoardPage({
                         .p-section { margin-top: 6px; }
                         .p-two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
                         .p-spec-group { border: 1.2px solid #111827; background: #ffffff; border-radius: 2px; overflow: hidden; }
-                        .p-spec-group h4 { margin: 0; background: #f1f5f9; padding: 3px 6px; font-size: 10px; font-weight: 700; color: #0f172a; }
-                        .p-spec-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-                        .p-spec-table td { border-top: 1px solid #cbd5e1; padding: 2px 4px; vertical-align: top; line-height: 1.2; }
+                        .p-spec-group h4 { margin: 0; background: #f1f5f9; padding: 5px 8px; font-size: 14px; font-weight: 700; color: #0f172a; }
+                        .p-spec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                        .p-spec-table td { border-top: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; line-height: 1.35; }
                         .p-spec-table td:first-child { width: 46%; border-right: 1px solid #cbd5e1; background: #f8fafc; font-weight: 700; }
                         .p-spec-table tr:first-child td { border-top: none; }
                         .p-foot { margin-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
-                        .p-foot p { margin: 1px 0; font-size: 11px; }
-                        .p-total { font-size: 14px; font-weight: 700; }
-                        .p-note { margin-top: 2px; font-size: 9px; color: #475569; }
+                        .p-foot p { margin: 2px 0; font-size: 14px; }
+                        .p-total { font-size: 19px; font-weight: 700; }
+                        .p-note { margin-top: 3px; font-size: 12px; color: #475569; }
                         .p-tight { letter-spacing: -0.1px; }
                         .p-print-page { border: 1.2px solid #111827; border-radius: 4px; background: #ffffff; padding: 10px; }
                         .p-print-page + .p-print-page { margin-top: 10px; }
                         .p-page-header { border: 1.2px solid #78350f; border-radius: 4px; background: #b45309; color: #ffffff; padding: 4px 6px; margin-bottom: 4px; }
-                        .p-page-header-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 295px; gap: 6px; align-items: start; }
-                        .p-page-header-title { margin: 0 0 2px; font-size: 14px; line-height: 1.06; font-weight: 800; }
+                        .p-page-header-grid { display: grid; grid-template-columns: 34mm minmax(0, 1fr) minmax(0, 1fr) 330px; gap: 10px; align-items: start; }
+                        .p-page-header-logo { background: #ffffff; border-radius: 3px; padding: 4px 6px; display: flex; align-items: center; justify-content: center; }
+                        .p-page-header-logo img { width: 100%; max-height: 18mm; object-fit: contain; display: block; }
+                        .p-page-header-title { margin: 0 0 3px; font-size: 20px; line-height: 1.1; font-weight: 800; }
                         .p-page-header-col { display: grid; gap: 1px; }
-                        .p-page-header-row { margin: 0; font-size: 10px; line-height: 1.15; color: #fef3c7; }
+                        .p-page-header-row { margin: 0; font-size: 13px; line-height: 1.35; color: #fef3c7; }
                         .p-page-header-row strong { color: #ffffff; font-weight: 800; overflow-wrap: anywhere; }
                         .p-page-header-label { color: #fef3c7; font-weight: 700; }
                         .p-page-header-right { border: 1px solid #fcd34d; border-radius: 3px; background: rgba(255, 255, 255, 0.08); padding: 3px 5px; }
                         .p-page-header-barcode { margin-top: 2px; border: 1px solid #78350f; border-radius: 2px; background: #ffffff; padding: 1px 2px; text-align: center; }
-                        .p-page-header-barcode svg { display: block; width: 100%; height: 11mm; }
-                        .p-page-header-code { margin: 1px 0 0; color: #1f2937; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+                        .p-page-header-barcode svg { display: block; width: 100%; height: 14mm; }
+                        .p-page-header-code { margin: 2px 0 0; color: #1f2937; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
                         .p-form-grid { display: grid; grid-template-columns: 58% 42%; gap: 8px; align-items: start; }
                         .p-form-left, .p-form-right { border: 0; border-radius: 2px; overflow: hidden; background: #fff; }
-                        .p-yellow-head { background: #facc15; color: #111827; font-weight: 700; padding: 4px 6px; border-bottom: 1.2px solid #111827; font-size: 11px; }
-                        .p-size-chip { display: inline-flex; align-items: center; border: 1.2px solid #111827; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; background: #fef9c3; }
+                        .p-yellow-head { background: #facc15; color: #111827; font-weight: 700; padding: 6px 8px; border-bottom: 1.2px solid #111827; font-size: 15px; }
+                        .p-size-chip { display: inline-flex; align-items: center; border: 1.2px solid #111827; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; background: #fef9c3; }
                         .p-form-body { padding: 6px; }
                         .p-artwork-box { border: 1.2px solid #111827; height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; min-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; max-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT}; background: #f8fafc; display: flex; align-items: center; justify-content: center; overflow: hidden; }
                         .p-artwork-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+                        .p-artwork-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+                        .p-artwork-gallery .p-artwork-box { height: auto; min-height: 50mm; max-height: 50mm; }
                         .p-artwork-empty { color: #64748b; font-size: 10px; font-weight: 600; }
-                        .p-spec-title { margin: 6px 0 3px; font-weight: 700; font-size: 11px; color: #0f172a; }
+                        .p-spec-title { margin: 8px 0 4px; font-weight: 700; font-size: 15px; color: #0f172a; }
                         .p-spec-grid { width: 100%; border-collapse: collapse; }
-                        .p-spec-grid td { border: 1px solid #111827; padding: 2px 4px; font-size: 10px; }
+                        .p-spec-grid td { border: 1px solid #111827; padding: 4px 6px; font-size: 13px; }
                         .p-spec-grid td:first-child { width: 42%; background: #f8fafc; font-weight: 700; }
                         .p-size-bar { margin-top: 4px; }
-                        .p-size-bar th, .p-size-bar td { border: 1px solid #111827; font-size: 10px; padding: 2px 3px; text-align: center; }
+                        .p-size-bar th, .p-size-bar td { border: 1px solid #111827; font-size: 13px; padding: 4px 5px; text-align: center; }
                         .p-size-bar thead th { background: #fde68a; font-weight: 700; }
                         .p-size-total { background: #fde68a; font-weight: 700; }
                         .p-size-filled { background: #bbf7d0; color: #14532d; font-weight: 700; }
                         .p-process-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-                        .p-process-table th, .p-process-table td { border: 1px solid #111827; padding: 2px 4px; font-size: 10px; }
+                        .p-process-table th, .p-process-table td { border: 1px solid #111827; padding: 4px 6px; font-size: 13px; }
                         .p-process-table thead th { background: #fde68a; font-weight: 700; }
                         .p-process-table th:first-child, .p-process-table td:first-child { white-space: normal; word-break: normal; overflow-wrap: break-word; }
                         .p-process-table th:nth-child(2), .p-process-table td:nth-child(2) { white-space: nowrap; }
                         .p-signature-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
-                        .p-sign-box { border: 1px solid #111827; min-height: 22px; padding: 2px 4px; font-size: 9px; }
-                        .p-bottom-meta { margin-top: 6px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-size: 10px; }
+                        .p-sign-box { border: 1px solid #111827; min-height: 30px; padding: 4px 6px; font-size: 12px; }
+                        .p-bottom-meta { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 13px; }
                         @media print {
                             .p-dialog-only { display: none !important; }
                             .p-preview-only { display: none !important; }
@@ -2426,6 +2430,85 @@ export function ProductionBoardPage({
                                     ...(detailOrder.reference_designs ?? []),
                                 ].filter((url): url is string => Boolean(url));
                                 const orderItems = detailOrder.items ?? [];
+                                const personalizationRows = (() => {
+                                    const raw = detailOrder.specification?.screen_print_detail;
+
+                                    if (!raw || typeof raw !== 'string') {
+                                        return [];
+                                    }
+
+                                    try {
+                                        const firstPass = JSON.parse(raw) as unknown;
+                                        const parsed = (typeof firstPass === 'string' ? JSON.parse(firstPass) : firstPass) as {
+                                            mode?: unknown;
+                                            personalization_rows?: Array<{
+                                                name?: unknown;
+                                                number?: unknown;
+                                                size?: unknown;
+                                                quantity?: unknown;
+                                            }>;
+                                        };
+
+                                        if (parsed.mode !== 'individual' || !Array.isArray(parsed.personalization_rows)) {
+                                            return [];
+                                        }
+
+                                        return parsed.personalization_rows.map((row) => {
+                                            const quantity = Number(row.quantity ?? 0);
+
+                                            return {
+                                                name: typeof row.name === 'string' && row.name.trim() !== '' ? row.name.trim() : '-',
+                                                number: typeof row.number === 'string' && row.number.trim() !== '' ? row.number.trim() : '-',
+                                                size: typeof row.size === 'string' && row.size.trim() !== '' ? row.size.trim() : '-',
+                                                quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 0,
+                                            };
+                                        }).filter((row) => row.name !== '-' || row.number !== '-' || row.size !== '-' || row.quantity > 0);
+                                    } catch {
+                                        return [];
+                                    }
+                                })();
+                                const isIndividualOrder = personalizationRows.length > 0;
+
+                                // Form 3 (กีฬาสี): the colour houses live in the spec JSON because
+                                // order_items has no colour column, so the print form reads them
+                                // from there — the same route the individual mode already takes.
+                                const sportsDayGroups = (() => {
+                                    const raw = detailOrder.specification?.screen_print_detail;
+
+                                    if (!raw || typeof raw !== 'string') {
+                                        return [];
+                                    }
+
+                                    try {
+                                        const firstPass = JSON.parse(raw) as unknown;
+                                        const parsed = (typeof firstPass === 'string' ? JSON.parse(firstPass) : firstPass) as {
+                                            mode?: unknown;
+                                            sports_day_groups?: Array<{
+                                                team_name?: unknown;
+                                                rows?: Array<Record<string, unknown>>;
+                                            }>;
+                                        };
+
+                                        if (parsed.mode !== 'sports_day' || !Array.isArray(parsed.sports_day_groups)) {
+                                            return [];
+                                        }
+
+                                        return parsed.sports_day_groups.map((group, index) => ({
+                                            teamName: typeof group.team_name === 'string' && group.team_name.trim() !== ''
+                                                ? group.team_name.trim()
+                                                : `คณะที่ ${index + 1}`,
+                                            rows: (Array.isArray(group.rows) ? group.rows : []).map((row) => ({
+                                                sizeGroup: String(row.size_group ?? 'adults') === 'kids' ? ('kids' as const) : ('adults' as const),
+                                                sizeLabel: String(row.size_label ?? '').trim(),
+                                                shirtQty: Number(row.shirt_qty ?? 0) || 0,
+                                                pantsQty: Number(row.pants_qty ?? 0) || 0,
+                                            })),
+                                        }));
+                                    } catch {
+                                        return [];
+                                    }
+                                })();
+                                const isSportsDayOrder = sportsDayGroups.length > 0;
                                 const adultSizeHeaders = ['SS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL'];
                                 const kidSizeHeaders = ['JSS', 'JS', 'JM', 'JL'];
                                 const normalizeSizeLabel = (value: string): string => {
@@ -2576,7 +2659,76 @@ export function ProductionBoardPage({
 
                                     return left.localeCompare(right, 'th');
                                 };
-                                const productionGroups = groupDefinitions
+                                // One printed page per colour house. A house can hold both kids
+                                // and adults sizes, and the size bar's columns differ between the
+                                // two, so each (house × garment × size group) that actually has
+                                // quantity becomes its own page — pages stay ordered by house.
+                                const sportsDayProductionGroups = sportsDayGroups.flatMap((team, teamIndex) =>
+                                    (['shirt', 'pants'] as const).flatMap((garment) =>
+                                        (['kids', 'adults'] as const).flatMap((sizeGroup) => {
+                                            const rows = team.rows.filter((row) => row.sizeGroup === sizeGroup);
+                                            const sizes = new Map<string, number>();
+                                            let quantity = 0;
+
+                                            for (const row of rows) {
+                                                const rowQuantity = garment === 'shirt' ? row.shirtQty : row.pantsQty;
+
+                                                if (rowQuantity <= 0) {
+                                                    continue;
+                                                }
+
+                                                quantity += rowQuantity;
+
+                                                const normalizedLabel = normalizeSizeLabel(row.sizeLabel);
+
+                                                if (normalizedLabel !== '') {
+                                                    sizes.set(normalizedLabel, Number(sizes.get(normalizedLabel) || 0) + rowQuantity);
+                                                }
+                                            }
+
+                                            if (quantity <= 0) {
+                                                return [];
+                                            }
+
+                                            const definitionKey = `${garment}_${sizeGroup}` as ProductionGroupKey;
+                                            const unitTotal = resolveGroupUnitTotal(definitionKey);
+                                            const garmentLabel = garment === 'pants'
+                                                ? (sizeGroup === 'kids' ? 'กางเกงเด็ก' : 'กางเกงผู้ใหญ่')
+                                                : (sizeGroup === 'kids' ? 'เสื้อไซต์เด็ก' : 'เสื้อไซต์ผู้ใหญ่');
+
+                                            return [{
+                                                key: `sports_day_${teamIndex}_${garment}_${sizeGroup}`,
+                                                label: `${team.teamName} · ${garmentLabel}`,
+                                                teamName: team.teamName,
+                                                garment,
+                                                sizeGroup,
+                                                quantity,
+                                                sizeRows: Array.from(sizes.entries())
+                                                    .sort(([left], [right]) => sizeLabelSorter(left, right))
+                                                    .map(([sizeLabel, sizeQuantity]) => ({ sizeLabel, quantity: sizeQuantity })),
+                                                unitTotal,
+                                                subtotal: unitTotal * quantity,
+                                                // The house's own artwork, in full. Unlike the other forms —
+                                                // which deliberately show a single image to mirror the paper
+                                                // sheet — every image attached to a colour house must reach
+                                                // that house's page, so the floor gets what was attached.
+                                                artworkUrls: (detailOrder.sports_day_artwork_urls?.[String(teamIndex)] ?? []).filter(
+                                                    (url): url is string => typeof url === 'string' && url.trim() !== '',
+                                                ),
+                                                artworkUrl: (garment === 'shirt'
+                                                    ? detailOrder.shirt_artwork_url?.trim()
+                                                    : detailOrder.pants_artwork_url?.trim()) || detailOrder.artwork_url?.trim() || null,
+                                                theme: resolveProductionGroupTheme(definitionKey),
+                                                specTitle: resolveProductionSpecTitle(garment),
+                                                components: garment === 'pants'
+                                                    ? (productionPricing?.pants_components ?? [])
+                                                    : (productionPricing?.components ?? []),
+                                            }];
+                                        }),
+                                    ),
+                                );
+
+                                const productionGroups = isSportsDayOrder ? sportsDayProductionGroups : groupDefinitions
                                     .map((group) => {
                                         const quantity = groupData[group.key].quantity;
                                         const unitTotal = resolveGroupUnitTotal(group.key);
@@ -2592,6 +2744,27 @@ export function ProductionBoardPage({
 
                                             return normalizedPantsArtwork ?? normalizedGeneralArtwork;
                                         };
+                                        /**
+                                         * Every artwork attached for this garment, not just the first.
+                                         * The singular *_artwork_url fields only ever hold one image,
+                                         * so a job with several reference sheets printed incomplete.
+                                         */
+                                        const resolveGroupArtworkUrls = (garment: ProductionGroupGarment): string[] => {
+                                            const garmentUrls = (garment === 'shirt'
+                                                ? detailOrder.shirt_artwork_urls
+                                                : detailOrder.pants_artwork_urls) ?? [];
+                                            const cleaned = garmentUrls.filter(
+                                                (url): url is string => typeof url === 'string' && url.trim() !== '',
+                                            );
+
+                                            if (cleaned.length > 0) {
+                                                return cleaned;
+                                            }
+
+                                            const fallback = resolveGroupArtworkUrl(garment);
+
+                                            return fallback ? [fallback] : [];
+                                        };
                                         const sizeRows = Array.from(groupData[group.key].sizes.entries())
                                             .sort(([left], [right]) => sizeLabelSorter(left, right))
                                             .map(([sizeLabel, sizeQuantity]) => ({
@@ -2605,6 +2778,7 @@ export function ProductionBoardPage({
                                             sizeRows,
                                             unitTotal,
                                             subtotal,
+                                            artworkUrls: resolveGroupArtworkUrls(group.garment),
                                             artworkUrl: resolveGroupArtworkUrl(group.garment),
                                             theme: resolveProductionGroupTheme(group.key),
                                             specTitle: resolveProductionSpecTitle(group.garment),
@@ -2735,9 +2909,23 @@ export function ProductionBoardPage({
                                             }
                                             .p-page-header-grid {
                                                 display: grid;
-                                                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 250px;
-                                                gap: 6px;
+                                                grid-template-columns: 34mm minmax(0, 1fr) minmax(0, 1fr) 250px;
+                                                gap: 8px;
                                                 align-items: start;
+                                            }
+                                            .p-page-header-logo {
+                                                background: #ffffff;
+                                                border-radius: 3px;
+                                                padding: 4px 6px;
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: center;
+                                            }
+                                            .p-page-header-logo img {
+                                                width: 100%;
+                                                max-height: 18mm;
+                                                object-fit: contain;
+                                                display: block;
                                             }
                                             .p-page-header-title {
                                                 margin: 0 0 2px;
@@ -2816,7 +3004,9 @@ export function ProductionBoardPage({
                                             }
                                             .p-artwork-box {
                                                 border: 1.2px solid #111827;
-                                                height: 54mm;
+                                                height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT};
+                                                min-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT};
+                                                max-height: ${PRODUCTION_ARTWORK_CONTAINER_HEIGHT};
                                                 background: #f8fafc;
                                                 display: flex;
                                                 align-items: center;
@@ -2828,6 +3018,16 @@ export function ProductionBoardPage({
                                                 max-width: 100%;
                                                 max-height: 100%;
                                                 object-fit: contain;
+                                            }
+                                            .p-artwork-gallery {
+                                                display: grid;
+                                                grid-template-columns: repeat(2, minmax(0, 1fr));
+                                                gap: 6px;
+                                            }
+                                            .p-artwork-gallery .p-artwork-box {
+                                                height: auto;
+                                                min-height: 50mm;
+                                                max-height: 50mm;
                                             }
                                             .p-artwork-empty {
                                                 color: #64748b;
@@ -2893,6 +3093,27 @@ export function ProductionBoardPage({
                                                 color: #14532d;
                                                 font-weight: 700;
                                             }
+                                            .p-personalization-table {
+                                                width: 100%;
+                                                margin-top: 4px;
+                                                border-collapse: collapse;
+                                            }
+                                            .p-personalization-table th,
+                                            .p-personalization-table td {
+                                                border: 1px solid #111827;
+                                                padding: 2px 3px;
+                                                font-size: 9px;
+                                                text-align: center;
+                                            }
+                                            .p-personalization-table th {
+                                                background: #fde68a;
+                                                font-weight: 700;
+                                            }
+                                            .p-personalization-table th:first-child,
+                                            .p-personalization-table td:first-child {
+                                                text-align: left;
+                                                overflow-wrap: anywhere;
+                                            }
                                             .p-process-table {
                                                 width: 100%;
                                                 border-collapse: collapse;
@@ -2942,7 +3163,7 @@ export function ProductionBoardPage({
                                             <div className="p-dialog-only space-y-3">
                                                 <section className="p-head p-card rounded-xl border border-slate-300 p-4 shadow-sm md:grid md:grid-cols-[1fr_270px] md:gap-4 md:p-5">
                                                     <div>
-                                                        <h2 className="p-head-title">ใบสั่งผลิต (ออร์เดอร์ตัด)</h2>
+                                                        <h2 className="p-head-title">ใบสั่งผลิต</h2>
                                                         <p className="mt-2 text-sm">เลขที่ออเดอร์: <strong>{detailOrder.order_code}</strong></p>
                                                         <div className="p-head-meta mt-2 grid gap-x-5 gap-y-1 text-xs sm:grid-cols-2">
                                                             <p>ประเภทเสื้อ: <span className="p-head-emphasis">{productionPricing?.shirt_type_name || detailOrder.job_type || '-'}</span></p>
@@ -3049,9 +3270,15 @@ export function ProductionBoardPage({
                                                     <section key={group.key} className="p-print-page space-y-2">
                                                         <header className="p-page-header" style={resolveGroupHeaderStyle(group.theme)}>
                                                             <div className="p-page-header-grid">
+                                                                <div className="p-page-header-logo">
+                                                                    <img src="/images/logo/logo.png" alt="J.S. Sport" />
+                                                                </div>
                                                                 <div className="p-page-header-col">
-                                                                    <h2 className="p-page-header-title">ใบสั่งผลิต (ออร์เดอร์ตัด)</h2>
+                                                                    <h2 className="p-page-header-title">ใบสั่งผลิต</h2>
                                                                     <p className="p-page-header-row"><span className="p-page-header-label">เลขที่ออเดอร์:</span> <strong>{detailOrder.order_code}</strong></p>
+                                                                    {'teamName' in group && group.teamName ? (
+                                                                        <p className="p-page-header-row"><span className="p-page-header-label">คณะสี:</span> <strong>{group.teamName}</strong></p>
+                                                                    ) : null}
                                                                     <p className="p-page-header-row"><span className="p-page-header-label">ประเภทเสื้อ:</span> <strong>{productionPricing?.shirt_type_name || detailOrder.job_type || '-'}</strong></p>
                                                                     <p className="p-page-header-row"><span className="p-page-header-label">วันที่สร้างใบงาน:</span> <strong>{dateOnly(detailOrder.order_date)}</strong></p>
                                                                     <p className="p-page-header-row"><span className="p-page-header-label">ชื่องาน:</span> <strong>{detailOrder.job_name || '-'}</strong></p>
@@ -3088,13 +3315,27 @@ export function ProductionBoardPage({
                                                                     </div>
                                                                 </div>
                                                                 <div className="p-form-body">
-                                                                    <div className="p-artwork-box">
-                                                                        {resolvedArtwork ? (
-                                                                            <img src={resolvedArtwork} alt={`${group.label}-artwork`} loading="lazy" />
-                                                                        ) : (
-                                                                            <div className="p-artwork-empty">ไม่มีรูป Artwork</div>
-                                                                        )}
-                                                                    </div>
+                                                                    {'artworkUrls' in group && group.artworkUrls.length > 0 ? (
+                                                                        <div className="p-artwork-gallery">
+                                                                            {group.artworkUrls.map((url, artworkIndex) => (
+                                                                                <div key={url} className="p-artwork-box">
+                                                                                    <img
+                                                                                        src={url}
+                                                                                        alt={`${group.label}-artwork-${artworkIndex + 1}`}
+                                                                                        loading="lazy"
+                                                                                    />
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="p-artwork-box">
+                                                                            {resolvedArtwork ? (
+                                                                                <img src={resolvedArtwork} alt={`${group.label}-artwork`} loading="lazy" />
+                                                                            ) : (
+                                                                                <div className="p-artwork-empty">ไม่มีรูป Artwork</div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
 
                                                                     <p className="p-spec-title">{group.specTitle}</p>
                                                                     <div className="p-spec-grid">
@@ -3106,28 +3347,30 @@ export function ProductionBoardPage({
                                                                         ))}
                                                                     </div>
 
-                                                                    <table className="p-size-bar">
-                                                                        <thead>
-                                                                            <tr>
-                                                                                {sizeHeaders.map((sizeLabel) => (
-                                                                                    <th key={`${group.key}-head-${sizeLabel}`}>{sizeLabel}</th>
-                                                                                ))}
-                                                                                <th className="p-size-total">รวม</th>
-                                                                            </tr>
-                                                                        </thead>
-                                                                        <tbody>
-                                                                            <tr>
-                                                                                {sizeHeaders.map((sizeLabel) => {
-                                                                                    const sizeQuantity = Number(sizeMap.get(sizeLabel) || 0);
+                                                                    {!isIndividualOrder ? (
+                                                                        <table className="p-size-bar">
+                                                                            <thead>
+                                                                                <tr>
+                                                                                    {sizeHeaders.map((sizeLabel) => (
+                                                                                        <th key={`${group.key}-head-${sizeLabel}`}>{sizeLabel}</th>
+                                                                                    ))}
+                                                                                    <th className="p-size-total">รวม</th>
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                <tr>
+                                                                                    {sizeHeaders.map((sizeLabel) => {
+                                                                                        const sizeQuantity = Number(sizeMap.get(sizeLabel) || 0);
 
-                                                                                    return (
-                                                                                        <td key={`${group.key}-qty-${sizeLabel}`} className={hasSizeCellValue(sizeQuantity) ? 'p-size-filled' : undefined}>{sizeQuantity}</td>
-                                                                                    );
-                                                                                })}
-                                                                                <td className={`p-size-total${hasSizeCellValue(group.quantity) ? ' p-size-filled' : ''}`}>{group.quantity}</td>
-                                                                            </tr>
-                                                                        </tbody>
-                                                                    </table>
+                                                                                        return (
+                                                                                            <td key={`${group.key}-qty-${sizeLabel}`} className={hasSizeCellValue(sizeQuantity) ? 'p-size-filled' : undefined}>{sizeQuantity}</td>
+                                                                                        );
+                                                                                    })}
+                                                                                    <td className={`p-size-total${hasSizeCellValue(group.quantity) ? ' p-size-filled' : ''}`}>{group.quantity}</td>
+                                                                                </tr>
+                                                                            </tbody>
+                                                                        </table>
+                                                                    ) : null}
                                                                 </div>
                                                             </div>
 
@@ -3198,11 +3441,63 @@ export function ProductionBoardPage({
                                                         </div>
                                                     </section>
                                                 );
-                                            }) : (
+                                            }) : null}
+
+                                            {isIndividualOrder ? (
+                                                <section className="p-print-page space-y-2">
+                                                    <header className="p-page-header">
+                                                        <div className="p-page-header-grid">
+                                                            <div className="p-page-header-logo">
+                                                                <img src="/images/logo/logo.png" alt="J.S. Sport" />
+                                                            </div>
+                                                            <div className="p-page-header-col">
+                                                                <h2 className="p-page-header-title">รายชื่อสกรีนรายตัว</h2>
+                                                                <p className="p-page-header-row"><span className="p-page-header-label">เลขที่ออเดอร์:</span> <strong>{detailOrder.order_code}</strong></p>
+                                                                <p className="p-page-header-row"><span className="p-page-header-label">ชื่องาน:</span> <strong>{detailOrder.job_name || '-'}</strong></p>
+                                                            </div>
+                                                            <div className="p-page-header-col">
+                                                                <p className="p-page-header-row"><span className="p-page-header-label">ลูกค้า:</span> <strong>{detailOrder.customer?.customer_name || '-'}</strong></p>
+                                                                <p className="p-page-header-row"><span className="p-page-header-label">วันที่รับสินค้า:</span> <strong>{dateOnly(detailOrder.due_date)}</strong></p>
+                                                            </div>
+                                                            <div className="p-page-header-right">
+                                                                <div className="p-page-header-barcode" dangerouslySetInnerHTML={{ __html: barcodeMarkup || `<div class="p-barcode-fallback">${detailOrder.order_code}</div>` }} />
+                                                                <p className="p-page-header-code">{detailOrder.order_code}</p>
+                                                            </div>
+                                                        </div>
+                                                    </header>
+
+                                                    <table className="p-personalization-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>สกรีนชื่อ</th>
+                                                                <th>เบอร์</th>
+                                                                <th>ไซซ์</th>
+                                                                <th>จำนวน</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {personalizationRows.map((row, index) => (
+                                                                <tr key={`${row.name}-${row.number}-${index}`}>
+                                                                    <td>{row.name}</td>
+                                                                    <td>{row.number}</td>
+                                                                    <td>{row.size}</td>
+                                                                    <td>{row.quantity}</td>
+                                                                </tr>
+                                                            ))}
+                                                            <tr className="p-size-total">
+                                                                <td colSpan={3}>รวม</td>
+                                                                <td>{personalizationRows.reduce((sum, row) => sum + row.quantity, 0)}</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </section>
+                                            ) : null}
+
+                                            {productionGroups.length === 0 ? (
                                                 <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
                                                     ไม่พบข้อมูลกลุ่มไซซ์เด็ก/ผู้ใหญ่สำหรับเสื้อหรือกางเกงในออเดอร์นี้
                                                 </section>
-                                            )}
+                                            ) : null}
                                         </div>
                                     </>
                                 );

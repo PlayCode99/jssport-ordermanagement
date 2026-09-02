@@ -11,11 +11,13 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderRouting;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Covers the counter row "Action" menu: ลบ (delete) and เปิดบิลอีกครั้ง
@@ -46,6 +48,12 @@ class OrderActionMenuTest extends TestCase
     {
         parent::setUp();
 
+        // Artwork uploads would otherwise land in the real storage directory and
+        // pile up as orphaned files every time the suite runs.
+        Storage::fake('public');
+
+        Carbon::setTestNow(Carbon::parse('2026-08-01 08:00:00', 'Asia/Bangkok'));
+
         $this->customer = Customer::create([
             'customer_code' => 'CUS-ACT-1',
             'customer_name' => 'Action Menu Customer',
@@ -55,6 +63,13 @@ class OrderActionMenuTest extends TestCase
             'branch_code' => 'BR-ACT-1',
             'branch_name' => 'Action Menu Branch',
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     private function user(UserRole $role): User

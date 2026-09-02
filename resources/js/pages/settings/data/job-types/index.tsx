@@ -1,6 +1,6 @@
 import { Head } from '@inertiajs/react';
 import { Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -17,6 +17,7 @@ type JobTypeRow = {
     id: string;
     createdAt: string;
     name: string;
+    createdBy?: string;
     active: boolean;
 };
 
@@ -32,8 +33,15 @@ function formatDate(value: string): string {
     });
 }
 
-function loadRows(): JobTypeRow[] {
-    if (typeof window === 'undefined') {
+/**
+ * Job types live in catalog_items now, the same as every other master data
+ * list, so they are identical on every machine and survive a deploy.
+ *
+ * This reader exists only to rescue lists left behind in a browser from before
+ * that move; the page offers to push them up, then never reads it again.
+ */
+function loadLegacyLocalRows(): JobTypeRow[] {
+    if (typeof window === 'undefined' || !window.localStorage) {
         return [];
     }
 
@@ -50,26 +58,80 @@ function loadRows(): JobTypeRow[] {
 
         return parsed.filter(
             (item) =>
-                typeof item.id === 'string' &&
-                typeof item.createdAt === 'string' &&
+                item !== null &&
+                typeof item === 'object' &&
                 typeof item.name === 'string' &&
-                typeof item.active === 'boolean',
+                item.name.trim() !== '',
         );
     } catch {
         return [];
     }
 }
 
-function saveRows(rows: JobTypeRow[]) {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+/** Next free catalog item_id — ids must be unique per storage key. */
+function nextItemId(rows: JobTypeRow[]): number {
+    return rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1;
 }
 
-export default function JobTypesPage() {
-    const [rows, setRows] = useState<JobTypeRow[]>(() => loadRows());
+async function persistRows(rows: JobTypeRow[]): Promise<JobTypeRow[] | null> {
+    // Any row still carrying a legacy non-numeric id gets a fresh one rather
+    // than a positional fallback, which could collide with an existing row.
+    let nextId = nextItemId(rows);
+    const numbered = rows.map((row) => {
+        const id = Number(row.id);
+
+        return { ...row, id: Number.isInteger(id) && id > 0 ? id : nextId++ };
+    });
+
+    const response = await fetch('/settings/data/catalog-items/sync', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '',
+            Accept: 'application/json',
+        },
+        body: JSON.stringify({
+            storage_key: STORAGE_KEY,
+            rows: numbered.map((row) => ({
+                id: row.id,
+                createdAt: row.createdAt,
+                name: row.name,
+                createdBy: row.createdBy ?? 'system',
+                active: row.active,
+            })),
+        }),
+    });
+
+    if (!response.ok) {
+        return null;
+    }
+
+    const payload = (await response.json()) as { rows?: Array<Record<string, unknown>> };
+
+    if (!Array.isArray(payload.rows)) {
+        return null;
+    }
+
+    return payload.rows.map((row) => ({
+        id: String(row.id),
+        createdAt: String(row.createdAt),
+        name: String(row.name),
+        createdBy: typeof row.createdBy === 'string' ? row.createdBy : 'system',
+        active: row.active !== false,
+    }));
+}
+
+export default function JobTypesPage({ rows: serverRows = [] }: { rows?: JobTypeRow[]; storageKey?: string }) {
+    const [rows, setRows] = useState<JobTypeRow[]>(() =>
+        serverRows.map((row) => ({ ...row, id: String(row.id), active: row.active !== false })),
+    );
+    // Anything still sitting in this browser from before job types moved server-side.
+    const [legacyRows, setLegacyRows] = useState<JobTypeRow[]>([]);
+    const [isImporting, setIsImporting] = useState(false);
+
+    useEffect(() => {
+        setLegacyRows(loadLegacyLocalRows());
+    }, []);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [newName, setNewName] = useState('');
     const [editId, setEditId] = useState<string | null>(null);
@@ -98,7 +160,47 @@ export default function JobTypesPage() {
 
     const saveAll = (nextRows: JobTypeRow[]) => {
         setRows(nextRows);
-        saveRows(nextRows);
+
+        void persistRows(nextRows).then((saved) => {
+            if (saved) {
+                setRows(saved);
+            }
+        });
+    };
+
+    const pendingImport = useMemo(() => {
+        const known = new Set(rows.map((row) => row.name.trim().toLowerCase()));
+
+        return legacyRows.filter((row) => !known.has(row.name.trim().toLowerCase()));
+    }, [legacyRows, rows]);
+
+    const importLegacyRows = async () => {
+        if (pendingImport.length === 0) {
+            return;
+        }
+
+        setIsImporting(true);
+
+        const nextId = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0);
+        const merged = [
+            ...rows,
+            ...pendingImport.map((row, index) => ({
+                id: String(nextId + index + 1),
+                createdAt: row.createdAt ?? new Date().toISOString(),
+                name: row.name.trim(),
+                createdBy: 'import',
+                active: row.active !== false,
+            })),
+        ];
+
+        const saved = await persistRows(merged);
+
+        if (saved) {
+            setRows(saved);
+            setLegacyRows([]);
+        }
+
+        setIsImporting(false);
     };
 
     const hasDuplicateName = (name: string, ignoreId?: string) => {
@@ -121,10 +223,14 @@ export default function JobTypesPage() {
             return;
         }
 
+        // The id is the catalog's item_id, so it has to be a number the server
+        // can key on — a timestamp string used to be fine when this list only
+        // ever lived in localStorage.
         const nextRow: JobTypeRow = {
-            id: `${Date.now()}-${normalizedName}`,
+            id: String(nextItemId(rows)),
             createdAt: new Date().toISOString(),
             name: normalizedName,
+            createdBy: 'user',
             active: true,
         };
 
@@ -172,6 +278,23 @@ export default function JobTypesPage() {
             <Head title="ประเภทงาน" />
 
             <div className="flex h-full flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
+                {pendingImport.length > 0 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                        <div className="min-w-0">
+                            <p className="text-sm font-semibold text-amber-900">
+                                พบประเภทงาน {pendingImport.length} รายการที่บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น
+                            </p>
+                            <p className="mt-0.5 text-xs text-amber-800">
+                                ตอนนี้ประเภทงานถูกเก็บบนเซิร์ฟเวอร์แล้ว เพื่อให้ทุกเครื่องเห็นตรงกัน — กดนำเข้าเพื่อย้ายรายการเหล่านี้ขึ้นไป
+                                ({pendingImport.map((row) => row.name).join(', ')})
+                            </p>
+                        </div>
+                        <Button type="button" onClick={() => void importLegacyRows()} disabled={isImporting}>
+                            {isImporting ? 'กำลังนำเข้า...' : 'นำเข้าขึ้นเซิร์ฟเวอร์'}
+                        </Button>
+                    </div>
+                ) : null}
+
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>

@@ -136,6 +136,7 @@ export interface Order {
     shirt_artwork_url?: string | null;
     pants_artwork_url?: string | null;
     shirt_artwork_urls?: string[];
+    sports_day_artwork_urls?: Record<string, string[]>;
     pants_artwork_urls?: string[];
         delivery_method: string | null;
         shipping_address: string | null;

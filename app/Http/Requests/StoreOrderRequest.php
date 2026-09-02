@@ -21,6 +21,24 @@ class StoreOrderRequest extends FormRequest
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
+    /**
+     * Parses a submitted date down to its day, ignoring any time-of-day, so the
+     * date rules compare calendar days rather than timestamps. Returns null for
+     * anything unparseable and lets the plain `date` rule report that instead.
+     */
+    private function asStartOfDay(mixed $value): ?Carbon
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function rules(): array
     {
         return [
@@ -33,21 +51,28 @@ class StoreOrderRequest extends FormRequest
             'job_type' => ['required', 'string'],
             'delivery_method' => ['nullable', 'string', Rule::in(['pickup', 'shipping', 'onsite'])],
             'shipping_address' => ['nullable', 'string'],
-            'order_date' => ['required', 'date'],
-            // Compared by day, not by timestamp: the bill carries the real time it
-            // was opened (e.g. 15:28) while a delivery date is always midnight, so
-            // a plain after_or_equal would reject same-day delivery.
-            'due_date' => ['required', 'date', function (string $attribute, mixed $value, callable $fail): void {
-                $orderDate = $this->input('order_date');
-
-                if (! is_string($orderDate) || $orderDate === '' || ! is_string($value) || $value === '') {
+            // A brand-new bill may not be opened in the past. Editing an existing
+            // order deliberately skips this: historical orders must stay
+            // correctable long after their billing date has gone by.
+            'order_date' => ['required', 'date', function (string $attribute, mixed $value, callable $fail): void {
+                if ($this->route('order') !== null) {
                     return;
                 }
 
-                try {
-                    $due = Carbon::parse($value)->startOfDay();
-                    $opened = Carbon::parse($orderDate)->startOfDay();
-                } catch (\Throwable) {
+                $opened = $this->asStartOfDay($value);
+
+                if ($opened !== null && $opened->lt(now()->startOfDay())) {
+                    $fail('วันที่เปิดบิลต้องไม่เป็นวันที่ผ่านมาแล้ว');
+                }
+            }],
+            // Compared by day, not by timestamp: the bill carries the real time
+            // it was opened (e.g. 15:28) while a delivery date is always
+            // midnight, so a plain after_or_equal would reject same-day delivery.
+            'due_date' => ['required', 'date', function (string $attribute, mixed $value, callable $fail): void {
+                $due = $this->asStartOfDay($value);
+                $opened = $this->asStartOfDay($this->input('order_date'));
+
+                if ($due === null || $opened === null) {
                     return;
                 }
 
@@ -65,6 +90,11 @@ class StoreOrderRequest extends FormRequest
             'pants_artwork.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
             'reference_designs' => ['nullable', 'array'],
             'reference_designs.*' => ['file', 'mimes:webp,png,jpg,pdf', 'max:5120'],
+
+            // Form 3 only: keyed by colour house index -> that house's files.
+            'sports_day_artwork' => ['nullable', 'array'],
+            'sports_day_artwork.*' => ['array'],
+            'sports_day_artwork.*.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
 
             // Set when the form was opened via "เปิดบิลอีกครั้ง": the artwork of
             // the source order is copied onto the new one server-side, because
@@ -112,6 +142,9 @@ class StoreOrderRequest extends FormRequest
             'pants_artwork.*.image' => 'ไฟล์ Art Work กางเกง ต้องเป็นไฟล์รูปภาพเท่านั้น',
             'pants_artwork.*.mimes' => 'ไฟล์ Art Work กางเกง ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
             'pants_artwork.*.max' => 'ไฟล์ Art Work กางเกง ต้องมีขนาดไม่เกิน 5MB',
+            'sports_day_artwork.*.*.image' => 'ไฟล์ Art Work คณะสี ต้องเป็นไฟล์รูปภาพเท่านั้น',
+            'sports_day_artwork.*.*.mimes' => 'ไฟล์ Art Work คณะสี ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
+            'sports_day_artwork.*.*.max' => 'ไฟล์ Art Work คณะสี ต้องมีขนาดไม่เกิน 5MB',
         ];
     }
 }

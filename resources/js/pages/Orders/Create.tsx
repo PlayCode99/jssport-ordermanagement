@@ -2,7 +2,6 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     CalendarClock,
     Copy,
-    FileImage,
     Loader2,
     Plus,
     Shirt,
@@ -34,7 +33,7 @@ type PaymentStatus = 'deposit' | 'pending' | 'paid';
 type ArtworkStatus = 'confirmed';
 type SpecTab = 'shirt' | 'pants';
 type SizeTableType = 'kids' | 'adults';
-type SizeFormMode = 'matrix' | 'individual';
+type SizeFormMode = 'matrix' | 'individual' | 'sports_day';
 
 type OptionItem = {
     id: number;
@@ -140,6 +139,37 @@ type PersonalizationRowForm = {
     number: string;
     quantity: number;
     unit_price: number;
+    /** Pants for this person, used only when the order includes pants. */
+    pants_size: string;
+    pants_quantity: number;
+    pants_unit_price: number;
+};
+
+/**
+ * Form 3 (กีฬาสี). One order, several colour houses that share the same shirt
+ * spec but each have their own fabric colour and their own size breakdown.
+ * Shirt and pants carry their own price, exactly like the "แยกชิ้น" half of
+ * Form 1, so the money maths below is the same shape as rowSeparateTotal().
+ */
+type SportsDayRowForm = {
+    id: string;
+    size_group: 'kids' | 'adults';
+    size_label: string;
+    shirt_qty: number;
+    shirt_price: number;
+    pants_qty: number;
+    pants_price: number;
+};
+
+type SportsDayGroupForm = {
+    id: string;
+    team_name: string;
+    fabric_color_id: string;
+    rows: SportsDayRowForm[];
+    /** Newly picked files, not yet uploaded. */
+    artwork_files: File[];
+    /** Artwork already saved on this order, shown so the count is honest. */
+    artwork_urls: string[];
 };
 
 type OrderLineItemPayload = {
@@ -174,6 +204,9 @@ type OrderCreateFormData = {
     pants_specs: PantsSpecsForm;
     size_tables: SizeTableForm[];
     personalization_rows: PersonalizationRowForm[];
+    /** Form 2 only: the customer also wants pants for each person. */
+    individual_include_pants: boolean;
+    sports_day_groups: SportsDayGroupForm[];
     line_items: OrderLineItemPayload[];
 };
 
@@ -200,6 +233,7 @@ type EditOrderPayload = {
     order_status?: string | null;
     artwork_url?: string | null;
     shirt_artwork_urls?: string[] | null;
+    sports_day_artwork_urls?: Record<string, string[]> | null;
     pants_artwork_urls?: string[] | null;
     reference_designs?: string[] | null;
     items?: Array<{
@@ -246,56 +280,51 @@ type RequestOrderItem = {
     unit_price: number;
 };
 
-type LocalCatalogRow = {
-    id: string | number;
-    name: string;
-    active: boolean;
+
+
+
+/**
+ * Which catalog each spec field picks from. Used to record the master-data name
+ * an order was saved with, so renaming a colour later cannot rewrite what an
+ * already-printed work sheet says.
+ */
+const SPEC_FIELD_CATALOG_SOURCE: Record<string, string> = {
+    pattern_id: 'patterns',
+    fabric_id: 'fabrics',
+    fabric_color_id: 'fabric_colors',
+    neck_style_id: 'neck_styles',
+    neck_color_id: 'neck_colors',
+    collar_id: 'collars',
+    placket_style_id: 'placket_styles',
+    placket_outer_color_id: 'placket_outer_colors',
+    placket_inner_color_id: 'placket_inner_colors',
+    sleeve_cuff_id: 'sleeve_cuffs',
+    panel_style_id: 'panel_styles',
+    screen_color_id: 'screen_colors',
+    embroidery_color_id: 'embroidery_colors',
+    sublimation_id: 'sublimations',
+    leg_style_id: 'leg_styles',
+    leg_cuff_id: 'leg_cuffs',
 };
 
-function loadLocalCatalogRows(storageKey: string): LocalCatalogRow[] {
-    if (typeof window === 'undefined') {
-        return [];
-    }
+function snapshotSpecLabels(specs: Record<string, string>, catalogs: CatalogMap): Record<string, string> {
+    const labels: Record<string, string> = {};
 
-    try {
-        const raw = window.localStorage.getItem(storageKey);
+    Object.entries(SPEC_FIELD_CATALOG_SOURCE).forEach(([field, source]) => {
+        const selected = specs[field];
 
-        if (!raw) {
-            return [];
+        if (!selected || selected === '-') {
+            return;
         }
 
-        const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+        const match = (catalogs[source] ?? []).find((option) => String(option.id) === String(selected));
 
-        if (!Array.isArray(parsed)) {
-            return [];
+        if (match?.name) {
+            labels[field] = match.name;
         }
+    });
 
-        return parsed
-            .map((item) => {
-                const name = typeof item.name === 'string' ? item.name.trim() : '';
-                const active = typeof item.active === 'boolean' ? item.active : true;
-
-                if (!name) {
-                    return null;
-                }
-
-                return {
-                    id: typeof item.id === 'string' || typeof item.id === 'number' ? item.id : Date.now(),
-                    name,
-                    active,
-                };
-            })
-            .filter((item): item is LocalCatalogRow => item !== null && item.active);
-    } catch {
-        return [];
-    }
-}
-
-function mapCatalogRowsToOptions(rows: LocalCatalogRow[]): OptionItem[] {
-    return rows.map((row, index) => ({
-        id: index + 1,
-        name: row.name,
-    }));
+    return labels;
 }
 
 function uid(prefix: string): string {
@@ -352,6 +381,102 @@ function createSizeTable(tableType: SizeTableType, sizes: string[]): SizeTableFo
     };
 }
 
+function createSportsDayRow(sizeGroup: 'kids' | 'adults' = 'adults', sizeLabel = ''): SportsDayRowForm {
+    return {
+        id: uid('sd-row'),
+        size_group: sizeGroup,
+        size_label: sizeLabel,
+        shirt_qty: 0,
+        shirt_price: 0,
+        pants_qty: 0,
+        pants_price: 0,
+    };
+}
+
+function createSportsDayGroup(teamName = ''): SportsDayGroupForm {
+    return {
+        id: uid('sd-group'),
+        team_name: teamName,
+        fabric_color_id: '',
+        rows: [createSportsDayRow()],
+        artwork_files: [],
+        artwork_urls: [],
+    };
+}
+
+/** Same shape as rowSeparateTotal(): each garment is billed at its own price. */
+export function sportsDayRowTotal(row: SportsDayRowForm): number {
+    const shirtAmount = Math.max(row.shirt_qty, 0) * Math.max(row.shirt_price, 0);
+    const pantsAmount = Math.max(row.pants_qty, 0) * Math.max(row.pants_price, 0);
+
+    return shirtAmount + pantsAmount;
+}
+
+export function sportsDayGroupTotal(group: SportsDayGroupForm): number {
+    return group.rows.reduce((total, row) => total + sportsDayRowTotal(row), 0);
+}
+
+export function sportsDayGroupPieces(group: SportsDayGroupForm): number {
+    return group.rows.reduce((total, row) => total + Math.max(row.shirt_qty, 0) + Math.max(row.pants_qty, 0), 0);
+}
+
+export function buildRequestItemsFromSportsDay(groups: SportsDayGroupForm[]): RequestOrderItem[] {
+    return groups.flatMap((group) =>
+        group.rows.flatMap((row) => {
+            const sizeLabel = row.size_label || '-';
+            const items: RequestOrderItem[] = [];
+
+            if (row.shirt_qty > 0 && row.shirt_price > 0) {
+                items.push({
+                    item_type: 'shirt',
+                    size_group: row.size_group,
+                    size_label: sizeLabel,
+                    quantity: row.shirt_qty,
+                    unit_price: Math.max(row.shirt_price, 0),
+                });
+            }
+
+            if (row.pants_qty > 0 && row.pants_price > 0) {
+                items.push({
+                    item_type: 'pants',
+                    size_group: row.size_group,
+                    size_label: sizeLabel,
+                    quantity: row.pants_qty,
+                    unit_price: Math.max(row.pants_price, 0),
+                });
+            }
+
+            return items;
+        }),
+    );
+}
+
+function buildLineItemsFromSportsDay(groups: SportsDayGroupForm[]): OrderLineItemPayload[] {
+    return buildRequestItemsFromSportsDay(groups).map((item) => ({
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_id: null,
+    }));
+}
+
+function resolveRequestItems(
+    mode: SizeFormMode,
+    sizeTables: SizeTableForm[],
+    sportsDayGroups: SportsDayGroupForm[],
+    personalizationRows: PersonalizationRowForm[],
+    includePants = false,
+): RequestOrderItem[] {
+    if (mode === 'matrix') {
+        return buildRequestItems(sizeTables);
+    }
+
+    if (mode === 'sports_day') {
+        return buildRequestItemsFromSportsDay(sportsDayGroups);
+    }
+
+    return buildRequestItemsFromIndividual(personalizationRows, includePants);
+}
+
 function getSetBundleCount(row: SizeRowForm): number {
     return Math.max(Math.min(row.set_shirt_qty, row.set_pants_qty), 0);
 }
@@ -375,8 +500,11 @@ function rowTotal(row: SizeRowForm): number {
     return rowSetTotal(row) + rowSeparateTotal(row);
 }
 
-function rowIndividualTotal(row: PersonalizationRowForm): number {
-    return row.quantity * row.unit_price;
+export function rowIndividualTotal(row: PersonalizationRowForm, includePants = false): number {
+    const shirt = Math.max(row.quantity, 0) * Math.max(row.unit_price, 0);
+    const pants = includePants ? Math.max(row.pants_quantity, 0) * Math.max(row.pants_unit_price, 0) : 0;
+
+    return shirt + pants;
 }
 
 function buildLineItemsFromMatrix(sizeTables: SizeTableForm[]): OrderLineItemPayload[] {
@@ -414,14 +542,12 @@ function buildLineItemsFromMatrix(sizeTables: SizeTableForm[]): OrderLineItemPay
     );
 }
 
-function buildLineItemsFromIndividual(rows: PersonalizationRowForm[]): OrderLineItemPayload[] {
-    return rows
-        .map((row) => ({
-            quantity: Math.max(row.quantity, 1),
-            unit_price: Math.max(row.unit_price, 0),
-            discount_id: null,
-        }))
-        .filter((item) => item.unit_price > 0 || item.quantity > 0);
+function buildLineItemsFromIndividual(rows: PersonalizationRowForm[], includePants = false): OrderLineItemPayload[] {
+    return buildRequestItemsFromIndividual(rows, includePants).map((item) => ({
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_id: null,
+    }));
 }
 
 function mapTableTypeToSizeGroup(tableType: SizeTableType): 'kids' | 'adults' {
@@ -438,7 +564,10 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
 
             if (setBundleCount > 0 && row.set_price > 0) {
                 items.push({
-                    item_type: 'garment',
+                    // A real set: one shirt plus one pair of pants at a set price.
+                    // 'garment' is left to mean "recorded before the garment was
+                    // named", which reporting shows separately rather than guessing.
+                    item_type: 'set',
                     size_group: sizeGroup,
                     size_label: sizeLabel,
                     quantity: setBundleCount,
@@ -448,7 +577,7 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
 
             if (row.separate_shirt_qty > 0 && row.separate_shirt_price > 0) {
                 items.push({
-                    item_type: 'garment',
+                    item_type: 'separate_shirt',
                     size_group: sizeGroup,
                     size_label: sizeLabel,
                     quantity: row.separate_shirt_qty,
@@ -458,7 +587,7 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
 
             if (row.separate_pants_qty > 0 && row.separate_pants_price > 0) {
                 items.push({
-                    item_type: 'garment',
+                    item_type: 'separate_pants',
                     size_group: sizeGroup,
                     size_label: sizeLabel,
                     quantity: row.separate_pants_qty,
@@ -471,16 +600,35 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
     );
 }
 
-function buildRequestItemsFromIndividual(rows: PersonalizationRowForm[]): RequestOrderItem[] {
-    return rows
-        .map((row) => ({
-            item_type: 'garment',
-            size_group: row.size_group,
-            size_label: row.size || '-',
-            quantity: Math.max(row.quantity, 1),
-            unit_price: Math.max(row.unit_price, 0),
-        }))
-        .filter((item) => item.unit_price > 0 || item.quantity > 0);
+export function buildRequestItemsFromIndividual(rows: PersonalizationRowForm[], includePants = false): RequestOrderItem[] {
+    return rows.flatMap((row): RequestOrderItem[] => {
+        const items: RequestOrderItem[] = [];
+        const shirtQuantity = Math.max(row.quantity, 0);
+
+        if (shirtQuantity > 0 || row.unit_price > 0) {
+            items.push({
+                item_type: 'shirt',
+                size_group: row.size_group,
+                size_label: row.size || '-',
+                quantity: Math.max(shirtQuantity, 1),
+                unit_price: Math.max(row.unit_price, 0),
+            });
+        }
+
+        // Pants ride along on the same person's row, priced separately, exactly
+        // like the separate columns of Form 1.
+        if (includePants && row.pants_quantity > 0 && row.pants_unit_price > 0) {
+            items.push({
+                item_type: 'pants',
+                size_group: row.size_group,
+                size_label: row.pants_size || row.size || '-',
+                quantity: row.pants_quantity,
+                unit_price: Math.max(row.pants_unit_price, 0),
+            });
+        }
+
+        return items;
+    });
 }
 
 function artworkSignature(file: File): string {
@@ -608,6 +756,8 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
             },
             size_tables: [defaultSizeTable],
             personalization_rows: [],
+            individual_include_pants: false,
+            sports_day_groups: [createSportsDayGroup()],
             line_items: [],
         };
     }
@@ -620,6 +770,41 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
         : Array.isArray(specPayload.rows)
             ? specPayload.rows
             : [];
+
+    // Unlike Form 1's size tables — which are rebuilt from order_items — the
+    // colour houses cannot be recovered that way: order_items has no colour
+    // column. They are persisted in the spec JSON and read straight back.
+    const savedSportsDayArtwork = (order.sports_day_artwork_urls ?? {}) as Record<string, string[]>;
+    const savedSportsDayGroups: SportsDayGroupForm[] = (Array.isArray(specPayload.sports_day_groups)
+        ? specPayload.sports_day_groups
+        : []
+    ).map((rawGroup, groupIndex) => {
+        const group = (rawGroup ?? {}) as Record<string, unknown>;
+        const rawRows = Array.isArray(group.rows) ? group.rows : [];
+
+        return {
+            id: uid(`sd-group-${groupIndex}`),
+            team_name: toStringValueFromUnknown(group.team_name),
+            fabric_color_id: toStringValueFromUnknown(group.fabric_color_id),
+            artwork_files: [],
+            artwork_urls: Array.isArray(savedSportsDayArtwork[String(groupIndex)])
+                ? (savedSportsDayArtwork[String(groupIndex)] as string[])
+                : [],
+            rows: rawRows.map((rawRow, rowIndex) => {
+                const row = (rawRow ?? {}) as Record<string, unknown>;
+
+                return {
+                    id: uid(`sd-row-${groupIndex}-${rowIndex}`),
+                    size_group: toStringValueFromUnknown(row.size_group) === 'kids' ? 'kids' : 'adults',
+                    size_label: toStringValueFromUnknown(row.size_label),
+                    shirt_qty: toNumberValueFromUnknown(row.shirt_qty),
+                    shirt_price: toNumberValueFromUnknown(row.shirt_price),
+                    pants_qty: toNumberValueFromUnknown(row.pants_qty),
+                    pants_price: toNumberValueFromUnknown(row.pants_price),
+                } satisfies SportsDayRowForm;
+            }),
+        } satisfies SportsDayGroupForm;
+    });
 
     const items = Array.isArray(order.items) ? order.items : [];
 
@@ -659,7 +844,7 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
                     row.separate_pants_qty += quantity;
                     row.separate_pants_price = unitPrice || row.separate_pants_price;
                 }
-            } else if (itemType.includes('shirt') || itemType.includes('pants') || itemType === 'garment') {
+            } else if (itemType.includes('shirt') || itemType.includes('pants') || itemType === 'garment' || itemType === 'set') {
                 const setCount = itemType.includes('shirt') ? quantity : itemType.includes('pants') ? 0 : quantity;
                 const pantsCount = itemType.includes('pants') ? quantity : itemType.includes('shirt') ? 0 : quantity;
 
@@ -718,6 +903,9 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
             number: toStringValue(row.number),
             quantity: Math.max(1, toNumberValue(row.quantity)),
             unit_price: toNumberValue(row.unit_price),
+            pants_size: toStringValueFromUnknown(row.pants_size),
+            pants_quantity: toNumberValueFromUnknown(row.pants_quantity),
+            pants_unit_price: toNumberValueFromUnknown(row.pants_unit_price),
         }));
 
     const resolvedJobTypeId = args.resolvedJobTypes.find((jobType) => jobType.name === order.job_type)?.id ?? args.resolvedJobTypes[0]?.id ?? 0;
@@ -784,8 +972,10 @@ export function buildEditInitialFormData(order: EditOrderPayload | null | undefi
             embroidery_code_text: toStringValueFromUnknown(pantsSpecPayload.embroidery_code_text ?? ''),
             embroidery_note_text: toStringValueFromUnknown(pantsSpecPayload.embroidery_note_text ?? ''),
         },
+        sports_day_groups: savedSportsDayGroups.length > 0 ? savedSportsDayGroups : [createSportsDayGroup()],
         size_tables: order ? (matrixTables.length > 0 ? matrixTables : []) : [defaultSizeTable],
         personalization_rows: mappedPersonalizationRows,
+        individual_include_pants: specPayload.individual_include_pants === true,
         line_items: items.map((item) => ({
             quantity: Math.max(1, toNumberValue(item.quantity)),
             unit_price: toNumberValue(item.unit_price),
@@ -988,17 +1178,22 @@ export default function OrderCreatePage({
     deliveryDateLoads = [],
     order,
 }: OrderCreatePageProps) {
-    const { compressImage, isCompressing, error: compressError } = useWebpCompress();
+    const { compressImage, isCompressing } = useWebpCompress();
     const { currentTeam } = usePage<{ currentTeam?: { slug: string } | null }>().props;
 
     const [activeSpecTab, setActiveSpecTab] = useState<SpecTab>('shirt');
     const [isDragOverArtwork, setIsDragOverArtwork] = useState(false);
-    const [isDragOverSlip, setIsDragOverSlip] = useState(false);
-    const [sizeFormMode, setSizeFormMode] = useState<SizeFormMode>('matrix');
+    // The saved mode decides which form an existing order reopens in. Without
+    // this an edit would always land on Form 1 and silently discard whatever
+    // the other modes had stored in the spec.
+    const [sizeFormMode, setSizeFormMode] = useState<SizeFormMode>(() => {
+        const savedMode = (order?.specification?.decoded as Record<string, unknown> | undefined)?.mode;
+
+        return savedMode === 'individual' || savedMode === 'sports_day' ? savedMode : 'matrix';
+    });
     const [artworkPreviewUrls, setArtworkPreviewUrls] = useState<string[]>([]);
     const [shirtArtworkPreviewUrls, setShirtArtworkPreviewUrls] = useState<string[]>([]);
     const [pantsArtworkPreviewUrls, setPantsArtworkPreviewUrls] = useState<string[]>([]);
-    const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
 
     useEffect(() => {
         if (!order) {
@@ -1021,7 +1216,6 @@ export default function OrderCreatePage({
     const artworkUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
     const [primaryArtworkSignature, setPrimaryArtworkSignature] = useState<string | null>(null);
 
-    const [masterJobTypes, setMasterJobTypes] = useState<OptionItem[]>([]);
 
     // Color values added inline from the order form (via MasterDataComboBox),
     // keyed by storage_key rather than by field, so a value added from one
@@ -1058,8 +1252,20 @@ export default function OrderCreatePage({
         return merged;
     };
 
+    /** Same catalogs the dropdowns show, including colours added inline just now. */
+    const withAllExtraColorOptions = (catalogs: CatalogMap): CatalogMap => {
+        const merged: CatalogMap = { ...catalogs };
+
+        Object.keys(SPEC_FIELD_CATALOG_SOURCE).forEach((field) => {
+            const source = SPEC_FIELD_CATALOG_SOURCE[field];
+            merged[source] = withExtraColorOptions(source, catalogs[source] ?? []);
+        });
+
+        return merged;
+    };
+
     const resolvedBranches = branches ?? [];
-    const resolvedJobTypes = masterJobTypes.length > 0 ? masterJobTypes : (jobTypes ?? []);
+    const resolvedJobTypes = jobTypes ?? [];
     const resolvedShirtCatalogs = shirtCatalogs ?? {};
     const resolvedPantsCatalogs = pantsCatalogs ?? {};
     const resolvedShirtTypes = shirtTypes ?? [];
@@ -1095,15 +1301,9 @@ export default function OrderCreatePage({
         [resolvedBranches, data.branch_id],
     );
 
-    useEffect(() => {
-        const localJobTypes = loadLocalCatalogRows('jssport.job-types');
-
-        if (localJobTypes.length > 0) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setMasterJobTypes(mapCatalogRowsToOptions(localJobTypes));
-        }
-
-    }, []);
+    // Job types come from the server (catalog_items) so every machine sees the
+    // same list. The browser copy is no longer consulted here — it is imported
+    // once from the ประเภทงาน settings page.
 
     useEffect(() => {
         if (!data.branch_id && resolvedBranches[0]) {
@@ -1167,40 +1367,41 @@ export default function OrderCreatePage({
         };
     }, [data.pants_artwork_files, order]);
 
-    useEffect(() => {
-        if (!data.transfer_slip_file) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setSlipPreviewUrl(null);
-
-            return;
-        }
-
-        const nextUrl = URL.createObjectURL(data.transfer_slip_file);
-
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSlipPreviewUrl(nextUrl);
-
-        return () => {
-            URL.revokeObjectURL(nextUrl);
-        };
-    }, [data.transfer_slip_file]);
-
     const matrixGrossAmount = useMemo(
         () => data.size_tables.flatMap((table) => table.rows).reduce((total, row) => total + rowTotal(row), 0),
         [data.size_tables],
     );
 
     const individualGrossAmount = useMemo(
-        () => data.personalization_rows.reduce((total, row) => total + rowIndividualTotal(row), 0),
-        [data.personalization_rows],
+        () => data.personalization_rows.reduce((total, row) => total + rowIndividualTotal(row, data.individual_include_pants), 0),
+        [data.personalization_rows, data.individual_include_pants],
     );
 
-    const grossAmount = sizeFormMode === 'matrix' ? matrixGrossAmount : individualGrossAmount;
+    const sportsDayGrossAmount = useMemo(
+        () => data.sports_day_groups.reduce((total, group) => total + sportsDayGroupTotal(group), 0),
+        [data.sports_day_groups],
+    );
+
+    const grossAmount = sizeFormMode === 'matrix'
+        ? matrixGrossAmount
+        : sizeFormMode === 'sports_day'
+            ? sportsDayGrossAmount
+            : individualGrossAmount;
     const discountPercent = Math.max(Math.min(toNumber(data.discount_percent), 50), 0);
     const discountAmount = (grossAmount * discountPercent) / 100;
     const derivedLineItems = useMemo(
-        () => (sizeFormMode === 'matrix' ? buildLineItemsFromMatrix(data.size_tables) : buildLineItemsFromIndividual(data.personalization_rows)),
-        [sizeFormMode, data.size_tables, data.personalization_rows],
+        () => {
+            if (sizeFormMode === 'matrix') {
+                return buildLineItemsFromMatrix(data.size_tables);
+            }
+
+            if (sizeFormMode === 'sports_day') {
+                return buildLineItemsFromSportsDay(data.sports_day_groups);
+            }
+
+            return buildLineItemsFromIndividual(data.personalization_rows, data.individual_include_pants);
+        },
+        [sizeFormMode, data.size_tables, data.sports_day_groups, data.personalization_rows, data.individual_include_pants],
     );
 
     const netAmount = Math.max(grossAmount - discountAmount, 0);
@@ -1289,6 +1490,103 @@ export default function OrderCreatePage({
         );
     };
 
+    // ---- Form 3 (กีฬาสี) handlers ----
+
+    const updateSportsDayGroups = (groups: SportsDayGroupForm[]) => {
+        setData('sports_day_groups', groups);
+    };
+
+    const patchSportsDayGroup = (groupId: string, patch: Partial<SportsDayGroupForm>) => {
+        updateSportsDayGroups(data.sports_day_groups.map((group) => (group.id === groupId ? { ...group, ...patch } : group)));
+    };
+
+    const patchSportsDayRow = (groupId: string, rowId: string, patch: Partial<SportsDayRowForm>) => {
+        updateSportsDayGroups(
+            data.sports_day_groups.map((group) =>
+                group.id === groupId
+                    ? { ...group, rows: group.rows.map((row) => (row.id === rowId ? { ...row, ...patch } : row)) }
+                    : group,
+            ),
+        );
+    };
+
+    const addSportsDayArtwork = (groupId: string, selectedFiles: File[]) => {
+        if (selectedFiles.length === 0) {
+            return;
+        }
+
+        void Promise.all(selectedFiles.map((file) => compressImage(file))).then((compressed) => {
+            setData((previous) => ({
+                ...previous,
+                sports_day_groups: previous.sports_day_groups.map((group) =>
+                    group.id === groupId ? { ...group, artwork_files: [...group.artwork_files, ...compressed] } : group,
+                ),
+            }));
+        });
+    };
+
+    const removeSportsDayArtwork = (groupId: string, fileIndex: number) => {
+        updateSportsDayGroups(
+            data.sports_day_groups.map((group) =>
+                group.id === groupId
+                    ? { ...group, artwork_files: group.artwork_files.filter((_, index) => index !== fileIndex) }
+                    : group,
+            ),
+        );
+    };
+
+    const addSportsDayGroup = () => {
+        updateSportsDayGroups([...data.sports_day_groups, createSportsDayGroup()]);
+    };
+
+    const removeSportsDayGroup = (groupId: string) => {
+        if (data.sports_day_groups.length <= 1) {
+            return;
+        }
+
+        updateSportsDayGroups(data.sports_day_groups.filter((group) => group.id !== groupId));
+    };
+
+    const addSportsDayRow = (groupId: string) => {
+        updateSportsDayGroups(
+            data.sports_day_groups.map((group) =>
+                group.id === groupId ? { ...group, rows: [...group.rows, createSportsDayRow()] } : group,
+            ),
+        );
+    };
+
+    const removeSportsDayRow = (groupId: string, rowId: string) => {
+        updateSportsDayGroups(
+            data.sports_day_groups.map((group) =>
+                group.id === groupId && group.rows.length > 1
+                    ? { ...group, rows: group.rows.filter((row) => row.id !== rowId) }
+                    : group,
+            ),
+        );
+    };
+
+    /** Copies the first row's prices down the rest of the table — the common case. */
+    const applySportsDayPricesToAllRows = (groupId: string) => {
+        updateSportsDayGroups(
+            data.sports_day_groups.map((group) => {
+                if (group.id !== groupId) {
+                    return group;
+                }
+
+                const first = group.rows[0];
+
+                if (!first) {
+                    return group;
+                }
+
+                return {
+                    ...group,
+                    rows: group.rows.map((row) => ({ ...row, shirt_price: first.shirt_price, pants_price: first.pants_price })),
+                };
+            }),
+        );
+    };
+
     const addSizeTable = (tableType: SizeTableType) => {
         const sizeSource = tableType === 'kids' ? resolvedKidsSizes : resolvedAdultSizes;
 
@@ -1360,6 +1658,9 @@ export default function OrderCreatePage({
                 number: '',
                 quantity: 1,
                 unit_price: 0,
+                pants_size: '',
+                pants_quantity: 0,
+                pants_unit_price: 0,
             },
         ]);
     };
@@ -1420,19 +1721,6 @@ export default function OrderCreatePage({
                 artwork_files: updatedArtworkFiles,
             };
         });
-    };
-
-    const handleSlipSelect = async (event: ChangeEvent<HTMLInputElement>) => {
-        const selected = event.target.files?.[0] ?? null;
-
-        if (!selected) {
-            setData('transfer_slip_file', null);
-
-            return;
-        }
-
-        const compressed = await compressImage(selected);
-        setData('transfer_slip_file', compressed);
     };
 
     const handleShirtArtworkSelect = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1508,20 +1796,44 @@ export default function OrderCreatePage({
             missing.push('สาขา');
         }
 
-        const requestItems = sizeFormMode === 'matrix'
-            ? buildRequestItems(data.size_tables)
-            : buildRequestItemsFromIndividual(data.personalization_rows);
+        const requestItems = resolveRequestItems(sizeFormMode, data.size_tables, data.sports_day_groups, data.personalization_rows, data.individual_include_pants);
 
         if (requestItems.length === 0) {
             missing.push('จำนวนและราคาสินค้าอย่างน้อย 1 รายการ');
         }
 
-        if (data.size_tables.some((table) => table.rows.some((row) => !row.size_label))) {
-            missing.push('ไซส์ในตารางเลือกไซซ์');
+        // Scoped to Form 1: the other modes keep their own (hidden) size_tables
+        // state, and an untouched hidden table must not block their submit.
+        if (sizeFormMode === 'matrix') {
+            if (data.size_tables.some((table) => table.rows.some((row) => !row.size_label))) {
+                missing.push('ไซส์ในตารางเลือกไซซ์');
+            }
+
+            if (data.size_tables.some((table) => table.rows.some((row) => row.size_label.length > SIZE_LABEL_MAX_LENGTH))) {
+                missing.push(`ไซส์ต้องไม่เกิน ${SIZE_LABEL_MAX_LENGTH} ตัวอักษร`);
+            }
         }
 
-        if (data.size_tables.some((table) => table.rows.some((row) => row.size_label.length > SIZE_LABEL_MAX_LENGTH))) {
-            missing.push(`ไซส์ต้องไม่เกิน ${SIZE_LABEL_MAX_LENGTH} ตัวอักษร`);
+        if (sizeFormMode === 'sports_day') {
+            if (data.sports_day_groups.some((group) => group.team_name.trim() === '')) {
+                missing.push('ชื่อคณะสี');
+            }
+
+            const rowsWithQuantity = data.sports_day_groups.flatMap((group) =>
+                group.rows.filter((row) => row.shirt_qty > 0 || row.pants_qty > 0),
+            );
+
+            if (rowsWithQuantity.some((row) => !row.size_label)) {
+                missing.push('ไซซ์ในตารางคณะสี');
+            }
+
+            if (rowsWithQuantity.some((row) => row.size_label.length > SIZE_LABEL_MAX_LENGTH)) {
+                missing.push(`ไซส์ต้องไม่เกิน ${SIZE_LABEL_MAX_LENGTH} ตัวอักษร`);
+            }
+
+            if (rowsWithQuantity.some((row) => (row.shirt_qty > 0 && row.shirt_price <= 0) || (row.pants_qty > 0 && row.pants_price <= 0))) {
+                missing.push('ราคาของรายการที่กรอกจำนวนไว้');
+            }
         }
 
         if (sizeFormMode === 'individual') {
@@ -1583,7 +1895,7 @@ export default function OrderCreatePage({
 
     const submit = () => {
         const selectedJobType = resolvedJobTypes.find((item) => String(item.id) === data.job_type_id)?.name ?? data.job_name;
-        const requestItems = sizeFormMode === 'matrix' ? buildRequestItems(data.size_tables) : buildRequestItemsFromIndividual(data.personalization_rows);
+        const requestItems = resolveRequestItems(sizeFormMode, data.size_tables, data.sports_day_groups, data.personalization_rows, data.individual_include_pants);
 
         if (requestItems.length === 0) {
             setValidationErrors(['จำนวนและราคาสินค้าอย่างน้อย 1 รายการ']);
@@ -1600,6 +1912,29 @@ export default function OrderCreatePage({
             mode: sizeFormMode,
             shirt_specs: data.shirt_specs,
             pants_specs: data.pants_specs,
+            // The master-data names as they read at the moment of saving.
+            spec_labels: {
+                shirt: snapshotSpecLabels(data.shirt_specs, withAllExtraColorOptions(resolvedShirtCatalogs)),
+                pants: snapshotSpecLabels(data.pants_specs, withAllExtraColorOptions(resolvedPantsCatalogs)),
+            },
+            sports_day_groups: sizeFormMode === 'sports_day'
+                ? data.sports_day_groups.map((group) => ({
+                      team_name: group.team_name.trim(),
+                      fabric_color_id: group.fabric_color_id,
+                      rows: group.rows.map((row) => ({
+                          size_group: row.size_group,
+                          size_label: row.size_label.trim(),
+                          shirt_qty: Math.max(row.shirt_qty, 0),
+                          shirt_price: Math.max(row.shirt_price, 0),
+                          pants_qty: Math.max(row.pants_qty, 0),
+                          pants_price: Math.max(row.pants_price, 0),
+                          total_price: sportsDayRowTotal(row),
+                      })),
+                      total_pieces: sportsDayGroupPieces(group),
+                      total_price: sportsDayGroupTotal(group),
+                  }))
+                : [],
+            individual_include_pants: sizeFormMode === 'individual' ? data.individual_include_pants : false,
             personalization_rows: sizeFormMode === 'individual'
                 ? data.personalization_rows.map((row) => ({
                       name: row.name.trim(),
@@ -1607,7 +1942,10 @@ export default function OrderCreatePage({
                       number: row.number.trim(),
                       quantity: Math.max(row.quantity, 1),
                       unit_price: Math.max(row.unit_price, 0),
-                      total_price: rowIndividualTotal(row),
+                      pants_size: data.individual_include_pants ? row.pants_size.trim() : '',
+                      pants_quantity: data.individual_include_pants ? Math.max(row.pants_quantity, 0) : 0,
+                      pants_unit_price: data.individual_include_pants ? Math.max(row.pants_unit_price, 0) : 0,
+                      total_price: rowIndividualTotal(row, data.individual_include_pants),
                   }))
                 : [],
         });
@@ -1633,6 +1971,15 @@ export default function OrderCreatePage({
                 };
             })(),
             duplicate_from_id: order?.duplicate_from_id ?? null,
+            // Keyed by colour house index so the server can tag each file with
+            // the house it belongs to. Only Form 3 ever sends this.
+            sports_day_artwork: sizeFormMode === 'sports_day'
+                ? Object.fromEntries(
+                      data.sports_day_groups
+                          .map((group, index) => [index, group.artwork_files] as const)
+                          .filter(([, files]) => files.length > 0),
+                  )
+                : {},
             customer_id: payload.customer_id ? Number(payload.customer_id) : null,
             customer_name: customerName,
             customer_phone: payload.customer_phone || null,
@@ -2077,128 +2424,11 @@ export default function OrderCreatePage({
                                         <div className="grid gap-2 border-t border-slate-200 pt-2">
                                             <div className="flex items-center justify-between">
                                                 <span className="font-semibold text-slate-700">ยอดคงเหลือ</span>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-bold text-slate-900">฿ {formatMoney(remainingAmount)}</span>
-                                                    {data.payment_status === 'paid' ? (
-                                                        <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">ชำระแล้ว</Badge>
-                                                    ) : data.payment_status === 'deposit' ? (
-                                                        <Badge className="border-blue-200 bg-blue-50 text-blue-700">มัดจำ</Badge>
-                                                    ) : (
-                                                        <Badge className="border-[#E21E26]/25 bg-[#E21E26]/10 text-[#E21E26]">ค้างชำระ</Badge>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="grid gap-1.5 text-xs">
-                                                <span className="font-semibold text-slate-600">สถานะการชำระเงิน</span>
-                                                <Select value={data.payment_status} onValueChange={(value: PaymentStatus) => setData('payment_status', value)}>
-                                                    <SelectTrigger className="h-8 w-full bg-white text-xs">
-                                                        <SelectValue placeholder="เลือกสถานะ" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="deposit">มัดจำ</SelectItem>
-                                                        <SelectItem value="pending">ค้างชำระ</SelectItem>
-                                                        <SelectItem value="paid">ชำระแล้ว</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <span className="text-sm font-bold text-slate-900">฿ {formatMoney(remainingAmount)}</span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-
-                                <div className="mt-4 grid gap-2">
-                                    <span className="text-xs font-semibold text-slate-600">วิธีชำระเงิน</span>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <Button
-                                            type="button"
-                                            variant={data.payment_method === 'cash' ? 'default' : 'outline'}
-                                            className="h-8 text-xs"
-                                            onClick={() => setData('payment_method', 'cash')}
-                                        >
-                                            เงินสด
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            variant={data.payment_method === 'transfer' ? 'default' : 'outline'}
-                                            className="h-8 text-xs"
-                                            onClick={() => setData('payment_method', 'transfer')}
-                                        >
-                                            เงินโอน
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <div
-                                    className={`mt-3 overflow-hidden transition-all duration-200 ${
-                                        data.payment_method === 'transfer' ? 'max-h-[240px] opacity-100' : 'max-h-0 opacity-0'
-                                    }`}
-                                >
-                                    <label
-                                        className={`block rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                                            isDragOverSlip ? 'border-emerald-400 bg-emerald-50' : 'border-slate-300 bg-slate-50/60'
-                                        }`}
-                                        onDragOver={(event) => {
-                                            event.preventDefault();
-                                            setIsDragOverSlip(true);
-                                        }}
-                                        onDragLeave={() => setIsDragOverSlip(false)}
-                                        onDrop={(event) => {
-                                            event.preventDefault();
-                                            setIsDragOverSlip(false);
-                                            const droppedFile = event.dataTransfer.files?.[0];
-
-                                            if (!droppedFile) {
-                                                return;
-                                            }
-
-                                            void (async () => {
-                                                const compressed = await compressImage(droppedFile);
-                                                setData('transfer_slip_file', compressed);
-                                            })();
-                                        }}
-                                    >
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            onChange={(event) => {
-                                                void handleSlipSelect(event);
-                                            }}
-                                        />
-                                        <FileImage className="mx-auto mb-2 size-5 text-slate-500" />
-                                        <p className="text-xs font-medium text-slate-700">อัปโหลดสลิปหลักฐานการโอน</p>
-                                        <p className="mt-1 text-[11px] text-slate-500">รองรับไฟล์รูปภาพ และจะถูกบีบอัดเป็น WebP อัตโนมัติ</p>
-                                    </label>
-
-                                    <div className="mt-2">
-                                        {data.transfer_slip_file && slipPreviewUrl ? (
-                                            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5">
-                                                <img src={slipPreviewUrl} alt={data.transfer_slip_file.name} className="size-16 rounded-md object-cover" />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="truncate text-xs font-semibold text-slate-800">{data.transfer_slip_file.name}</p>
-                                                    <p className="text-[11px] text-slate-500">
-                                                        {Math.round(data.transfer_slip_file.size / 1024).toLocaleString('th-TH')} KB
-                                                    </p>
-                                                </div>
-                                                <Button
-                                                    type="button"
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="size-8 text-slate-500 hover:text-rose-600"
-                                                    onClick={() => {
-                                                        setData('transfer_slip_file', null);
-                                                    }}
-                                                >
-                                                    <X className="size-4" />
-                                                </Button>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                </div>
-
-                                {compressError ? (
-                                    <p className="mt-3 text-xs text-[#E21E26]">แจ้งเตือนการบีบอัดรูปภาพ: {compressError}</p>
-                                ) : null}
                             </section>
                         </div>
 
@@ -2487,6 +2717,15 @@ export default function OrderCreatePage({
                                 >
                                     รายตัว (Form 2)
                                 </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={sizeFormMode === 'sports_day' ? 'default' : 'ghost'}
+                                    className="h-8 text-xs"
+                                    onClick={() => setSizeFormMode('sports_day')}
+                                >
+                                    กีฬาสี (Form 3)
+                                </Button>
                             </div>
                         </div>
 
@@ -2769,11 +3008,273 @@ export default function OrderCreatePage({
                                 })}
                             </div> : null}
 
+                            {sizeFormMode === 'sports_day' ? (
+                                <div className="space-y-4">
+                                    {data.sports_day_groups.map((group, groupIndex) => {
+                                        const groupPieces = sportsDayGroupPieces(group);
+                                        const groupTotal = sportsDayGroupTotal(group);
+
+                                        return (
+                                            <div key={group.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                                                <div className="mb-3 grid gap-2 md:grid-cols-[1.2fr_1.2fr_auto_auto] md:items-end">
+                                                    <label className="grid gap-1 text-xs">
+                                                        <span className="font-semibold text-slate-600">คณะสี</span>
+                                                        <Input
+                                                            value={group.team_name}
+                                                            onChange={(event) => patchSportsDayGroup(group.id, { team_name: event.target.value })}
+                                                            placeholder={`เช่น คณะสีแดง`}
+                                                            className="h-9 bg-white text-xs"
+                                                            aria-label={`ชื่อคณะสีที่ ${groupIndex + 1}`}
+                                                        />
+                                                    </label>
+                                                    <label className="grid gap-1 text-xs">
+                                                        <span className="font-semibold text-slate-600">สีผ้า</span>
+                                                        <MasterDataComboBox
+                                                            storageKey="jssport.shirt-fabric-colors"
+                                                            options={withExtraColorOptions('fabric_colors', resolvedShirtCatalogs.fabric_colors ?? [])}
+                                                            value={group.fabric_color_id}
+                                                            onValueChange={(value) => patchSportsDayGroup(group.id, { fabric_color_id: value })}
+                                                            onOptionAdded={(option) => handleColorOptionAdded('jssport.shirt-fabric-colors', option)}
+                                                            placeholder="เลือกหรือพิมพ์สีผ้า"
+                                                            aria-label={`สีผ้าของคณะที่ ${groupIndex + 1}`}
+                                                        />
+                                                    </label>
+                                                    <div className="text-xs text-slate-600">
+                                                        <span className="font-mono text-sm font-semibold text-slate-900">{groupPieces}</span> ตัว ·{' '}
+                                                        <span className="font-mono text-sm font-semibold text-slate-900">฿ {formatMoney(groupTotal)}</span>
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-9 text-xs text-[#E21E26]"
+                                                        disabled={data.sports_day_groups.length <= 1}
+                                                        onClick={() => removeSportsDayGroup(group.id)}
+                                                    >
+                                                        ลบคณะ
+                                                    </Button>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    {group.rows.map((row) => {
+                                                        const rowSizeOptions = row.size_group === 'kids' ? resolvedKidsSizes : resolvedAdultSizes;
+
+                                                        return (
+                                                            <div
+                                                                key={row.id}
+                                                                className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2.5 md:grid-cols-[0.9fr_1fr_0.7fr_0.9fr_0.7fr_0.9fr_0.9fr_auto]"
+                                                            >
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">ประเภทไซซ์</span>
+                                                                    <Select
+                                                                        value={row.size_group}
+                                                                        onValueChange={(value) =>
+                                                                            patchSportsDayRow(group.id, row.id, {
+                                                                                size_group: value === 'kids' ? 'kids' : 'adults',
+                                                                                size_label: '',
+                                                                            })
+                                                                        }
+                                                                    >
+                                                                        <SelectTrigger className="h-9 w-full bg-white text-xs">
+                                                                            <SelectValue placeholder="เลือกประเภท" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="kids">เด็ก (Kids)</SelectItem>
+                                                                            <SelectItem value="adults">ผู้ใหญ่ (Adults)</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </label>
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">ไซซ์</span>
+                                                                    <Select
+                                                                        value={row.size_label}
+                                                                        onValueChange={(value) => patchSportsDayRow(group.id, row.id, { size_label: value })}
+                                                                    >
+                                                                        <SelectTrigger className="h-9 w-full bg-white text-xs">
+                                                                            <SelectValue placeholder="เลือกไซซ์" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            {rowSizeOptions.map((size) => (
+                                                                                <SelectItem key={size} value={size}>
+                                                                                    {size}
+                                                                                </SelectItem>
+                                                                            ))}
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </label>
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">เสื้อ</span>
+                                                                    <Input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        value={row.shirt_qty}
+                                                                        onChange={(event) =>
+                                                                            patchSportsDayRow(group.id, row.id, { shirt_qty: Math.max(toNumber(event.target.value), 0) })
+                                                                        }
+                                                                        className="h-9 bg-white text-xs"
+                                                                    />
+                                                                </label>
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">ราคาเสื้อ</span>
+                                                                    <Input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        value={row.shirt_price}
+                                                                        onChange={(event) =>
+                                                                            patchSportsDayRow(group.id, row.id, { shirt_price: Math.max(toNumber(event.target.value), 0) })
+                                                                        }
+                                                                        className="h-9 bg-white text-xs"
+                                                                    />
+                                                                </label>
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">กางเกง</span>
+                                                                    <Input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        value={row.pants_qty}
+                                                                        onChange={(event) =>
+                                                                            patchSportsDayRow(group.id, row.id, { pants_qty: Math.max(toNumber(event.target.value), 0) })
+                                                                        }
+                                                                        className="h-9 bg-white text-xs"
+                                                                    />
+                                                                </label>
+                                                                <label className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">ราคากางเกง</span>
+                                                                    <Input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        value={row.pants_price}
+                                                                        onChange={(event) =>
+                                                                            patchSportsDayRow(group.id, row.id, { pants_price: Math.max(toNumber(event.target.value), 0) })
+                                                                        }
+                                                                        className="h-9 bg-white text-xs"
+                                                                    />
+                                                                </label>
+                                                                <div className="grid gap-1 text-xs">
+                                                                    <span className="text-slate-600">รวมราคา</span>
+                                                                    <div className="flex h-9 items-center justify-end rounded-md border border-slate-200 bg-slate-50 px-2 font-mono text-xs font-semibold text-slate-900">
+                                                                        ฿ {formatMoney(sportsDayRowTotal(row))}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-end">
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        className="h-9 text-xs text-slate-500 hover:text-[#E21E26]"
+                                                                        disabled={group.rows.length <= 1}
+                                                                        onClick={() => removeSportsDayRow(group.id, row.id)}
+                                                                    >
+                                                                        ลบ
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+
+                                                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-2.5">
+                                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                                        <span className="text-xs font-semibold text-slate-600">Art Work ของคณะนี้</span>
+                                                        <span className="text-xs text-slate-500">
+                                                            แนบแล้ว{' '}
+                                                            <span className="font-mono text-sm font-semibold text-slate-900">
+                                                                {group.artwork_urls.length + group.artwork_files.length}
+                                                            </span>{' '}
+                                                            รูป
+                                                            {group.artwork_urls.length > 0 ? ` (บันทึกแล้ว ${group.artwork_urls.length})` : ''}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {group.artwork_urls.map((url) => (
+                                                            <div key={url} className="size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                                                                <img src={url} alt={`Art Work ${group.team_name}`} className="size-full object-contain" />
+                                                            </div>
+                                                        ))}
+                                                        {group.artwork_files.map((file, fileIndex) => (
+                                                            <div
+                                                                key={`${file.name}-${file.lastModified}-${fileIndex}`}
+                                                                className="relative size-16 overflow-hidden rounded-md border border-dashed border-slate-300 bg-slate-50"
+                                                            >
+                                                                <img src={URL.createObjectURL(file)} alt={file.name} className="size-full object-contain" />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeSportsDayArtwork(group.id, fileIndex)}
+                                                                    aria-label={`ลบรูปที่ ${fileIndex + 1} ของ ${group.team_name || 'คณะนี้'}`}
+                                                                    className="absolute right-0 top-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                        <label className="flex size-16 cursor-pointer items-center justify-center rounded-md border border-dashed border-slate-300 text-xs text-slate-500 hover:border-[#174395] hover:text-[#174395]">
+                                                            + เพิ่มรูป
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                multiple
+                                                                className="hidden"
+                                                                aria-label={`เลือกรูป Art Work ของ ${group.team_name || 'คณะนี้'}`}
+                                                                onChange={(event) => {
+                                                                    addSportsDayArtwork(group.id, Array.from(event.target.files ?? []));
+                                                                    event.target.value = '';
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => addSportsDayRow(group.id)}>
+                                                        <Plus className="size-3.5" />
+                                                        เพิ่มไซซ์
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-8 text-xs"
+                                                        onClick={() => applySportsDayPricesToAllRows(group.id)}
+                                                    >
+                                                        ใช้ราคาแถวแรกกับทุกแถว
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={addSportsDayGroup}>
+                                        <Plus className="size-3.5" />
+                                        เพิ่มคณะสี
+                                    </Button>
+                                </div>
+                            ) : null}
+
                             {sizeFormMode === 'individual' ? (
                                 <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-                                    <h3 className="text-xs font-semibold text-slate-700">รายชื่อสกรีนชื่อ-เบอร์รายตัว (Personalization List)</h3>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <h3 className="text-xs font-semibold text-slate-700">รายชื่อสกรีนชื่อ-เบอร์รายตัว (Personalization List)</h3>
+                                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs">
+                                            <input
+                                                type="checkbox"
+                                                checked={data.individual_include_pants}
+                                                onChange={(event) => setData('individual_include_pants', event.target.checked)}
+                                                className="size-3.5 accent-[#174395]"
+                                                aria-label="สั่งกางเกงด้วย"
+                                            />
+                                            <span className="font-semibold text-slate-700">สั่งกางเกงด้วย</span>
+                                        </label>
+                                    </div>
                                     {data.personalization_rows.map((row) => (
-                                        <div key={row.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2.5 md:grid-cols-[1.3fr_0.9fr_0.9fr_0.7fr_0.8fr_0.9fr_auto]">
+                                        <div
+                                            key={row.id}
+                                            className={`grid gap-2 rounded-lg border border-slate-200 bg-white p-2.5 ${
+                                                data.individual_include_pants
+                                                    ? 'md:grid-cols-[1.2fr_0.8fr_0.7fr_0.6fr_0.7fr_0.7fr_0.6fr_0.7fr_0.8fr_auto]'
+                                                    : 'md:grid-cols-[1.3fr_0.9fr_0.9fr_0.7fr_0.8fr_0.9fr_auto]'
+                                            }`}
+                                        >
                                             <label className="grid gap-1 text-xs">
                                                 <span className="text-slate-600">สกรีนชื่อ (Name)</span>
                                                 <Input
@@ -2839,7 +3340,7 @@ export default function OrderCreatePage({
                                                 />
                                             </label>
                                             <label className="grid gap-1 text-xs">
-                                                <span className="text-slate-600">ราคาต่อชุด</span>
+                                                <span className="text-slate-600">ราคาเสื้อ</span>
                                                 <Input
                                                     type="number"
                                                     min={0}
@@ -2849,9 +3350,52 @@ export default function OrderCreatePage({
                                                 />
                                             </label>
 
+                                            {data.individual_include_pants ? (
+                                                <>
+                                                    <label className="grid gap-1 text-xs">
+                                                        <span className="text-slate-600">ไซซ์กางเกง</span>
+                                                        <Select
+                                                            value={row.pants_size}
+                                                            onValueChange={(value) => updatePersonalization(row.id, 'pants_size', value)}
+                                                        >
+                                                            <SelectTrigger className="h-8 w-full bg-white text-xs">
+                                                                <SelectValue placeholder="เลือกไซซ์" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {(row.size_group === 'kids' ? resolvedKidsSizes : resolvedAdultSizes).map((size) => (
+                                                                    <SelectItem key={size} value={size}>
+                                                                        {size}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </label>
+                                                    <label className="grid gap-1 text-xs">
+                                                        <span className="text-slate-600">จำนวนกางเกง</span>
+                                                        <Input
+                                                            type="number"
+                                                            min={0}
+                                                            value={row.pants_quantity}
+                                                            onChange={(event) => updatePersonalization(row.id, 'pants_quantity', Math.max(0, toNumber(event.target.value)))}
+                                                            className="h-8 text-xs"
+                                                        />
+                                                    </label>
+                                                    <label className="grid gap-1 text-xs">
+                                                        <span className="text-slate-600">ราคากางเกง</span>
+                                                        <Input
+                                                            type="number"
+                                                            min={0}
+                                                            value={row.pants_unit_price}
+                                                            onChange={(event) => updatePersonalization(row.id, 'pants_unit_price', Math.max(0, toNumber(event.target.value)))}
+                                                            className="h-8 text-xs"
+                                                        />
+                                                    </label>
+                                                </>
+                                            ) : null}
+
                                             <div className="flex items-end">
                                                 <div className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 px-2 text-right text-xs font-semibold leading-8 text-slate-800">
-                                                    {formatMoney(rowIndividualTotal(row))}
+                                                    {formatMoney(rowIndividualTotal(row, data.individual_include_pants))}
                                                 </div>
                                             </div>
 

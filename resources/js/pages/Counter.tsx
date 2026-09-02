@@ -37,10 +37,7 @@ type CounterFilters = {
     shipping_date_from: string | null;
     shipping_date_to: string | null;
     search?: string | null;
-    department?: DepartmentFilter | null;
 };
-
-type DepartmentFilter = 'all' | 'design' | 'print_room' | 'cutting' | 'heat_press' | 'embroidery' | 'sewing' | 'screen_flex' | 'qc' | 'shipping';
 
 export interface OrderTableRow {
     id: number;
@@ -69,6 +66,13 @@ export interface OrderTableRow {
         branch_name: string | null;
         delivery_method: string | null;
         shipping_address: string | null;
+        shipping_delivery_info?: {
+            carrier_name?: string;
+            tracking_no?: string;
+            onsite_sender_name?: string;
+            onsite_vehicle_plate?: string;
+            sender_signature?: string;
+        } | null;
         customer: {
             name: string | null;
             phone: string | null;
@@ -291,18 +295,6 @@ const tableDateFormatter = new Intl.DateTimeFormat('th-TH', {
     month: '2-digit',
     year: 'numeric',
 });
-
-const departmentOptions: Array<{ value: DepartmentFilter; label: string }> = [
-    { value: 'all', label: 'ทุกห้องการผลิต' },
-    { value: 'print_room', label: 'ห้องพิมพ์' },
-    { value: 'heat_press', label: 'ห้องอัด' },
-    { value: 'cutting', label: 'ห้องตัด' },
-    { value: 'embroidery', label: 'ห้องปัก' },
-    { value: 'sewing', label: 'ห้องเย็บ' },
-    { value: 'screen_flex', label: 'สกรีน,เฟล็ค' },
-    { value: 'qc', label: 'ตรวจสอบ' },
-    { value: 'shipping', label: 'จัดส่ง' },
-];
 
 function formatTableDate(value: string): string {
     const date = new Date(value);
@@ -568,15 +560,15 @@ function OrderActionMenu({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                     disabled={!canDelete}
-                    variant="destructive"
                     title={canDelete ? 'ลบออเดอร์' : 'ลบได้เฉพาะผู้ดูแลระบบ และเฉพาะงานที่ยังไม่เข้าไลน์ผลิต'}
+                    className="!text-[#E21E26] focus:!text-[#C91820] [&_svg]:!text-[#E21E26] focus:[&_svg]:!text-[#C91820]"
                     onSelect={() => {
                         if (canDelete) {
                             onDelete(row);
                         }
                     }}
                 >
-                    <Trash2 className="size-4" />
+                    <Trash2 className="size-4 !text-[#E21E26]" />
                     ลบ
                 </DropdownMenuItem>
             </DropdownMenuContent>
@@ -665,9 +657,8 @@ function OrdersTable({
                                 <th className="w-[6%] whitespace-nowrap px-3 py-3 text-right">จำนวนตัว</th>
                                 <th className="w-[9%] whitespace-nowrap px-3 py-3">สถานะงาน</th>
                                 <th className="w-[7%] whitespace-nowrap px-3 py-3">ใบจัดส่ง</th>
-                                <th className="w-[8%] whitespace-nowrap px-3 py-3">สถานะชำระเงิน</th>
-                                <th className="w-[6%] px-3 py-3">ผู้รับงาน</th>
-                                <th className="w-[6%] px-3 py-3 text-center">ไทม์ไลน์</th>
+                                <th className="w-[8%] px-3 py-3">ผู้รับงาน</th>
+                                <th className="w-[8%] px-3 py-3 text-center">ไทม์ไลน์</th>
                                 <th className="w-[4%] px-3 py-3 text-center">Action</th>
                             </tr>
                         </thead>
@@ -837,15 +828,10 @@ function OrdersTable({
                                                             เปิด PDF
                                                         </Button>
                                                     </td>
-                                                    <td className="w-[8%] whitespace-nowrap px-3 py-2 align-middle">
-                                                        <Badge variant="outline" className={`${paymentClass(row.payment_status)} px-1.5 py-0.5 text-[11px]`}>
-                                                            {paymentLabel(row.payment_status)}
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="w-[6%] px-3 py-2 align-middle text-xs text-slate-500">
+                                                    <td className="w-[8%] px-3 py-2 align-middle text-xs text-slate-500">
                                                         <span className="block truncate">{row.receiver_name}</span>
                                                     </td>
-                                                    <td className="w-[6%] px-3 py-2 text-center align-middle">
+                                                    <td className="w-[8%] px-3 py-2 text-center align-middle">
                                                         <Button
                                                             type="button"
                                                             variant="outline"
@@ -984,7 +970,6 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
     const [shippingDateFrom, setShippingDateFrom] = useState(formatInput(filters.shipping_date_from));
     const [shippingDateTo, setShippingDateTo] = useState(formatInput(filters.shipping_date_to));
     const [search, setSearch] = useState(formatInput(filters.search));
-    const [department, setDepartment] = useState<DepartmentFilter>((filters.department as DepartmentFilter | null) ?? 'all');
     const [isBillingRangeOpen, setIsBillingRangeOpen] = useState(false);
     const [isShippingRangeOpen, setIsShippingRangeOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<OrderTableRow | null>(null);
@@ -1000,8 +985,7 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
         setShippingDateFrom(formatInput(filters.shipping_date_from));
         setShippingDateTo(formatInput(filters.shipping_date_to));
         setSearch(formatInput(filters.search));
-        setDepartment((filters.department as DepartmentFilter | null) ?? 'all');
-    }, [filters.branch_id, filters.billing_date_from, filters.billing_date_to, filters.shipping_date_from, filters.shipping_date_to, filters.search, filters.department]);
+    }, [filters.branch_id, filters.billing_date_from, filters.billing_date_to, filters.shipping_date_from, filters.shipping_date_to, filters.search]);
 
     const handleResetFilters = () => {
         setBranchId('all');
@@ -1010,7 +994,6 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
         setShippingDateFrom('');
         setShippingDateTo('');
         setSearch('');
-        setDepartment('all');
         setIsBillingRangeOpen(false);
         setIsShippingRangeOpen(false);
     };
@@ -1117,7 +1100,6 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
     );
 
     const selectedBranchLabel = branchOptions.find((option) => option.value === branchId)?.label ?? 'ทุกสาขา';
-    const selectedDepartmentLabel = departmentOptions.find((option) => option.value === department)?.label ?? 'ทุกห้องการผลิต';
     const billingRangeLabel = billingDateFrom && billingDateTo ? `วันที่เปิดบิล: ${formatShortDate(billingDateFrom)} - ${formatShortDate(billingDateTo)}` : 'วันที่เปิดบิล: ทั้งหมด';
     const shippingRangeLabel = shippingDateFrom && shippingDateTo ? `วันที่จัดส่ง: ${formatShortDate(shippingDateFrom)} - ${formatShortDate(shippingDateTo)}` : 'วันที่จัดส่ง: ทั้งหมด';
     const detailImages = useMemo(() => {
@@ -1217,9 +1199,8 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
             shipping_date_from: shippingDateFrom || undefined,
             shipping_date_to: shippingDateTo || undefined,
             search: search || undefined,
-            department: department === 'all' ? undefined : department,
         }),
-        [branchId, billingDateFrom, billingDateTo, shippingDateFrom, shippingDateTo, search, department],
+        [branchId, billingDateFrom, billingDateTo, shippingDateFrom, shippingDateTo, search],
     );
 
     // Changing a filter changes the result set, so the page resets to 1 (no `page`
@@ -1251,6 +1232,51 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
         );
     };
 
+    const handlePrintDeliveryNote = (row: OrderTableRow) => {
+        const order = row.details;
+
+        if (!order) {
+            return;
+        }
+
+        const deliveryInfo = order.shipping_delivery_info;
+        const deliveryDetails = order.delivery_method === 'onsite'
+            ? [deliveryInfo?.onsite_sender_name, deliveryInfo?.onsite_vehicle_plate].filter(Boolean).join(' / ')
+            : [deliveryInfo?.carrier_name, deliveryInfo?.tracking_no].filter(Boolean).join(' / ');
+        const printWindow = window.open('', '_blank', 'width=900,height=1100');
+
+        if (!printWindow) {
+            return;
+        }
+
+        printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งมอบสินค้า ${escapeHtml(row.order_code)}</title><style>
+            @page { size: A4 portrait; margin: 8mm; }
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            html, body { width: 210mm; height: 297mm; margin: 0; }
+            body { color: #172554; font-family: 'TH Sarabun New', 'Noto Sans Thai', Arial, sans-serif; font-size: 15px; }
+            .note { height: 281mm; overflow: hidden; border: 0.55mm solid #486581; border-radius: 3mm; padding: 3.5mm; }
+            .header { display: grid; grid-template-columns: 1fr 62mm; gap: 4mm; }
+            .top { display: grid; grid-template-columns: minmax(0, 1fr) 76mm; gap: 4mm; }
+            .logo { width: 38mm; }.tax, .original { margin: 1mm 0; color: #a04848; font-weight: 700; }
+            .title { border: 0.55mm solid #486581; border-radius: 2.5mm; padding: 2mm; text-align: center; font-size: 24px; font-weight: 700; }
+            .original { text-align: center; }.top { margin-top: 2mm; }
+            .box { min-height: 34mm; border: 0.55mm solid #486581; border-radius: 4.5mm; padding: 3mm 4mm; }
+            .line { margin: 0 0 1.5mm; font-size: 16px; }.meta { display: grid; grid-template-columns: 32mm minmax(0, 1fr); gap: 1mm 2mm; margin: 0; font-size: 14px; }.meta dt, .meta dd { margin: 0; }.meta dt { white-space: nowrap; }.meta dd { min-width: 0; overflow-wrap: anywhere; text-align: right; font-weight: 700; }
+            table { width: 100%; margin-top: 2.5mm; border: 0.55mm solid #486581; border-collapse: separate; border-spacing: 0; border-radius: 3.5mm; overflow: hidden; }
+            th, td { border-right: 0.3mm solid #486581; border-bottom: 0.3mm solid #486581; padding: 2mm 2.5mm; vertical-align: top; } th:last-child, td:last-child { border-right: 0; } tbody tr:last-child td { border-bottom: 0; } th { background: #f8fafc; text-align: center; font-weight: 700; }
+            .center { text-align: center; white-space: nowrap; }.item td { height: 96mm; }.summary { text-align: right; font-weight: 700; }.received { padding: 3mm; text-align: center; font-weight: 700; }
+            .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 3mm; }.signature { min-height: 34mm; border: 0.55mm solid #486581; border-radius: 3.5mm; padding: 3mm; }.sign-line { margin: 16mm 4mm 0; border-bottom: 0.3mm dotted #172554; }.sign-date { margin-top: 2mm; text-align: center; }
+        </style></head><body><main class="note">
+            <header class="header"><div><img class="logo" src="/images/logo/logo.png" alt="J.S. Sport"><p class="tax">ไม่ใช่ใบกำกับภาษี</p></div><div><div class="title">ใบส่งมอบสินค้า</div><p class="original">ต้นฉบับ</p></div></header>
+            <section class="top"><div class="box"><p class="line"><strong>ลูกค้า</strong> ${escapeHtml(order.customer.name || row.customer_name || '-')}</p><p class="line"><strong>ที่อยู่</strong> ${escapeHtml(order.shipping_address || '-')}</p><p class="line"><strong>วิธีส่งมอบ</strong> ${escapeHtml(deliveryMethodLabel(order.delivery_method))}</p><p class="line"><strong>รายละเอียดขนส่ง</strong> ${escapeHtml(deliveryDetails || '-')}</p></div><div class="box"><dl class="meta"><dt>เลขที่ออเดอร์</dt><dd>${escapeHtml(row.order_code)}</dd><dt>วันที่ส่งมอบ</dt><dd>${escapeHtml(formatTableDate(row.due_date))}</dd><dt>ชื่องาน</dt><dd>${escapeHtml(order.job_name || '-')}</dd></dl></div></section>
+            <table><thead><tr><th style="width:9%">ลำดับ</th><th>รายการ</th><th style="width:13%">จำนวน</th><th style="width:18%">จำนวนเงิน</th></tr></thead><tbody><tr class="item"><td class="center">1</td><td>${escapeHtml(order.job_type || row.job_type || '-')}: ${escapeHtml(order.job_name || '-')}</td><td class="center">${(row.order_item_count ?? 0).toLocaleString('th-TH')}</td><td class="center">${formatMoney(order.pricing.net_amount)}</td></tr><tr><td colspan="2" class="received">ได้รับสินค้าตามรายการข้างบนนี้ถูกต้องแล้ว</td><td class="summary">รวม</td><td class="summary">${formatMoney(order.pricing.net_amount)}</td></tr></tbody></table>
+            <section class="signatures"><div class="signature"><strong>ผู้รับสินค้า</strong><div class="sign-line"></div><div class="sign-date">วันที่ ................................</div></div><div class="signature"><strong>ผู้ส่งสินค้า</strong><div class="sign-line"></div><div class="sign-date">${escapeHtml(deliveryInfo?.sender_signature || '-')}<br>วันที่ ${escapeHtml(formatTableDate(row.due_date))}</div></div></section>
+        </main></body></html>`);
+        printWindow.document.close();
+        printWindow.focus();
+        window.setTimeout(() => printWindow.print(), 250);
+    };
+
     const handlePrintDocument = (orderRow?: OrderTableRow | null) => {
         const sourceOrder = orderRow?.details ? orderRow : selectedOrder;
 
@@ -1274,41 +1300,34 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
         ].filter((url): url is string => Boolean(url))));
         const customerName = order.customer.name || sourceOrder.customer_name || '-';
         const receiverName = sourceOrder.receiver_name || '-';
-        const splitSpecRows = (rows: Array<{ label: string; value: string }>) => {
-            const midpoint = Math.ceil(rows.length / 2);
-
-            return [rows.slice(0, midpoint), rows.slice(midpoint)] as const;
-        };
-
         const renderSpecTableRows = (rows: Array<{ label: string; value: string }>) => {
             if (rows.length === 0) {
-                return '<tr><td colspan="2" class="empty-state">—</td></tr>';
+                return '<tr><td colspan="4" class="empty-state">—</td></tr>';
             }
 
-            return rows.map((row) => `<tr><td class="spec-label">${escapeHtml(row.label)}</td><td class="spec-values">${escapeHtml(row.value || '-')}</td></tr>`).join('');
+            return Array.from({ length: Math.ceil(rows.length / 2) }, (_, index) => {
+                const first = rows[index * 2];
+                const second = rows[index * 2 + 1];
+
+                return `
+                    <tr class="spec-row">
+                        <td class="spec-label">${escapeHtml(first.label)}</td>
+                        <td class="spec-value">${escapeHtml(first.value || '-')}</td>
+                        <td class="spec-label">${second ? escapeHtml(second.label) : ''}</td>
+                        <td class="spec-value">${second ? escapeHtml(second.value || '-') : ''}</td>
+                    </tr>
+                `;
+            }).join('');
         };
 
-        const renderSpecSection = (title: string, rows: Array<{ label: string; value: string }>, width: '50%' | '100%') => {
-            const [firstColumnRows, secondColumnRows] = splitSpecRows(rows);
-
+        const renderSpecSection = (title: string, rows: Array<{ label: string; value: string }>) => {
             return `
-                <td style="width: ${width};">
-                    <div class="section-title">${title}</div>
-                    <table class="spec-split">
-                        <tr>
-                            <td class="spec-col">
-                                <table class="spec-table">
-                                    ${renderSpecTableRows(firstColumnRows)}
-                                </table>
-                            </td>
-                            <td class="spec-col">
-                                <table class="spec-table">
-                                    ${renderSpecTableRows(secondColumnRows)}
-                                </table>
-                            </td>
-                        </tr>
+                <div class="spec-section">
+                    <div class="table-title">${title}</div>
+                    <table class="spec-table">
+                        <tbody>${renderSpecTableRows(rows)}</tbody>
                     </table>
-                </td>
+                </div>
             `;
         };
         const personalizationPrintRows = sourcePersonalizationRows.map((row) => ({
@@ -1349,9 +1368,7 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                 </tr>`).join('')
             : `<tr><td colspan="${isIndividualPrint ? '6' : '4'}" class="empty-state">ไม่มีข้อมูลไซซ์</td></tr>`;
 
-        const specColumnsMarkup = pantsRows.length > 0
-            ? `${renderSpecSection('สเปกเสื้อ', shirtRows, '50%')}${renderSpecSection('สเปกกางเกง', pantsRows, '50%')}`
-            : renderSpecSection('สเปกเสื้อ', shirtRows, '100%');
+        const specTablesMarkup = `<div class="spec-sections${pantsRows.length > 0 ? ' has-two' : ''}">${renderSpecSection('สเปกเสื้อ', shirtRows)}${pantsRows.length > 0 ? renderSpecSection('สเปกกางเกง', pantsRows) : ''}</div>`;
         const totalQuantity = (isIndividualPrint ? personalizationPrintRows : sizeRows).reduce((sum, row) => sum + Number(row.quantity || 0), 0);
         const totalAmount = (isIndividualPrint ? personalizationPrintRows : sizeRows).reduce((sum, row) => sum + Number(row.total_price || 0), 0);
         const sizeTableTitle = isIndividualPrint ? 'รายละเอียดรายตัว (Form 2)' : 'ขนาดผู้ใหญ่ มัธยมต้น/มัธยมปลาย';
@@ -1413,12 +1430,12 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                         .job-hero-value.is-date { color: #E21E26; }
                         .header-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
                         .header-table td { border: 1px solid #000000; vertical-align: middle; padding: 4px; }
-                        .logo-cell { width: 28%; text-align: center; }
-                        .logo-cell img { max-height: 36px; width: auto; }
-                        .company-cell { width: 46%; text-align: center; }
+                        .logo-cell { width: 36%; text-align: center; }
+                        .logo-cell img { max-height: 78px; width: auto; }
+                        .company-cell { width: 40%; text-align: center; }
                         .company-title { font-size: 20px; font-weight: 800; color: #E21E26; line-height: 1; }
                         .subtitle { font-size: 10px; color: #374151; margin-top: 1px; line-height: 1.15; }
-                        .branch-cell { width: 26%; font-size: 11px; line-height: 1.25; }
+                        .branch-cell { width: 24%; font-size: 11px; line-height: 1.25; }
                         .branch-cell .branch-label { color: #E21E26; font-weight: 700; }
                         .barcode-wrap { margin-top: 3px; border: 1px solid #000000; padding: 2px; text-align: center; }
                         .barcode-wrap svg { display: block; width: 100%; height: 12mm; }
@@ -1437,13 +1454,17 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                         .detail-list .green { color: #16a34a; font-weight: 700; }
                         .detail-list .blue { color: #174395; font-weight: 700; }
                         .detail-list .balance { color: #E21E26; font-weight: 800; font-size: 12px; }
-                        .spec-split { width: 100%; border-collapse: separate; border-spacing: 3px 0; table-layout: fixed; }
-                        .spec-col { width: 50%; padding: 0; vertical-align: top; }
-                        .spec-table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-                        .spec-table td { border: 1px solid #000000; padding: 2px 3px; vertical-align: top; line-height: 1.1; }
-                        .spec-label { font-weight: 700; width: 36%; }
-                        .spec-values { width: 64%; }
-                        .table-title { background: #174395; color: #ffffff; font-weight: 700; text-align: center; padding: 4px; font-size: 11px; margin-top: 4px; }
+                        .spec-sections { margin-top: 4px; display: grid; grid-template-columns: 1fr; gap: 4px; }
+                        .spec-section { min-width: 0; }
+                        .spec-table { width: 100%; border-collapse: collapse; margin-top: 2px; font-size: 12px; table-layout: fixed; }
+                        .spec-table td { border: 1px solid #000000; padding: 2px 3px; vertical-align: middle; line-height: 1.1; }
+                        .spec-row td { text-align: center; }
+                        .spec-label { width: 18%; background: #e0f2fe; font-weight: 700; white-space: nowrap; }
+                        .spec-value { width: 32%; background: #ffffff; }
+                        .table-title { background: #174395; color: #ffffff; font-weight: 700; text-align: center; padding: 3px; font-size: 12px; margin-top: 0; }
+                        @media print {
+                            .spec-sections.has-two { grid-template-columns: 1fr 1fr; gap: 5px; }
+                        }
                         .size-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 11px; }
                         .size-table th, .size-table td { border: 1px solid #000000; padding: 3px 4px; text-align: center; }
                         .size-table th { background: #e0f2fe; font-weight: 700; }
@@ -1535,11 +1556,7 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                             </tr>
                         </table>
 
-                        <table class="detail-grid" style="margin-top: 4px;">
-                            <tr>
-                                ${specColumnsMarkup}
-                            </tr>
-                        </table>
+                        ${specTablesMarkup}
 
                         <div class="table-title">${sizeTableTitle}</div>
                         <table class="size-table">
@@ -1615,22 +1632,6 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                                         <FilePlus2 className="size-4" />
                                         + เปิดบิลใหม่
                                     </Button>
-                                    <div className="inline-flex flex-wrap gap-2 rounded-2xl p-1">
-                                        <Button
-                                            type="button"
-                                            className="h-9 rounded-lg border border-gray-100 bg-white px-4 text-xs font-semibold text-slate-500 shadow-sm transition-colors duration-150 ease-out hover:bg-slate-50 hover:text-slate-900"
-                                            onClick={() => router.visit('/orders/create')}
-                                        >
-                                            เปิดบิลงานเพิ่ม
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            className="h-9 rounded-lg border border-gray-100 bg-white px-4 text-xs font-semibold text-slate-500 shadow-sm transition-colors duration-150 ease-out hover:bg-slate-50 hover:text-slate-900"
-                                            onClick={() => router.visit('/orders')}
-                                        >
-                                            เปิดบิลงานเก่า
-                                        </Button>
-                                    </div>
                                 </div>
                             </div>
 
@@ -1641,19 +1642,6 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                                     </SelectTrigger>
                                     <SelectContent>
                                         {branchOptions.map((option) => (
-                                            <SelectItem key={option.value} value={option.value}>
-                                                {option.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-
-                                <Select value={department} onValueChange={(value: DepartmentFilter) => setDepartment(value)}>
-                                    <SelectTrigger className="h-8 w-full border-gray-100 bg-slate-50 text-xs text-slate-500 sm:w-[230px]">
-                                        <span className="truncate">ห้อง: {selectedDepartmentLabel}</span>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {departmentOptions.map((option) => (
                                             <SelectItem key={option.value} value={option.value}>
                                                 {option.label}
                                             </SelectItem>
@@ -1777,7 +1765,7 @@ export default function Counter({ pendingInvitations = [], branches, floorStats,
                             onPageChange={handlePageChange}
                             onOpenDetail={setSelectedOrder}
                             onOpenTimeline={setTimelineOrder}
-                            onOpenPdf={handlePrintDocument}
+                            onOpenPdf={handlePrintDeliveryNote}
                             isAdmin={isAdmin}
                             onDuplicate={handleDuplicateOrder}
                             onDelete={setPendingDelete}

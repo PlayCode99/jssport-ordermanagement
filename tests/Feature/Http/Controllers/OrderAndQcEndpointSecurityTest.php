@@ -16,6 +16,7 @@ use App\Models\OrderRouting;
 use App\Models\OrderStatusHistory;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Routing\Router;
 use Tests\TestCase;
+use Illuminate\Support\Facades\Storage;
 
 class OrderAndQcEndpointSecurityTest extends TestCase
 {
@@ -32,7 +34,24 @@ class OrderAndQcEndpointSecurityTest extends TestCase
     {
         parent::setUp();
 
+        // Artwork uploads would otherwise land in the real storage directory and
+        // pile up as orphaned files every time the suite runs.
+        Storage::fake('public');
+
+        // These cases pin their billing dates to fixed July 2026 values. Real
+        // time has since moved past them, which would trip the "a new bill may
+        // not be opened in the past" rule for reasons that have nothing to do
+        // with what each case is actually asserting — so pin the clock too.
+        Carbon::setTestNow(Carbon::parse('2026-07-11 08:00:00'));
+
         $this->registerFallbackTestRoutes();
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_order_store_endpoint_enforces_zero_trust_math_via_http(): void
