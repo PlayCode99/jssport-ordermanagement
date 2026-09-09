@@ -22,6 +22,9 @@ class EmbroideryTeam extends Model
         ];
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function orderRoutings(): HasMany
     {
         return $this->hasMany(OrderRouting::class, 'embroidery_team_id');

@@ -11,7 +11,13 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import type { Auth } from '@/types';
 
 type CatalogRow = {
@@ -52,18 +58,24 @@ export default function ShirtCatalogPage() {
     const { auth, catalog, rows: initialRows } = usePage<PageProps>().props;
     const dataLabel = catalog.dataLabel ?? 'Shirt Data';
     const parentTitle = catalog.parentTitle ?? 'แบบเสื้อ';
-    const parentPath = catalog.parentPath ?? '/settings/data/shirts';
     const pagePrefix = catalog.pagePrefix ?? parentTitle;
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [newName, setNewName] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | 'active' | 'inactive'
+    >('all');
     const [editId, setEditId] = useState<number | null>(null);
     const [editValue, setEditValue] = useState('');
     const [rows, setRows] = useState<CatalogRow[]>(initialRows);
 
     const sortedRows = useMemo(
-        () => [...rows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        () =>
+            [...rows].sort(
+                (a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime(),
+            ),
         [rows],
     );
 
@@ -92,7 +104,10 @@ export default function ShirtCatalogPage() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '',
+                'X-CSRF-TOKEN':
+                    document
+                        .querySelector('meta[name="csrf-token"]')
+                        ?.getAttribute('content') ?? '',
                 Accept: 'application/json',
             },
             body: JSON.stringify({
@@ -106,6 +121,7 @@ export default function ShirtCatalogPage() {
         }
 
         const payload = (await response.json()) as { rows?: CatalogRow[] };
+
         if (Array.isArray(payload.rows)) {
             setRows(payload.rows);
         }
@@ -113,11 +129,13 @@ export default function ShirtCatalogPage() {
 
     const addRow = async () => {
         const name = newName.trim();
+
         if (name.length === 0) {
             return;
         }
 
-        const nextRowId = rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
+        const nextRowId =
+            rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
 
         const nextRow: CatalogRow = {
             id: nextRowId,
@@ -133,7 +151,11 @@ export default function ShirtCatalogPage() {
     };
 
     const toggleActive = async (id: number) => {
-        await saveRows(rows.map((row) => (row.id === id ? { ...row, active: !row.active } : row)));
+        await saveRows(
+            rows.map((row) =>
+                row.id === id ? { ...row, active: !row.active } : row,
+            ),
+        );
     };
 
     const startEdit = (row: CatalogRow) => {
@@ -143,17 +165,21 @@ export default function ShirtCatalogPage() {
 
     const saveEdit = async (id: number) => {
         const name = editValue.trim();
+
         if (name.length === 0) {
             return;
         }
 
-        await saveRows(rows.map((row) => (row.id === id ? { ...row, name } : row)));
+        await saveRows(
+            rows.map((row) => (row.id === id ? { ...row, name } : row)),
+        );
         setEditId(null);
         setEditValue('');
     };
 
     const deleteRow = async (id: number) => {
         const ok = window.confirm(`ยืนยันการลบ${catalog.title}นี้ใช่หรือไม่`);
+
         if (!ok) {
             return;
         }
@@ -169,13 +195,23 @@ export default function ShirtCatalogPage() {
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">{dataLabel}</p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">{pagePrefix}: {catalog.title}</h1>
-                            <p className="mt-2 text-sm text-slate-600">เพิ่มและจัดการ{catalog.title} พร้อมบันทึกผู้สร้างจากบัญชีที่กำลังใช้งาน</p>
+                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                {dataLabel}
+                            </p>
+                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                {pagePrefix}: {catalog.title}
+                            </h1>
+                            <p className="mt-2 text-sm text-slate-600">
+                                เพิ่มและจัดการ{catalog.title}{' '}
+                                พร้อมบันทึกผู้สร้างจากบัญชีที่กำลังใช้งาน
+                            </p>
                         </div>
 
                         <div className="flex w-full justify-start xl:w-auto xl:justify-end">
-                            <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
+                            <Button
+                                onClick={() => setIsCreateModalOpen(true)}
+                                className="gap-2"
+                            >
                                 <Plus className="size-4" />
                                 เพิ่ม{catalog.title}
                             </Button>
@@ -186,8 +222,12 @@ export default function ShirtCatalogPage() {
                 <section className="flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
                         <div>
-                            <h2 className="text-base font-semibold text-slate-900">รายการ{catalog.title}</h2>
-                            <p className="text-sm text-slate-500">ทั้งหมด {filteredRows.length} รายการ</p>
+                            <h2 className="text-base font-semibold text-slate-900">
+                                รายการ{catalog.title}
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                ทั้งหมด {filteredRows.length} รายการ
+                            </p>
                         </div>
 
                         <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
@@ -195,20 +235,33 @@ export default function ShirtCatalogPage() {
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    onChange={(event) =>
+                                        setSearchTerm(event.target.value)
+                                    }
                                     placeholder={`ค้นหาชื่อ${catalog.title}หรือผู้สร้าง`}
                                     className="bg-white pl-9"
                                 />
                             </div>
 
-                            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(
+                                    value: 'all' | 'active' | 'inactive',
+                                ) => setStatusFilter(value)}
+                            >
                                 <SelectTrigger className="w-full bg-white md:w-[180px]">
                                     <SelectValue placeholder="สถานะ" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกสถานะ</SelectItem>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกสถานะ
+                                    </SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -218,32 +271,61 @@ export default function ShirtCatalogPage() {
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">วันที่สร้าง</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ชื่อ{catalog.title}</th>
-                                    <th className="w-[180px] px-4 py-3 text-left font-semibold text-slate-700">ผู้สร้าง</th>
-                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">Active</th>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">จัดการ</th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        วันที่สร้าง
+                                    </th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                                        ชื่อ{catalog.title}
+                                    </th>
+                                    <th className="w-[180px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        ผู้สร้าง
+                                    </th>
+                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        Active
+                                    </th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        จัดการ
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRows.length === 0 ? (
                                     <tr>
-                                        <td className="px-4 py-5 text-center text-slate-500" colSpan={5}>
-                                            ไม่พบข้อมูล{catalog.title}ที่ตรงกับเงื่อนไข
+                                        <td
+                                            className="px-4 py-5 text-center text-slate-500"
+                                            colSpan={5}
+                                        >
+                                            ไม่พบข้อมูล{catalog.title}
+                                            ที่ตรงกับเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRows.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-3 align-top text-slate-700">{formatDate(row.createdAt)}</td>
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-50/60"
+                                        >
+                                            <td className="px-4 py-3 align-top text-slate-700">
+                                                {formatDate(row.createdAt)}
+                                            </td>
                                             <td className="px-4 py-3 text-slate-800">
                                                 {editId === row.id ? (
                                                     <div className="flex items-center gap-2">
                                                         <Input
                                                             value={editValue}
-                                                            onChange={(event) => setEditValue(event.target.value)}
+                                                            onChange={(event) =>
+                                                                setEditValue(
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
                                                         />
-                                                        <Button size="sm" onClick={() => saveEdit(row.id)}>
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                saveEdit(row.id)
+                                                            }
+                                                        >
                                                             บันทึก
                                                         </Button>
                                                     </div>
@@ -251,26 +333,49 @@ export default function ShirtCatalogPage() {
                                                     row.name
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 align-top text-slate-700">{row.createdBy}</td>
+                                            <td className="px-4 py-3 align-top text-slate-700">
+                                                {row.createdBy}
+                                            </td>
                                             <td className="px-4 py-3 align-top">
                                                 <Button
-                                                    variant={row.active ? 'default' : 'outline'}
+                                                    variant={
+                                                        row.active
+                                                            ? 'default'
+                                                            : 'outline'
+                                                    }
                                                     size="sm"
-                                                    onClick={() => toggleActive(row.id)}
+                                                    onClick={() =>
+                                                        toggleActive(row.id)
+                                                    }
                                                     className="gap-1"
                                                 >
                                                     <Power className="size-4" />
-                                                    {row.active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                                                    {row.active
+                                                        ? 'เปิดใช้งาน'
+                                                        : 'ปิดใช้งาน'}
                                                 </Button>
                                             </td>
                                             <td className="px-4 py-3 align-top">
                                                 <div className="flex items-center gap-2">
                                                     {editId === row.id ? (
-                                                        <Button variant="ghost" size="sm" onClick={() => setEditId(null)}>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                setEditId(null)
+                                                            }
+                                                        >
                                                             ยกเลิก
                                                         </Button>
                                                     ) : (
-                                                        <Button variant="outline" size="sm" onClick={() => startEdit(row)} className="gap-1">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                startEdit(row)
+                                                            }
+                                                            className="gap-1"
+                                                        >
                                                             <Pencil className="size-4" />
                                                             แก้ไข
                                                         </Button>
@@ -278,7 +383,9 @@ export default function ShirtCatalogPage() {
                                                     <Button
                                                         variant="destructive"
                                                         size="sm"
-                                                        onClick={() => deleteRow(row.id)}
+                                                        onClick={() =>
+                                                            deleteRow(row.id)
+                                                        }
                                                         className="gap-1"
                                                     >
                                                         <Trash2 className="size-4" />
@@ -295,15 +402,24 @@ export default function ShirtCatalogPage() {
                 </section>
             </div>
 
-            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+            <Dialog
+                open={isCreateModalOpen}
+                onOpenChange={setIsCreateModalOpen}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>เพิ่มข้อมูล{catalog.title}</DialogTitle>
-                        <DialogDescription>กรอกชื่อ{catalog.title}ใหม่ ระบบจะบันทึกผู้สร้างจากบัญชีที่ล็อกอินอยู่โดยอัตโนมัติ</DialogDescription>
+                        <DialogDescription>
+                            กรอกชื่อ{catalog.title}ใหม่
+                            ระบบจะบันทึกผู้สร้างจากบัญชีที่ล็อกอินอยู่โดยอัตโนมัติ
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-2">
-                        <label htmlFor="catalog-name" className="text-sm font-medium text-slate-700">
+                        <label
+                            htmlFor="catalog-name"
+                            className="text-sm font-medium text-slate-700"
+                        >
                             ชื่อ{catalog.title}
                         </label>
                         <Input
@@ -321,7 +437,10 @@ export default function ShirtCatalogPage() {
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsCreateModalOpen(false)}
+                        >
                             ยกเลิก
                         </Button>
                         <Button onClick={addRow}>บันทึก</Button>
@@ -332,7 +451,10 @@ export default function ShirtCatalogPage() {
     );
 }
 
-ShirtCatalogPage.layout = (props: { currentTeam?: { slug: string } | null; catalog: CatalogConfig }) => ({
+ShirtCatalogPage.layout = (props: {
+    currentTeam?: { slug: string } | null;
+    catalog: CatalogConfig;
+}) => ({
     breadcrumbs: [
         {
             title: 'เคาว์เตอร์',

@@ -33,6 +33,7 @@ import {
 import { UserMenuContent } from '@/components/user-menu-content';
 import { useCurrentUrl } from '@/hooks/use-current-url';
 import { useInitials } from '@/hooks/use-initials';
+import { resolveLogoHref } from '@/lib/permissionHelpers';
 import { cn, toUrl } from '@/lib/utils';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
@@ -62,6 +63,13 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
     const getInitials = useInitials();
     const { isCurrentUrl, whenCurrentUrl } = useCurrentUrl();
     const mainUrl = currentTeam ? `/${currentTeam.slug}/index` : '/';
+    // Same rule as the sidebar: the logo goes to the page this account lands on.
+    const logoHref = resolveLogoHref({
+        canOpenCounter: false,
+        counterUrl: mainUrl,
+        landingPath: (page.props as { landingPath?: string | null })
+            .landingPath,
+    });
 
     const mainNavItems: NavItem[] = [
         {
@@ -137,7 +145,7 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                     </div>
 
                     <Link
-                        href={mainUrl}
+                        href={logoHref}
                         prefetch
                         className="flex items-center space-x-2"
                     >

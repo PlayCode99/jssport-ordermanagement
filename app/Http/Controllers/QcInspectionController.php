@@ -7,8 +7,8 @@ namespace App\Http\Controllers;
 use App\Domain\Production\Actions\ProcessQcInspectionAction;
 use App\Http\Requests\StoreQcInspectionRequest;
 use App\Models\Order;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 
 class QcInspectionController extends Controller
 {

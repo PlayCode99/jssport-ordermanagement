@@ -22,6 +22,9 @@ class CuttingTeam extends Model
         ];
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function orderRoutings(): HasMany
     {
         return $this->hasMany(OrderRouting::class, 'cutting_team_id');

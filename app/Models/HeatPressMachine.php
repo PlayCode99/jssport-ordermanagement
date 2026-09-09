@@ -22,6 +22,9 @@ class HeatPressMachine extends Model
         ];
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function orderRoutings(): HasMany
     {
         return $this->hasMany(OrderRouting::class, 'heat_press_machine_id');

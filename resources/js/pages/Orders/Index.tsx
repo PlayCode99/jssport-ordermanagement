@@ -5,7 +5,13 @@ import { useState } from 'react';
 import { OrderVirtualizedTable } from '@/components/domain/orders/OrderVirtualizedTable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import type { Order, OrderStatus } from '@/types/models';
 
 type CursorPagination<T> = {
@@ -40,13 +46,17 @@ export default function OrdersIndex({ orders, filters }: Props) {
     const [status, setStatus] = useState(filters.status || 'all');
 
     const applyFilters = (nextSearch = search, nextStatus = status) => {
-        router.get('/orders', {
-            search: nextSearch || undefined,
-            status: nextStatus === 'all' ? undefined : nextStatus,
-        }, {
-            preserveState: true,
-            replace: true,
-        });
+        router.get(
+            '/orders',
+            {
+                search: nextSearch || undefined,
+                status: nextStatus === 'all' ? undefined : nextStatus,
+            },
+            {
+                preserveState: true,
+                replace: true,
+            },
+        );
     };
 
     return (
@@ -55,8 +65,13 @@ export default function OrdersIndex({ orders, filters }: Props) {
 
             <main className="mx-auto w-full max-w-[1600px] space-y-4 px-4 py-5 lg:px-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h1 className="text-xl font-bold text-slate-900">รายการออเดอร์</h1>
-                    <Button type="button" onClick={() => router.visit('/orders/create')}>
+                    <h1 className="text-xl font-bold text-slate-900">
+                        รายการออเดอร์
+                    </h1>
+                    <Button
+                        type="button"
+                        onClick={() => router.visit('/orders/create')}
+                    >
                         <FilePlus2 className="size-4" />
                         เปิดออร์เดอร์ใหม่
                     </Button>
@@ -68,15 +83,23 @@ export default function OrdersIndex({ orders, filters }: Props) {
                         <div className="flex gap-2">
                             <Input
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) =>
+                                    setSearch(event.target.value)
+                                }
                                 onKeyDown={(event) => {
                                     if (event.key === 'Enter') {
                                         applyFilters();
                                     }
                                 }}
-                                placeholder="เลขออเดอร์, ชื่องาน, ลูกค้า"
+                                placeholder="เลขออเดอร์, ชื่อหน่วยงาน, ชื่องาน, ลูกค้า"
                             />
-                            <Button type="button" size="icon" variant="outline" onClick={() => applyFilters()} title="ค้นหา">
+                            <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                onClick={() => applyFilters()}
+                                title="ค้นหา"
+                            >
                                 <Search className="size-4" />
                             </Button>
                         </div>
@@ -97,7 +120,12 @@ export default function OrdersIndex({ orders, filters }: Props) {
                             <SelectContent>
                                 <SelectItem value="all">ทุกสถานะ</SelectItem>
                                 {orderStatuses.map((item) => (
-                                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                                    <SelectItem
+                                        key={item.value}
+                                        value={item.value}
+                                    >
+                                        {item.label}
+                                    </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -106,14 +134,32 @@ export default function OrdersIndex({ orders, filters }: Props) {
 
                 <OrderVirtualizedTable
                     orders={orders.data}
-                    onRowClick={(order) => router.visit(`/orders/${order.id}/edit`)}
+                    onRowClick={(order) =>
+                        router.visit(`/orders/${order.id}/edit`)
+                    }
                 />
 
                 <div className="flex justify-end gap-2">
-                    <Button type="button" variant="outline" disabled={!orders.prev_page_url} onClick={() => orders.prev_page_url && router.visit(orders.prev_page_url)}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!orders.prev_page_url}
+                        onClick={() =>
+                            orders.prev_page_url &&
+                            router.visit(orders.prev_page_url)
+                        }
+                    >
                         ก่อนหน้า
                     </Button>
-                    <Button type="button" variant="outline" disabled={!orders.next_page_url} onClick={() => orders.next_page_url && router.visit(orders.next_page_url)}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!orders.next_page_url}
+                        onClick={() =>
+                            orders.next_page_url &&
+                            router.visit(orders.next_page_url)
+                        }
+                    >
                         ถัดไป
                     </Button>
                 </div>

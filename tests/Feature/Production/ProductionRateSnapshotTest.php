@@ -6,14 +6,15 @@ use App\Domain\OrderManagement\Actions\CreateOrderAction;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\GarmentType;
 use App\Models\Order;
 use App\Models\User;
+use App\Support\Production\ProductionRateSnapshotBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 /**
@@ -55,7 +56,7 @@ class ProductionRateSnapshotTest extends TestCase
         $customer = Customer::firstOrCreate(['customer_code' => 'CUS-RATE'], ['customer_name' => 'Rate']);
         $branch = Branch::firstOrCreate(['branch_code' => 'BR-RATE'], ['branch_name' => 'Rate']);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'rate probe',
@@ -84,11 +85,11 @@ class ProductionRateSnapshotTest extends TestCase
 
     private function sheetTotal(Order $order): float
     {
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $method = (new \ReflectionClass($controller))->getMethod('buildProductionPricingSummary');
         $method->setAccessible(true);
 
-        $types = app(\App\Support\Production\ProductionRateSnapshotBuilder::class)->activeGarmentTypes();
+        $types = app(ProductionRateSnapshotBuilder::class)->activeGarmentTypes();
 
         return (float) $method->invoke($controller, $order->fresh(['items', 'specification']), $types)['grand_total'];
     }
@@ -159,10 +160,10 @@ class ProductionRateSnapshotTest extends TestCase
 
         GarmentType::query()->whereKey($this->shirtType->id)->update(['name' => 'เสื้อโปโล (แก้ชื่อ)']);
 
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $method = (new \ReflectionClass($controller))->getMethod('buildProductionPricingSummary');
         $method->setAccessible(true);
-        $types = app(\App\Support\Production\ProductionRateSnapshotBuilder::class)->activeGarmentTypes();
+        $types = app(ProductionRateSnapshotBuilder::class)->activeGarmentTypes();
 
         $summary = $method->invoke($controller, $order->fresh(['items', 'specification']), $types);
 

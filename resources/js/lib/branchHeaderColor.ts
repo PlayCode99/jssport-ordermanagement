@@ -35,7 +35,9 @@ export function normalizeBranchHeaderColor(color: unknown): string {
     return isHexColor(trimmed) ? trimmed : DEFAULT_BRANCH_HEADER_COLOR;
 }
 
-export function loadBranchHeaderColorMap(storageKey = 'jssport.data-branches'): Map<string, string> {
+export function loadBranchHeaderColorMap(
+    storageKey = 'jssport.data-branches',
+): Map<string, string> {
     if (typeof window === 'undefined') {
         return new Map<string, string>();
     }
@@ -56,7 +58,10 @@ export function loadBranchHeaderColorMap(storageKey = 'jssport.data-branches'): 
         const map = new Map<string, string>();
 
         parsed.forEach((item) => {
-            const branchName = typeof item.branchName === 'string' ? item.branchName.trim() : '';
+            const branchName =
+                typeof item.branchName === 'string'
+                    ? item.branchName.trim()
+                    : '';
 
             if (!branchName) {
                 return;
@@ -83,5 +88,8 @@ export function resolveBranchHeaderColor(
 
     const map = loadBranchHeaderColorMap();
 
-    return map.get(normalizedBranchName) ?? normalizeBranchHeaderColor(fallbackColor);
+    return (
+        map.get(normalizedBranchName) ??
+        normalizeBranchHeaderColor(fallbackColor)
+    );
 }

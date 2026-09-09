@@ -9,7 +9,10 @@ const { mockRouterGet, mockRouterReload } = vi.hoisted(() => ({
     mockRouterReload: vi.fn(),
 }));
 
-const mockPage = vi.hoisted(() => ({ props: {} as Record<string, unknown>, url: '/production/embroidery' }));
+const mockPage = vi.hoisted(() => ({
+    props: {} as Record<string, unknown>,
+    url: '/production/embroidery',
+}));
 
 vi.mock('@inertiajs/react', () => ({
     Head: () => null,
@@ -43,10 +46,22 @@ const makeOrder = (over: Record<string, unknown>): Order =>
         branch: { branch_name: 'สาขา 1' },
         customer: { customer_name: 'ลูกค้า' },
         creator_user: { name: 'ผู้สร้าง' },
-        items: [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 5 }],
+        items: [
+            {
+                item_type: 'shirt',
+                size_group: 'adults',
+                size_label: 'M',
+                quantity: 5,
+            },
+        ],
         receipts: [],
         status_histories: [],
-        specification: { screen_print_detail: JSON.stringify({ schema: 'spec-v2', mode: 'matrix' }) },
+        specification: {
+            screen_print_detail: JSON.stringify({
+                schema: 'spec-v2',
+                mode: 'matrix',
+            }),
+        },
         routings: [
             {
                 id: 7001,
@@ -89,7 +104,11 @@ describe('shirt and pants artwork on the print form', () => {
         openDetail(
             makeOrder({
                 shirt_artwork_url: '/storage/shirt-1.webp',
-                shirt_artwork_urls: ['/storage/shirt-1.webp', '/storage/shirt-2.webp', '/storage/shirt-3.webp'],
+                shirt_artwork_urls: [
+                    '/storage/shirt-1.webp',
+                    '/storage/shirt-2.webp',
+                    '/storage/shirt-3.webp',
+                ],
             }),
         );
 
@@ -98,15 +117,27 @@ describe('shirt and pants artwork on the print form', () => {
         expect(images).toContain('/storage/shirt-2.webp');
         expect(images).toContain('/storage/shirt-3.webp');
         // 3 attached -> 3 printed.
-        expect(images.filter((src) => src?.includes('/storage/shirt-')).length).toBe(3);
+        expect(
+            images.filter((src) => src?.includes('/storage/shirt-')).length,
+        ).toBe(3);
     });
 
     it('keeps pants artwork on the pants sheet and shirt artwork on the shirt sheet', () => {
         openDetail(
             makeOrder({
                 items: [
-                    { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 5 },
-                    { item_type: 'pants', size_group: 'adults', size_label: 'M', quantity: 5 },
+                    {
+                        item_type: 'shirt',
+                        size_group: 'adults',
+                        size_label: 'M',
+                        quantity: 5,
+                    },
+                    {
+                        item_type: 'pants',
+                        size_group: 'adults',
+                        size_label: 'M',
+                        quantity: 5,
+                    },
                 ],
                 specification: {
                     screen_print_detail: JSON.stringify({
@@ -116,7 +147,10 @@ describe('shirt and pants artwork on the print form', () => {
                         pants_specs: { pattern_id: '2' },
                     }),
                 },
-                shirt_artwork_urls: ['/storage/shirt-a.webp', '/storage/shirt-b.webp'],
+                shirt_artwork_urls: [
+                    '/storage/shirt-a.webp',
+                    '/storage/shirt-b.webp',
+                ],
                 pants_artwork_urls: ['/storage/pants-a.webp'],
             }),
         );
@@ -128,8 +162,12 @@ describe('shirt and pants artwork on the print form', () => {
                 .filter((src) => !src?.includes('/images/logo/'));
         const all = pages.map(srcsOn);
 
-        const shirtPage = all.find((srcs) => srcs.some((s) => s?.includes('shirt-')));
-        const pantsPage = all.find((srcs) => srcs.some((s) => s?.includes('pants-')));
+        const shirtPage = all.find((srcs) =>
+            srcs.some((s) => s?.includes('shirt-')),
+        );
+        const pantsPage = all.find((srcs) =>
+            srcs.some((s) => s?.includes('pants-')),
+        );
 
         expect(shirtPage).toHaveLength(2);
         expect(pantsPage).toHaveLength(1);
@@ -151,7 +189,9 @@ describe('shirt and pants artwork on the print form', () => {
     it('still shows the empty placeholder when nothing is attached at all', () => {
         openDetail(makeOrder({ shirt_artwork_urls: [] }));
 
-        expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThan(
+            0,
+        );
     });
 
     it('puts the company logo on every printed sheet', () => {
@@ -161,8 +201,8 @@ describe('shirt and pants artwork on the print form', () => {
         expect(pages.length).toBeGreaterThan(0);
 
         pages.forEach((page) => {
-            const logos = Array.from(page.querySelectorAll('img')).filter((img) =>
-                img.getAttribute('src')?.includes('/images/logo/'),
+            const logos = Array.from(page.querySelectorAll('img')).filter(
+                (img) => img.getAttribute('src')?.includes('/images/logo/'),
             );
 
             expect(logos.length).toBe(1);
@@ -183,8 +223,18 @@ describe('shirt and pants artwork on the print form', () => {
         openDetail(
             makeOrder({
                 items: [
-                    { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 7 },
-                    { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 3 },
+                    {
+                        item_type: 'shirt',
+                        size_group: 'adults',
+                        size_label: 'M',
+                        quantity: 7,
+                    },
+                    {
+                        item_type: 'shirt',
+                        size_group: 'adults',
+                        size_label: 'L',
+                        quantity: 3,
+                    },
                 ],
             }),
         );
@@ -199,7 +249,9 @@ describe('shirt and pants artwork on the print form', () => {
         let written = '';
         const fakeDoc = {
             open: vi.fn(),
-            write: (html: string) => { written += html; },
+            write: (html: string) => {
+                written += html;
+            },
             close: vi.fn(),
             images: [],
             querySelectorAll: () => [],

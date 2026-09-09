@@ -1,4 +1,5 @@
-import { ProductionBoardPage, type ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
+import { ProductionBoardPage } from '@/components/domain/production/ProductionBoardPage';
+import type { ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
 import type { CuttingTeam, EmbroideryTeam, Order } from '@/types/models';
 
 type EmbroideryPageProps = {
@@ -15,7 +16,13 @@ type EmbroideryPageProps = {
     cuttingTeams?: CuttingTeam[];
     embroideryTeams?: EmbroideryTeam[];
     fabricLookup?: Record<string, string>;
-    specSectionsMap?: Record<string, { shirt: Array<{ label: string; value: string }>; pants: Array<{ label: string; value: string }> }>;
+    specSectionsMap?: Record<
+        string,
+        {
+            shirt: Array<{ label: string; value: string }>;
+            pants: Array<{ label: string; value: string }>;
+        }
+    >;
     initialDepartmentFilter?: ProductionDepartmentFilter;
     showDepartmentFilter?: boolean;
     pageTitle?: string;

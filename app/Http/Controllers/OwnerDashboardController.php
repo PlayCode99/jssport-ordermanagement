@@ -7,9 +7,11 @@ namespace App\Http\Controllers;
 use App\Enums\AccessRole;
 use App\Enums\GarmentCategory;
 use App\Enums\OrderStatus;
-use App\Enums\RoutingStatus;
+use App\Models\Branch;
+use App\Models\CatalogItem;
 use App\Models\GarmentType;
 use App\Models\Order;
+use App\Support\Orders\DeliveryCalendarBuilder;
 use App\Support\Orders\OrderCompletion;
 use App\Support\Production\ProductionCostCalculation;
 use App\Support\UserAccessControl;
@@ -28,23 +30,6 @@ use Inertia\Response;
 class OwnerDashboardController extends Controller
 {
     use ProductionCostCalculation;
-
-    /**
-     * Statuses that count as "still being worked on". Everything except the two
-     * terminal ones, matching how the counter treats an order as open.
-     *
-     * @var array<int, string>
-     */
-    private const IN_PROGRESS_STATUSES = [
-        'draft',
-        'designing',
-        'waiting_customer_confirm',
-        'confirmed',
-        'in_production',
-        'qc_checking',
-        'qc_rejected',
-        'shipping',
-    ];
 
     public function __invoke(Request $request): Response
     {
@@ -131,7 +116,7 @@ class OwnerDashboardController extends Controller
      */
     private function filterOptions($actor): array
     {
-        $branchesQuery = \App\Models\Branch::query()->select(['id', 'branch_name'])->orderBy('branch_name');
+        $branchesQuery = Branch::query()->select(['id', 'branch_name'])->orderBy('branch_name');
 
         if ($actor->branch_id !== null) {
             UserAccessControl::applyBranchScope($branchesQuery, $actor, 'id');
@@ -319,7 +304,7 @@ class OwnerDashboardController extends Controller
      */
     private function masterJobTypes(): Collection
     {
-        $catalog = \App\Models\CatalogItem::query()
+        $catalog = CatalogItem::query()
             ->where('storage_key', ShirtCatalogController::JOB_TYPES_STORAGE_KEY)
             ->where('active', true)
             ->orderBy('item_id')
@@ -428,44 +413,6 @@ class OwnerDashboardController extends Controller
      * still has it, or that it is finished. Read from the routings themselves so
      * it says the same thing the production boards do.
      */
-    private function deliveryStatusLabel(Order $order): string
-    {
-        if (OrderCompletion::isClosed($order)) {
-            return 'ปิดงาน';
-        }
-
-        $active = $order->routings
-            ->filter(fn ($routing): bool => (bool) $routing->is_required)
-            ->sortBy('id')
-            ->first(fn ($routing): bool => in_array(
-                $routing->status?->value,
-                [RoutingStatus::Pending->value, RoutingStatus::InProgress->value, RoutingStatus::Rejected->value],
-                true,
-            ));
-
-        if ($active === null) {
-            return 'รอดำเนินการ';
-        }
-
-        $room = match ($active->station_name?->value) {
-            'design' => 'ออกแบบ',
-            'print' => 'ห้องพิมพ์',
-            'screen' => 'ห้องอัด',
-            'flex' => 'ห้องสกรีน เฟล็กซ์',
-            'embroidery' => 'ห้องปัก',
-            'cutting' => 'ห้องตัด',
-            'sewing' => 'ห้องเย็บ',
-            'qc' => 'ตรวจสอบ',
-            'shipping' => 'จัดส่ง',
-            default => 'ผลิต',
-        };
-
-        return match ($active->status?->value) {
-            RoutingStatus::InProgress->value => $room.' (กำลังทำ)',
-            RoutingStatus::Rejected->value => $room.' (แก้ไข)',
-            default => $room.' (รอคิว)',
-        };
-    }
 
     /**
      * Delivery calendar. Independent of the dashboard filters: "what ships
@@ -475,53 +422,9 @@ class OwnerDashboardController extends Controller
      */
     private function buildCalendar(Request $request, $actor): array
     {
-        $month = $this->validDate($request->query('calendar_month').'-01')
-            ? (string) $request->query('calendar_month')
-            : now()->format('Y-m');
-
-        $start = Carbon::createFromFormat('Y-m-d', $month.'-01')->startOfDay();
-        $end = $start->copy()->addMonth();
-
-        $query = Order::query()
-            ->where('order_status', '!=', OrderStatus::Cancelled->value)
-            ->whereNotNull('due_date')
-            ->where('due_date', '>=', $start)
-            ->where('due_date', '<', $end)
-            ->with(['customer:id,customer_name', 'items', 'routings']);
-
-        if ($actor->branch_id !== null) {
-            UserAccessControl::applyBranchScope($query, $actor);
-        }
-
-        $days = $query->orderBy('due_date')->get()
-            ->groupBy(fn (Order $order): string => $order->due_date->format('Y-m-d'))
-            ->map(fn (Collection $group): array => [
-                'count' => $group->count(),
-                'quantity' => (int) $group->sum(fn (Order $order): int => (int) $order->items->sum('quantity')),
-                'orders' => $group->map(fn (Order $order): array => [
-                    'id' => $order->id,
-                    'order_code' => $order->order_code,
-                    'customer_name' => $order->customer?->customer_name ?? '-',
-                    'job_name' => $order->job_name,
-                    'job_type' => $order->job_type,
-                    'delivery_method' => $order->delivery_method,
-                    'delivery_label' => match ($order->delivery_method) {
-                        'shipping' => 'ขนส่ง',
-                        'onsite' => 'ส่งหน้างาน',
-                        default => 'รับที่ร้าน',
-                    },
-                    'order_status' => $order->order_status?->value,
-                    'status_label' => $this->deliveryStatusLabel($order),
-                    'is_closed' => OrderCompletion::isClosed($order),
-                    'quantity' => (int) $order->items->sum('quantity'),
-                ])->values()->all(),
-            ])
-            ->all();
-
-        return [
-            'month' => $month,
-            'today' => now()->format('Y-m-d'),
-            'days' => $days,
-        ];
+        return DeliveryCalendarBuilder::build(
+            is_string($request->query('calendar_month')) ? $request->query('calendar_month') : null,
+            $actor,
+        );
     }
 }

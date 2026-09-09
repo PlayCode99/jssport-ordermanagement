@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
+use App\Enums\AccessRole;
 use App\Enums\OrderStatus;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
@@ -83,6 +84,7 @@ class RoleAuthorizationSecurityTest extends TestCase
 
         $qc = User::factory()->create([
             'role' => UserRole::Qc,
+            'access_role' => AccessRole::QcStaff,
             'station_department' => StationDepartment::Qc,
         ]);
 

@@ -9,6 +9,7 @@ use App\Enums\RoutingStationName;
 use App\Enums\RoutingStatus;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\CuttingTeam;
@@ -255,18 +256,18 @@ class ProductionRoomFlowCoverageTest extends TestCase
     public function test_pants_pricing_summary_uses_the_pants_type_from_the_order_specification(): void
     {
         $customer = Customer::create([
-            'customer_code' => 'CUS-PANTS-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'customer_code' => 'CUS-PANTS-'.$this->nextSequence(),
             'customer_name' => 'Pants Pricing Customer',
         ]);
 
         $branch = Branch::create([
-            'branch_code' => 'BR-PANTS-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'branch_code' => 'BR-PANTS-'.$this->nextSequence(),
             'branch_name' => 'Pants Pricing Branch',
         ]);
 
         $pantsType = GarmentType::create([
             'category' => 'PANTS',
-            'code' => 'PANTS-TEST-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'code' => 'PANTS-TEST-'.$this->nextSequence(),
             'name' => 'ทดสอบกางเกง',
             'is_active' => true,
             'display_order' => 1,
@@ -282,7 +283,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'ทดสอบกางเกง',
@@ -303,7 +304,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
             ],
         ], $creator->id);
 
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $reflection = new \ReflectionClass($controller);
         $method = $reflection->getMethod('buildProductionPricingSummary');
         $method->setAccessible(true);
@@ -334,7 +335,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
         $groups = collect($summary['groups'] ?? []);
 
         $this->assertCount(1, $groups);
-        $this->assertSame('shirt_adults', (string) ($groups->first()['key'] ?? ''));
+        $this->assertSame('shirt_adults_unspecified', (string) ($groups->first()['key'] ?? ''));
         $this->assertSame(5, (int) ($summary['shirt_adult_quantity'] ?? 0));
         $this->assertSame(0, (int) ($summary['pants_adult_quantity'] ?? -1));
         $this->assertSame(100.0, (float) ($summary['grand_total'] ?? 0));
@@ -354,7 +355,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
         $groups = collect($summary['groups'] ?? []);
         $keys = $groups->pluck('key')->all();
 
-        $this->assertSame(['shirt_kids', 'shirt_adults'], $keys);
+        $this->assertSame(['shirt_kids_unspecified', 'shirt_adults_unspecified'], $keys);
         $this->assertSame(2, (int) ($summary['group_count'] ?? 0));
         $this->assertSame(20.0, (float) ($summary['child_total'] ?? 0));
         $this->assertSame(90.0, (float) ($summary['adult_total'] ?? 0));
@@ -378,7 +379,10 @@ class ProductionRoomFlowCoverageTest extends TestCase
         $groupKeys = $groups->pluck('key')->all();
         $groupSubtotals = (float) $groups->sum(fn (array $group): float => (float) ($group['subtotal'] ?? 0));
 
-        $this->assertSame(['shirt_kids', 'shirt_adults', 'pants_kids', 'pants_adults'], $groupKeys);
+        $this->assertSame(
+            ['shirt_kids_unspecified', 'shirt_adults_unspecified', 'pants_kids_unspecified', 'pants_adults_unspecified'],
+            $groupKeys,
+        );
         $this->assertSame(2, (int) ($summary['shirt_child_quantity'] ?? 0));
         $this->assertSame(3, (int) ($summary['shirt_adult_quantity'] ?? 0));
         $this->assertSame(4, (int) ($summary['pants_child_quantity'] ?? 0));
@@ -404,7 +408,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
         $summary = $this->invokeProductionPricingSummary($order);
         $groups = collect($summary['groups'] ?? []);
 
-        $this->assertSame(['shirt_kids', 'shirt_adults', 'pants_kids', 'pants_adults'], $groups->pluck('key')->all());
+        $this->assertSame(['shirt_kids_unspecified', 'shirt_adults_unspecified', 'pants_kids_unspecified', 'pants_adults_unspecified'], $groups->pluck('key')->all());
         $this->assertSame(20, (int) ($summary['shirt_child_quantity'] ?? 0));
         $this->assertSame(60, (int) ($summary['shirt_adult_quantity'] ?? 0));
         $this->assertSame(20, (int) ($summary['pants_child_quantity'] ?? 0));
@@ -437,7 +441,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
      */
     private function invokeProductionPricingSummary(Order $order): array
     {
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $reflection = new \ReflectionClass($controller);
         $method = $reflection->getMethod('buildProductionPricingSummary');
         $method->setAccessible(true);
@@ -455,7 +459,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
     {
         $type = GarmentType::create([
             'category' => $category,
-            'code' => $codePrefix.'-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'code' => $codePrefix.'-'.$this->nextSequence(),
             'name' => $codePrefix,
             'is_active' => true,
             'display_order' => 1,
@@ -474,12 +478,12 @@ class ProductionRoomFlowCoverageTest extends TestCase
     private function createPricingProbeOrder(array $items, int $shirtTypeId, int $pantsTypeId): Order
     {
         $customer = Customer::create([
-            'customer_code' => 'CUS-PRICE-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'customer_code' => 'CUS-PRICE-'.$this->nextSequence(),
             'customer_name' => 'Pricing Probe Customer',
         ]);
 
         $branch = Branch::create([
-            'branch_code' => 'BR-PRICE-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'branch_code' => 'BR-PRICE-'.$this->nextSequence(),
             'branch_name' => 'Pricing Probe Branch',
         ]);
 
@@ -488,7 +492,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        return (new CreateOrderAction())->execute([
+        return (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Pricing Probe',
@@ -1101,15 +1105,31 @@ class ProductionRoomFlowCoverageTest extends TestCase
         }
     }
 
+    /**
+     * Counts the fixtures this test has made. customer_code and branch_code are
+     * unique columns, so drawing them at random meant a run could collide with
+     * itself and fail for no reason; a counter cannot.
+     */
+    private int $fixtureSequence = 0;
+
+    private function nextSequence(): string
+    {
+        $this->fixtureSequence += 1;
+
+        return str_pad((string) $this->fixtureSequence, 5, '0', STR_PAD_LEFT);
+    }
+
     private function createOrderWithJobType(string $jobType): Order
     {
+        $sequence = $this->nextSequence();
+
         $customer = Customer::create([
-            'customer_code' => 'CUS-FLOW-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'customer_code' => 'CUS-FLOW-'.$sequence,
             'customer_name' => 'Flow Coverage Customer',
         ]);
 
         $branch = Branch::create([
-            'branch_code' => 'BR-FLOW-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'branch_code' => 'BR-FLOW-'.$sequence,
             'branch_name' => 'Flow Coverage Branch',
         ]);
 
@@ -1118,7 +1138,7 @@ class ProductionRoomFlowCoverageTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        return (new CreateOrderAction())->execute([
+        return (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Flow Coverage Order',

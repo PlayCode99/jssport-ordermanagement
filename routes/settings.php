@@ -38,6 +38,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('settings.users.update');
     Route::patch('settings/users/{user}/active', [UserManagementController::class, 'updateActive'])
         ->name('settings.users.active.update');
+    Route::post('settings/users/{user}/reset-password', [UserManagementController::class, 'resetPassword'])
+        ->middleware('throttle:6,1')
+        ->name('settings.users.password.reset');
     Route::delete('settings/users/{user}', [UserManagementController::class, 'destroy'])
         ->name('settings.users.destroy');
 

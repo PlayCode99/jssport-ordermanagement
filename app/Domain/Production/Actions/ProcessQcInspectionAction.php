@@ -31,9 +31,9 @@ class ProcessQcInspectionAction
                 $order->routings()
                     ->where('station_name', '!=', 'shipping')
                     ->update([
-                    'status' => RoutingStatus::Completed,
-                    'completed_at' => now(),
-                ]);
+                        'status' => RoutingStatus::Completed,
+                        'completed_at' => now(),
+                    ]);
             }
 
             if ($decision === 'reject') {

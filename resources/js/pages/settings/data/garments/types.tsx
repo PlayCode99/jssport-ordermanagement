@@ -11,7 +11,13 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type GarmentCategory = 'SHIRT' | 'PANTS';
 
@@ -48,7 +54,11 @@ const INITIAL_FORM: FormState = {
 };
 
 function csrfToken(): string {
-    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+    return (
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
 }
 
 function generateCode(category: GarmentCategory, name: string): string {
@@ -69,8 +79,12 @@ export default function GarmentTypesPage() {
     const { rows: initialRows, selectedCategory } = usePage<PageProps>().props;
     const [rows, setRows] = useState<GarmentTypeRow[]>(initialRows);
     const [searchTerm, setSearchTerm] = useState('');
-    const [categoryFilter, setCategoryFilter] = useState<'all' | GarmentCategory>(selectedCategory ?? 'all');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+    const [categoryFilter, setCategoryFilter] = useState<
+        'all' | GarmentCategory
+    >(selectedCategory ?? 'all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | 'active' | 'inactive'
+    >('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editId, setEditId] = useState<number | null>(null);
     const [form, setForm] = useState<FormState>(INITIAL_FORM);
@@ -84,7 +98,8 @@ export default function GarmentTypesPage() {
                 const matchesSearch =
                     keyword.length === 0 ||
                     row.name.toLowerCase().includes(keyword);
-                const matchesCategory = categoryFilter === 'all' || row.category === categoryFilter;
+                const matchesCategory =
+                    categoryFilter === 'all' || row.category === categoryFilter;
                 const matchesStatus =
                     statusFilter === 'all' ||
                     (statusFilter === 'active' && row.is_active) ||
@@ -92,7 +107,12 @@ export default function GarmentTypesPage() {
 
                 return matchesSearch && matchesCategory && matchesStatus;
             })
-            .sort((a, b) => a.category.localeCompare(b.category) || a.display_order - b.display_order || a.id - b.id);
+            .sort(
+                (a, b) =>
+                    a.category.localeCompare(b.category) ||
+                    a.display_order - b.display_order ||
+                    a.id - b.id,
+            );
     }, [rows, searchTerm, categoryFilter, statusFilter]);
 
     const openCreateModal = () => {
@@ -116,9 +136,10 @@ export default function GarmentTypesPage() {
     };
 
     const saveForm = async () => {
-        const resolvedCode = form.code.trim().length > 0
-            ? form.code.trim().toUpperCase()
-            : generateCode(form.category, form.name);
+        const resolvedCode =
+            form.code.trim().length > 0
+                ? form.code.trim().toUpperCase()
+                : generateCode(form.category, form.name);
 
         const payload = {
             category: form.category,
@@ -130,10 +151,14 @@ export default function GarmentTypesPage() {
 
         if (!payload.name) {
             setError('กรุณากรอกประเภท และชื่อ');
+
             return;
         }
 
-        const endpoint = editId === null ? '/settings/data/garments/types' : `/settings/data/garments/types/${editId}`;
+        const endpoint =
+            editId === null
+                ? '/settings/data/garments/types'
+                : `/settings/data/garments/types/${editId}`;
         const method = editId === null ? 'POST' : 'PUT';
 
         const response = await fetch(endpoint, {
@@ -146,10 +171,14 @@ export default function GarmentTypesPage() {
             body: JSON.stringify(payload),
         });
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: GarmentTypeRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: GarmentTypeRow[];
+        } | null;
 
         if (!response.ok) {
             setError(body?.message ?? 'บันทึกข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -161,23 +190,29 @@ export default function GarmentTypesPage() {
     };
 
     const toggleActive = async (row: GarmentTypeRow) => {
-        const response = await fetch(`/settings/data/garments/types/${row.id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrfToken(),
-                Accept: 'application/json',
+        const response = await fetch(
+            `/settings/data/garments/types/${row.id}`,
+            {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify({
+                    category: row.category,
+                    code: row.code,
+                    name: row.name,
+                    display_order: row.display_order,
+                    is_active: !row.is_active,
+                }),
             },
-            body: JSON.stringify({
-                category: row.category,
-                code: row.code,
-                name: row.name,
-                display_order: row.display_order,
-                is_active: !row.is_active,
-            }),
-        });
+        );
 
-        const body = (await response.json().catch(() => null)) as { rows?: GarmentTypeRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            rows?: GarmentTypeRow[];
+        } | null;
+
         if (response.ok && Array.isArray(body?.rows)) {
             setRows(body.rows);
         }
@@ -185,22 +220,31 @@ export default function GarmentTypesPage() {
 
     const deleteRow = async (row: GarmentTypeRow) => {
         const ok = window.confirm(`ยืนยันการลบ ${row.name} ใช่หรือไม่`);
+
         if (!ok) {
             return;
         }
 
-        const response = await fetch(`/settings/data/garments/types/${row.id}`, {
-            method: 'DELETE',
-            headers: {
-                'X-CSRF-TOKEN': csrfToken(),
-                Accept: 'application/json',
+        const response = await fetch(
+            `/settings/data/garments/types/${row.id}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': csrfToken(),
+                    Accept: 'application/json',
+                },
             },
-        });
+        );
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: GarmentTypeRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: GarmentTypeRow[];
+        } | null;
+
         if (!response.ok) {
             setError(body?.message ?? 'ลบข้อมูลไม่สำเร็จ');
             setIsModalOpen(true);
+
             return;
         }
 
@@ -217,14 +261,23 @@ export default function GarmentTypesPage() {
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">Garment Pricing</p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">แยกประเภทเสื้อและกางเกง</h1>
-                            <p className="mt-2 text-sm text-slate-600">สร้างประเภทงาน เช่น เสื้อโปโล หรือกางเกงขาสั้น แล้วเข้าไปตั้งราคาเด็ก/ผู้ใหญ่</p>
+                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                Garment Pricing
+                            </p>
+                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                แยกประเภทเสื้อและกางเกง
+                            </h1>
+                            <p className="mt-2 text-sm text-slate-600">
+                                สร้างประเภทงาน เช่น เสื้อโปโล หรือกางเกงขาสั้น
+                                แล้วเข้าไปตั้งราคาเด็ก/ผู้ใหญ่
+                            </p>
                         </div>
 
                         <div className="flex w-full flex-wrap justify-start gap-2 xl:w-auto xl:justify-end">
                             <Button asChild variant="outline">
-                                <Link href="/settings/data/garments/prices">ไปหน้าเซ็ทราคา</Link>
+                                <Link href="/settings/data/garments/prices">
+                                    ไปหน้าเซ็ทราคา
+                                </Link>
                             </Button>
                             <Button onClick={openCreateModal} className="gap-2">
                                 <Plus className="size-4" />
@@ -237,8 +290,12 @@ export default function GarmentTypesPage() {
                 <section className="flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 md:px-5">
                         <div>
-                            <h2 className="text-base font-semibold text-slate-900">รายการประเภท</h2>
-                            <p className="text-sm text-slate-500">ทั้งหมด {filteredRows.length} รายการ</p>
+                            <h2 className="text-base font-semibold text-slate-900">
+                                รายการประเภท
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                ทั้งหมด {filteredRows.length} รายการ
+                            </p>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -246,31 +303,53 @@ export default function GarmentTypesPage() {
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    onChange={(event) =>
+                                        setSearchTerm(event.target.value)
+                                    }
                                     placeholder="ค้นหาชื่อประเภท"
                                     className="bg-white pl-9"
                                 />
                             </div>
 
-                            <Select value={categoryFilter} onValueChange={(value: 'all' | GarmentCategory) => setCategoryFilter(value)}>
+                            <Select
+                                value={categoryFilter}
+                                onValueChange={(
+                                    value: 'all' | GarmentCategory,
+                                ) => setCategoryFilter(value)}
+                            >
                                 <SelectTrigger className="bg-white">
                                     <SelectValue placeholder="ประเภทสินค้า" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกประเภท</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกประเภท
+                                    </SelectItem>
                                     <SelectItem value="SHIRT">เสื้อ</SelectItem>
-                                    <SelectItem value="PANTS">กางเกง</SelectItem>
+                                    <SelectItem value="PANTS">
+                                        กางเกง
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
 
-                            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(
+                                    value: 'all' | 'active' | 'inactive',
+                                ) => setStatusFilter(value)}
+                            >
                                 <SelectTrigger className="bg-white">
                                     <SelectValue placeholder="สถานะ" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกสถานะ</SelectItem>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกสถานะ
+                                    </SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -280,47 +359,95 @@ export default function GarmentTypesPage() {
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">กลุ่ม</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ชื่อประเภท</th>
-                                    <th className="w-[150px] px-4 py-3 text-left font-semibold text-slate-700">สถานะ</th>
-                                    <th className="w-[380px] px-4 py-3 text-left font-semibold text-slate-700">จัดการ</th>
+                                    <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        กลุ่ม
+                                    </th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                                        ชื่อประเภท
+                                    </th>
+                                    <th className="w-[150px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        สถานะ
+                                    </th>
+                                    <th className="w-[380px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        จัดการ
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRows.length === 0 ? (
                                     <tr>
-                                        <td className="px-4 py-5 text-center text-slate-500" colSpan={5}>
+                                        <td
+                                            className="px-4 py-5 text-center text-slate-500"
+                                            colSpan={5}
+                                        >
                                             ไม่พบข้อมูลที่ตรงกับเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRows.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-3 align-top text-slate-700">{row.category === 'SHIRT' ? 'เสื้อ' : 'กางเกง'}</td>
-                                            <td className="px-4 py-3 align-top text-slate-800">{row.name}</td>
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-50/60"
+                                        >
+                                            <td className="px-4 py-3 align-top text-slate-700">
+                                                {row.category === 'SHIRT'
+                                                    ? 'เสื้อ'
+                                                    : 'กางเกง'}
+                                            </td>
+                                            <td className="px-4 py-3 align-top text-slate-800">
+                                                {row.name}
+                                            </td>
                                             <td className="px-4 py-3 align-top">
                                                 <Button
-                                                    variant={row.is_active ? 'default' : 'outline'}
+                                                    variant={
+                                                        row.is_active
+                                                            ? 'default'
+                                                            : 'outline'
+                                                    }
                                                     size="sm"
-                                                    onClick={() => toggleActive(row)}
+                                                    onClick={() =>
+                                                        toggleActive(row)
+                                                    }
                                                     className="gap-1"
                                                 >
                                                     <Power className="size-4" />
-                                                    {row.is_active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                                                    {row.is_active
+                                                        ? 'เปิดใช้งาน'
+                                                        : 'ปิดใช้งาน'}
                                                 </Button>
                                             </td>
                                             <td className="px-4 py-3 align-top">
                                                 <div className="flex flex-wrap items-center gap-2">
-                                                    <Button asChild variant="secondary" size="sm">
-                                                        <Link href={`/settings/data/garments/prices?garment_type_id=${row.id}&category=${row.category}`}>
+                                                    <Button
+                                                        asChild
+                                                        variant="secondary"
+                                                        size="sm"
+                                                    >
+                                                        <Link
+                                                            href={`/settings/data/garments/prices?garment_type_id=${row.id}&category=${row.category}`}
+                                                        >
                                                             เซ็ทราคา
                                                         </Link>
                                                     </Button>
-                                                    <Button variant="outline" size="sm" onClick={() => openEditModal(row)} className="gap-1">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            openEditModal(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Pencil className="size-4" />
                                                         แก้ไข
                                                     </Button>
-                                                    <Button variant="destructive" size="sm" onClick={() => deleteRow(row)} className="gap-1">
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            deleteRow(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Trash2 className="size-4" />
                                                         ลบ
                                                     </Button>
@@ -338,46 +465,77 @@ export default function GarmentTypesPage() {
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{editId === null ? 'เพิ่มประเภท' : 'แก้ไขประเภท'}</DialogTitle>
-                        <DialogDescription>กำหนดว่าเป็นเสื้อหรือกางเกง จากนั้นค่อยเพิ่มรายการราคา</DialogDescription>
+                        <DialogTitle>
+                            {editId === null ? 'เพิ่มประเภท' : 'แก้ไขประเภท'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            กำหนดว่าเป็นเสื้อหรือกางเกง
+                            จากนั้นค่อยเพิ่มรายการราคา
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-3">
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">ประเภทสินค้า</label>
+                            <label className="text-sm font-medium text-slate-700">
+                                ประเภทสินค้า
+                            </label>
                             <Select
                                 value={form.category}
-                                onValueChange={(value: GarmentCategory) => setForm((prev) => ({ ...prev, category: value }))}
+                                onValueChange={(value: GarmentCategory) =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        category: value,
+                                    }))
+                                }
                             >
                                 <SelectTrigger className="bg-white">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="SHIRT">เสื้อ</SelectItem>
-                                    <SelectItem value="PANTS">กางเกง</SelectItem>
+                                    <SelectItem value="PANTS">
+                                        กางเกง
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-slate-700">ชื่อประเภท</label>
+                            <label className="text-sm font-medium text-slate-700">
+                                ชื่อประเภท
+                            </label>
                             <Input
                                 value={form.name}
-                                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                                onChange={(event) =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        name: event.target.value,
+                                    }))
+                                }
                                 placeholder="เช่น เสื้อโปโล"
                                 className="bg-white"
                             />
                         </div>
 
                         <div className="space-y-2">
-                            <p className="text-xs text-slate-500">ระบบจะจัดลำดับให้อัตโนมัติ คุณแก้ได้ภายหลังถ้าจำเป็น</p>
+                            <p className="text-xs text-slate-500">
+                                ระบบจะจัดลำดับให้อัตโนมัติ
+                                คุณแก้ได้ภายหลังถ้าจำเป็น
+                            </p>
                         </div>
 
-                        {error ? <p className="text-sm font-medium text-red-600">{error}</p> : null}
+                        {error ? (
+                            <p className="text-sm font-medium text-red-600">
+                                {error}
+                            </p>
+                        ) : null}
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsModalOpen(false)}>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsModalOpen(false)}
+                        >
                             ยกเลิก
                         </Button>
                         <Button onClick={saveForm}>บันทึก</Button>
@@ -388,7 +546,9 @@ export default function GarmentTypesPage() {
     );
 }
 
-GarmentTypesPage.layout = (props: { currentTeam?: { slug: string } | null }) => ({
+GarmentTypesPage.layout = (props: {
+    currentTeam?: { slug: string } | null;
+}) => ({
     breadcrumbs: [
         {
             title: 'เคาว์เตอร์',

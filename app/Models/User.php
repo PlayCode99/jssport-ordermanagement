@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Models;
@@ -8,7 +9,9 @@ use App\Concerns\HasTeams;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Support\UserAccessControl;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,8 +23,6 @@ use Illuminate\Support\Carbon;
 use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
-use App\Support\UserAccessControl;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * @property int $id
@@ -47,6 +48,7 @@ use Illuminate\Database\Eloquent\Builder;
  * @property-read Collection<int, Team> $ownedTeams
  * @property-read Collection<int, Membership> $teamMemberships
  * @property-read Collection<int, Team> $teams
+ * @property-read Branch|null $branch
  */
 class User extends Authenticatable implements PasskeyUser
 {
@@ -59,7 +61,7 @@ class User extends Authenticatable implements PasskeyUser
     protected $guarded = [];
 
     /**
-     * @var array<int, string>
+     * @var list<string>
      */
     protected $hidden = [
         'password',
@@ -86,6 +88,9 @@ class User extends Authenticatable implements PasskeyUser
         ];
     }
 
+    /**
+     * @return BelongsTo<Branch, $this>
+     */
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
@@ -96,39 +101,59 @@ class User extends Authenticatable implements PasskeyUser
         UserAccessControl::applyBranchScope($query, $viewer);
     }
 
+    /**
+     * @return HasMany<Order, $this>
+     */
     public function createdOrders(): HasMany
     {
         return $this->hasMany(Order::class, 'creator_user_id');
     }
 
+    /**
+     * @return HasMany<OrderStatusHistory, $this>
+     */
     public function statusHistories(): HasMany
     {
         return $this->hasMany(OrderStatusHistory::class);
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function assignedRoutings(): HasMany
     {
         return $this->hasMany(OrderRouting::class, 'assigned_user_id');
     }
 
+    /**
+     * @return HasMany<Receipt, $this>
+     */
     public function cashierReceipts(): HasMany
     {
         return $this->hasMany(Receipt::class, 'cashier_user_id');
     }
 
+    /**
+     * @return HasMany<CuttingOrder, $this>
+     */
     public function cuttingOrdersAsCutter(): HasMany
     {
         return $this->hasMany(CuttingOrder::class, 'cutter_user_id');
     }
 
+    /**
+     * @return HasMany<CuttingOrder, $this>
+     */
     public function cuttingOrdersAsInspector(): HasMany
     {
         return $this->hasMany(CuttingOrder::class, 'inspector_user_id');
     }
 
+    /**
+     * @return HasMany<CuttingWorkerTask, $this>
+     */
     public function cuttingWorkerTasks(): HasMany
     {
         return $this->hasMany(CuttingWorkerTask::class, 'worker_user_id');
     }
 }
-

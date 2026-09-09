@@ -18,8 +18,8 @@ vi.mock('@/layouts/settings/layout', () => ({
 
 import AppLayout from '@/layouts/app-layout';
 import AuthLayout from '@/layouts/auth-layout';
-import SettingsLayout from '@/layouts/settings/layout';
 import { resolvePageLayout } from '@/layouts/layout-resolver';
+import SettingsLayout from '@/layouts/settings/layout';
 
 describe('resolvePageLayout', () => {
     it('uses auth layout for auth pages', () => {

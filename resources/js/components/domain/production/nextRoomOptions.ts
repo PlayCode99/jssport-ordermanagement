@@ -1,10 +1,19 @@
 import type { Order } from '@/types/models';
 
-export type ProductionRoomDestination = 'print' | 'cutting' | 'screen_flex' | 'embroidery' | 'sewing' | 'qc' | 'shipping';
+export type ProductionRoomDestination =
+    | 'print'
+    | 'cutting'
+    | 'screen_flex'
+    | 'embroidery'
+    | 'sewing'
+    | 'qc'
+    | 'shipping';
 
 type OrderRoutingRecord = NonNullable<Order['routings']>[number];
 
-export const nextRoomLabelFromStation = (station: ProductionRoomDestination): string => {
+export const nextRoomLabelFromStation = (
+    station: ProductionRoomDestination,
+): string => {
     switch (station) {
         case 'print':
             return 'ห้องพิมพ์';
@@ -23,7 +32,9 @@ export const nextRoomLabelFromStation = (station: ProductionRoomDestination): st
     }
 };
 
-export const getRequiredRoomSequence = (order: Order | null): ProductionRoomDestination[] => {
+export const getRequiredRoomSequence = (
+    order: Order | null,
+): ProductionRoomDestination[] => {
     if (!order?.routings) {
         return [];
     }
@@ -40,37 +51,44 @@ export const getRequiredRoomSequence = (order: Order | null): ProductionRoomDest
                 if (!sequence.includes('print')) {
                     sequence.push('print');
                 }
+
                 break;
             case 'cutting':
                 if (!sequence.includes('cutting')) {
                     sequence.push('cutting');
                 }
+
                 break;
             case 'screen':
             case 'flex':
                 if (!sequence.includes('screen_flex')) {
                     sequence.push('screen_flex');
                 }
+
                 break;
             case 'embroidery':
                 if (!sequence.includes('embroidery')) {
                     sequence.push('embroidery');
                 }
+
                 break;
             case 'sewing':
                 if (!sequence.includes('sewing')) {
                     sequence.push('sewing');
                 }
+
                 break;
             case 'qc':
                 if (!sequence.includes('qc')) {
                     sequence.push('qc');
                 }
+
                 break;
             case 'shipping':
                 if (!sequence.includes('shipping')) {
                     sequence.push('shipping');
                 }
+
                 break;
             default:
                 break;
@@ -79,11 +97,16 @@ export const getRequiredRoomSequence = (order: Order | null): ProductionRoomDest
 
     // Insert `print` after `cutting` for sublimation jobs even if no explicit print routing exists.
     const looksLikeSublimation = (order: Order | null): boolean => {
-        if (!order) return false;
+        if (!order) {
+            return false;
+        }
 
-        const specSublimation = Boolean(order.specification?.sublimation_detail);
+        const specSublimation = Boolean(
+            order.specification?.sublimation_detail,
+        );
         const jobType = (order.job_type ?? '').toString().toLowerCase();
-        const jobTypeFlag = jobType.includes('ซับ') || jobType.includes('sublimation');
+        const jobTypeFlag =
+            jobType.includes('ซับ') || jobType.includes('sublimation');
 
         return specSublimation || jobTypeFlag;
     };
@@ -99,12 +122,17 @@ export const getRequiredRoomSequence = (order: Order | null): ProductionRoomDest
     return sequence;
 };
 
-export const getDestinationRoutingStatus = (order: Order | null, destination: ProductionRoomDestination): string | null => {
+export const getDestinationRoutingStatus = (
+    order: Order | null,
+    destination: ProductionRoomDestination,
+): string | null => {
     if (!order) {
         return null;
     }
 
-    const routings = (order.routings ?? []).filter((item) => item.is_required) as OrderRoutingRecord[];
+    const routings = (order.routings ?? []).filter(
+        (item) => item.is_required,
+    ) as OrderRoutingRecord[];
 
     if (destination === 'screen_flex') {
         const matchingStatuses = routings
@@ -115,11 +143,20 @@ export const getDestinationRoutingStatus = (order: Order | null, destination: Pr
             return null;
         }
 
-        if (matchingStatuses.some((status) => status === 'in_progress' || status === 'pending' || status === 'rejected')) {
+        if (
+            matchingStatuses.some(
+                (status) =>
+                    status === 'in_progress' ||
+                    status === 'pending' ||
+                    status === 'rejected',
+            )
+        ) {
             return 'in_progress';
         }
 
-        return matchingStatuses.every((status) => status === 'completed') ? 'completed' : 'skipped';
+        return matchingStatuses.every((status) => status === 'completed')
+            ? 'completed'
+            : 'skipped';
     }
 
     const routing = routings.find((item) => item.station_name === destination);
@@ -127,12 +164,17 @@ export const getDestinationRoutingStatus = (order: Order | null, destination: Pr
     return routing?.status ?? null;
 };
 
-export const isDestinationFinished = (order: Order | null, destination: ProductionRoomDestination): boolean => {
+export const isDestinationFinished = (
+    order: Order | null,
+    destination: ProductionRoomDestination,
+): boolean => {
     if (!order) {
         return true;
     }
 
-    const routings = (order.routings ?? []).filter((item) => item.is_required) as OrderRoutingRecord[];
+    const routings = (order.routings ?? []).filter(
+        (item) => item.is_required,
+    ) as OrderRoutingRecord[];
 
     if (destination === 'screen_flex') {
         const matchingStatuses = routings
@@ -169,18 +211,29 @@ export const getNextRoomOptionsForCurrentPage = (
             return;
         }
 
-        const destinationStatus = getDestinationRoutingStatus(order, destination);
+        const destinationStatus = getDestinationRoutingStatus(
+            order,
+            destination,
+        );
         const isForwardDestination = index > currentIndex;
-        const isReopenableDestination = index < currentIndex
-            && ['skipped', 'pending', 'completed', 'in_progress'].includes(destinationStatus ?? '');
-        const isCurrentStepStillActive = destinationStatus === 'in_progress' || destinationStatus === 'pending';
+        const isReopenableDestination =
+            index < currentIndex &&
+            ['skipped', 'pending', 'completed', 'in_progress'].includes(
+                destinationStatus ?? '',
+            );
+        const isCurrentStepStillActive =
+            destinationStatus === 'in_progress' ||
+            destinationStatus === 'pending';
         const isCompletedDestination = destinationStatus === 'completed';
 
         if (isCompletedDestination) {
             return;
         }
 
-        if (isForwardDestination || (isReopenableDestination && !isCurrentStepStillActive)) {
+        if (
+            isForwardDestination ||
+            (isReopenableDestination && !isCurrentStepStillActive)
+        ) {
             availableDestinations.push(destination);
         }
     });
@@ -189,13 +242,33 @@ export const getNextRoomOptionsForCurrentPage = (
 };
 
 export const getTargetStatusForNextStation = (
-    targetStation: ProductionRoomDestination | 'screen' | 'flex' | 'embroidery' | 'cutting' | 'sewing' | 'qc' | 'shipping',
+    targetStation:
+        | ProductionRoomDestination
+        | 'screen'
+        | 'flex'
+        | 'embroidery'
+        | 'cutting'
+        | 'sewing'
+        | 'qc'
+        | 'shipping',
 ): 'pending' | 'in_progress' => {
-    return ['print', 'screen', 'flex', 'embroidery', 'cutting', 'sewing'].includes(targetStation) ? 'pending' : 'in_progress';
+    return [
+        'print',
+        'screen',
+        'flex',
+        'embroidery',
+        'cutting',
+        'sewing',
+    ].includes(targetStation)
+        ? 'pending'
+        : 'in_progress';
 };
 
-export const getCurrentRoomTransitionStatus = (currentRoutingStatus: string | null | undefined): 'completed' | 'skipped' => {
-    return currentRoutingStatus === 'in_progress' || currentRoutingStatus === 'completed'
+export const getCurrentRoomTransitionStatus = (
+    currentRoutingStatus: string | null | undefined,
+): 'completed' | 'skipped' => {
+    return currentRoutingStatus === 'in_progress' ||
+        currentRoutingStatus === 'completed'
         ? 'completed'
         : 'skipped';
 };
@@ -209,7 +282,11 @@ export const getDestinationOptionLabel = (
     const currentIndex = currentRoom ? sequence.indexOf(currentRoom) : -1;
     const destinationIndex = sequence.indexOf(destination);
 
-    if (currentIndex >= 0 && destinationIndex >= 0 && destinationIndex < currentIndex) {
+    if (
+        currentIndex >= 0 &&
+        destinationIndex >= 0 &&
+        destinationIndex < currentIndex
+    ) {
         const routingStatus = getDestinationRoutingStatus(order, destination);
 
         if (routingStatus === 'skipped' || routingStatus === 'completed') {

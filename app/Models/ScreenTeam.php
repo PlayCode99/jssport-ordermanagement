@@ -22,6 +22,9 @@ class ScreenTeam extends Model
         ];
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function orderRoutings(): HasMany
     {
         return $this->hasMany(OrderRouting::class, 'screen_team_id');

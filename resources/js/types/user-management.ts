@@ -15,7 +15,8 @@ export const USER_ACCESS_ROLES = {
     OWNER: 'OWNER',
 } as const;
 
-export type UserAccessRole = (typeof USER_ACCESS_ROLES)[keyof typeof USER_ACCESS_ROLES];
+export type UserAccessRole =
+    (typeof USER_ACCESS_ROLES)[keyof typeof USER_ACCESS_ROLES];
 
 export type BranchOption = {
     id: number;

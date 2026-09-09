@@ -23,6 +23,16 @@ vi.mock('@inertiajs/react', () => ({
     usePage: () => mockPage,
 }));
 
+/**
+ * The label of a group now appears twice in the dialog: once on the chip that
+ * jumps to the sheet, once on the sheet's own coloured header. Assertions about
+ * the sheet look inside the folded stack so they cannot match the chip.
+ */
+const sheetHeader = (label: string) =>
+    within(
+        document.querySelector('[data-print-sheets]') as HTMLElement,
+    ).getByText(label);
+
 const makePricingSummary = (grandTotal = 20) => ({
     components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
     pants_components: [],
@@ -37,41 +47,54 @@ const makePricingSummary = (grandTotal = 20) => ({
     grand_total: grandTotal,
 });
 
-const makeSpecOrder = (id: number): Order => ({
-    id,
-    order_code: `ORD-${id}`,
-    job_name: `Spec Order ${id}`,
-    job_type: 'งานปัก',
-    order_status: 'in_production',
-    order_date: '2026-08-01',
-    due_date: '2026-08-05',
-    branch: { branch_name: 'สาขา 1' },
-    customer: { customer_name: `ลูกค้า ${id}` },
-    creator_user: { name: `ผู้สร้าง ${id}` },
-    items: [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 1 }],
-    receipts: [],
-    status_histories: [],
-    routings: [
-        {
-            id: id * 100,
-            station_name: 'embroidery',
-            is_required: true,
-            status: 'pending',
-            created_at: '2026-08-01T10:00:00.000000Z',
-            updated_at: '2026-08-01T10:00:00.000000Z',
-            started_at: null,
-            completed_at: null,
-        },
-    ],
-}) as Order;
+const makeSpecOrder = (id: number): Order =>
+    ({
+        id,
+        order_code: `ORD-${id}`,
+        job_name: `Spec Order ${id}`,
+        job_type: 'งานปัก',
+        order_status: 'in_production',
+        order_date: '2026-08-01',
+        due_date: '2026-08-05',
+        branch: { branch_name: 'สาขา 1' },
+        customer: { customer_name: `ลูกค้า ${id}` },
+        creator_user: { name: `ผู้สร้าง ${id}` },
+        items: [
+            {
+                item_type: 'shirt',
+                shirt_style: 'short',
+                size_group: 'adults',
+                size_label: 'M',
+                quantity: 1,
+            },
+        ],
+        receipts: [],
+        status_histories: [],
+        routings: [
+            {
+                id: id * 100,
+                station_name: 'embroidery',
+                is_required: true,
+                status: 'pending',
+                created_at: '2026-08-01T10:00:00.000000Z',
+                updated_at: '2026-08-01T10:00:00.000000Z',
+                started_at: null,
+                completed_at: null,
+            },
+        ],
+    }) as Order;
 
 describe('production board timeline sync', () => {
     it('renders 4 grouped sections in the detail dialog when all shirt/pants kid/adult data exists', () => {
         mockPage.props = {
             productionPricingMap: {
                 '61': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -97,10 +120,34 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 61' },
             creator_user: { name: 'ผู้สร้าง 61' },
             items: [
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 2 },
-                { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 3 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 4 },
-                { item_type: 'pants', size_group: 'oversize', size_label: '2XL', quantity: 1 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 2,
+                },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 3,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'oversize',
+                    size_label: '2XL',
+                    quantity: 1,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -131,26 +178,34 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        expect(screen.getByText('เสื้อไซต์เด็ก')).toBeInTheDocument();
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.getByText('กางเกงเด็ก')).toBeInTheDocument();
-        expect(screen.getByText('กางเกงผู้ใหญ่')).toBeInTheDocument();
+        expect(sheetHeader('เสื้อไซต์เด็ก แขนสั้น')).toBeInTheDocument();
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(sheetHeader('กางเกงเด็ก ขาสั้น')).toBeInTheDocument();
+        expect(sheetHeader('กางเกงผู้ใหญ่ ขาสั้น')).toBeInTheDocument();
 
         const printPages = document.querySelectorAll('.p-print-page');
         expect(printPages.length).toBe(4);
-        expect(document.querySelectorAll('.p-yellow-head').length).toBeGreaterThan(0);
+        expect(
+            document.querySelectorAll('.p-yellow-head').length,
+        ).toBeGreaterThan(0);
         expect(screen.getAllByText('รายการ').length).toBeGreaterThan(0);
         expect(screen.getAllByText('ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('subtotal').length).toBe(4);
+        expect(screen.getAllByText('รวมค่าแรง').length).toBe(4);
         expect(screen.getAllByText(/วิธีคิดคำนวณเงิน/).length).toBe(4);
         expect(screen.getAllByText('20.00').length).toBeGreaterThan(0);
         expect(screen.getAllByText('15.00').length).toBeGreaterThan(0);
-        expect(screen.queryByText(/หน้า\s*\d+\s*\/\s*\d+/)).not.toBeInTheDocument();
+        expect(
+            screen.queryByText(/หน้า\s*\d+\s*\/\s*\d+/),
+        ).not.toBeInTheDocument();
         expect(screen.queryByText(/พิมพ์:/)).not.toBeInTheDocument();
         expect(screen.queryByText('ชื่อช่าง')).not.toBeInTheDocument();
         expect(screen.getAllByText(/ผู้ตรวจสอบ/).length).toBeGreaterThan(0);
 
-        const normalizedMarkup = (document.querySelector('.p-sheet')?.innerHTML ?? '')
+        const normalizedMarkup = (
+            document.querySelector('.p-sheet')?.innerHTML ?? ''
+        )
             .replace(/พิมพ์: [^<]+/g, 'พิมพ์: <TIME>')
             .replace(/หน้า \d+ \/ \d+/g, 'หน้า <P> / <N>');
         expect(normalizedMarkup).toMatchSnapshot();
@@ -160,7 +215,9 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '82': {
-                    components: [{ name: 'เสื้อคอวี', child_price: 5, adult_price: 8 }],
+                    components: [
+                        { name: 'เสื้อคอวี', child_price: 5, adult_price: 8 },
+                    ],
                     pants_components: [
                         { name: 'ใส่เชือก', child_price: 10, adult_price: 30 },
                         { name: 'ทดสอบ', child_price: 10, adult_price: 15 },
@@ -190,11 +247,46 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ผอ อุดมร์' },
             creator_user: { name: 'ส้มโอ03' },
             items: [
-                { item_type: 'garment', size_group: 'kids', size_label: 'JM', quantity: 10 },
-                { item_type: 'garment', size_group: 'kids', size_label: 'JS', quantity: 10 },
-                { item_type: 'garment', size_group: 'adults', size_label: 'L', quantity: 20 },
-                { item_type: 'garment', size_group: 'adults', size_label: 'M', quantity: 20 },
-                { item_type: 'garment', size_group: 'adults', size_label: 'S', quantity: 20 },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 10,
+                },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JS',
+                    quantity: 10,
+                },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 20,
+                },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 20,
+                },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'S',
+                    quantity: 20,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -238,10 +330,18 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(4);
-        expect(screen.getAllByText('เสื้อไซต์เด็ก').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('กางเกงเด็ก').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('กางเกงผู้ใหญ่').length).toBeGreaterThan(0);
+        expect(
+            screen.getAllByText('เสื้อไซต์เด็ก แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.getAllByText('กางเกงเด็ก ขาสั้น').length).toBeGreaterThan(
+            0,
+        );
+        expect(
+            screen.getAllByText('กางเกงผู้ใหญ่ ขาสั้น').length,
+        ).toBeGreaterThan(0);
         expect(screen.getByText('20 x 20.00 = 400.00')).toBeInTheDocument();
         expect(screen.getByText('60 x 45.00 = 2,700.00')).toBeInTheDocument();
     });
@@ -265,7 +365,14 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 83' },
             creator_user: { name: 'ผู้สร้าง 83' },
             items: [
-                { item_type: 'garment', size_group: 'adults', size_label: 'M', quantity: 5 },
+                {
+                    item_type: 'garment',
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 5,
+                },
             ],
             specification: {
                 screen_print_detail: JSON.stringify({
@@ -310,10 +417,16 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงผู้ใหญ่')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกง', { selector: 'h4' })).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกงผู้ใหญ่ ขาสั้น'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกง', { selector: 'h4' }),
+        ).not.toBeInTheDocument();
     });
 
     it('renders Form 2 screen names, numbers, sizes, and quantities in the production document', () => {
@@ -325,13 +438,26 @@ describe('production board timeline sync', () => {
 
         const order = {
             ...makeSpecOrder(901),
-            items: [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 3 }],
+            items: [
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 3,
+                },
+            ],
             specification: {
                 screen_print_detail: JSON.stringify({
                     mode: 'individual',
                     personalization_rows: [
                         { name: 'สมชาย', number: '10', size: 'M', quantity: 1 },
-                        { name: 'สมหญิง', number: '25', size: 'L', quantity: 2 },
+                        {
+                            name: 'สมหญิง',
+                            number: '25',
+                            size: 'L',
+                            quantity: 2,
+                        },
                     ],
                 }),
             },
@@ -350,7 +476,9 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const personalizationTable = document.querySelector('.p-personalization-table');
+        const personalizationTable = document.querySelector(
+            '.p-personalization-table',
+        );
 
         expect(document.querySelectorAll('.p-print-page')).toHaveLength(2);
         expect(personalizationTable).not.toBeNull();
@@ -363,7 +491,9 @@ describe('production board timeline sync', () => {
         expect(personalizationTable).toHaveTextContent('L');
         expect(personalizationTable).toHaveTextContent('รวม');
         expect(personalizationTable).toHaveTextContent('3');
-        expect(document.querySelectorAll('.p-size-bar')).toHaveLength(0);
+        // The name list carries a size per person, but the floor still cuts by
+        // size, so the group sheet prints the same size bar as every other form.
+        expect(document.querySelectorAll('.p-size-bar')).toHaveLength(1);
     });
 
     it('renders only one job when only shirt adults has real data', () => {
@@ -377,7 +507,13 @@ describe('production board timeline sync', () => {
             ...makeSpecOrder(84),
             order_code: 'ORD-084',
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
         } as Order;
 
@@ -395,9 +531,13 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงผู้ใหญ่')).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกงผู้ใหญ่ ขาสั้น'),
+        ).not.toBeInTheDocument();
     });
 
     it('does not render pants when pants quantities are all zero', () => {
@@ -405,7 +545,9 @@ describe('production board timeline sync', () => {
             productionPricingMap: {
                 '85': {
                     ...makePricingSummary(40),
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     pants_child_unit_total: 5,
                     pants_adult_unit_total: 15,
                 },
@@ -416,9 +558,27 @@ describe('production board timeline sync', () => {
             ...makeSpecOrder(85),
             order_code: 'ORD-085',
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 2 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 0 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JM', quantity: 0 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 2,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 0,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 0,
+                },
             ],
         } as Order;
 
@@ -436,8 +596,10 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงผู้ใหญ่')).not.toBeInTheDocument();
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกงผู้ใหญ่ ขาสั้น'),
+        ).not.toBeInTheDocument();
     });
 
     it('renders pants when at least one pants size has quantity greater than zero', () => {
@@ -446,7 +608,9 @@ describe('production board timeline sync', () => {
                 '86': {
                     ...makePricingSummary(15),
                     components: [],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 0,
                     pants_child_unit_total: 5,
@@ -464,7 +628,13 @@ describe('production board timeline sync', () => {
             ...makeSpecOrder(86),
             order_code: 'ORD-086',
             items: [
-                { item_type: 'pants', size_group: 'kids', size_label: 'JM', quantity: 3 },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 3,
+                },
             ],
         } as Order;
 
@@ -482,15 +652,21 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('กางเกงเด็ก').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('กางเกงเด็ก ขาสั้น').length).toBeGreaterThan(
+            0,
+        );
     });
 
     it('keeps dialog group count equal to pdf page count', () => {
         mockPage.props = {
             productionPricingMap: {
                 '87': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 20,
                     pants_child_unit_total: 0,
@@ -508,12 +684,24 @@ describe('production board timeline sync', () => {
             ...makeSpecOrder(87),
             order_code: 'ORD-087',
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
         } as Order;
 
-        const { container } = render(
+        render(
             <ProductionBoardPage
                 orders={[order]}
                 branches={[]}
@@ -527,8 +715,11 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         const pageCount = document.querySelectorAll('.p-print-page').length;
-        const summaryLabel = screen.getByText(/สรุปตามกลุ่มการผลิต/).textContent ?? '';
-        const summaryCount = Number(summaryLabel.match(/(\d+)\s*กลุ่ม/)?.[1] ?? '0');
+        const summaryLabel =
+            screen.getByText(/สรุปตามกลุ่มการผลิต/).textContent ?? '';
+        const summaryCount = Number(
+            summaryLabel.match(/(\d+)\s*กลุ่ม/)?.[1] ?? '0',
+        );
 
         expect(summaryCount).toBe(pageCount);
     });
@@ -537,8 +728,12 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '88': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -556,10 +751,34 @@ describe('production board timeline sync', () => {
             ...makeSpecOrder(88),
             order_code: 'ORD-088',
             items: [
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 2 },
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 3 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'M', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 2,
+                },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 3,
+                },
             ],
         } as Order;
 
@@ -577,18 +796,30 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(4);
-        expect(screen.getAllByText('เสื้อไซต์เด็ก').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('กางเกงเด็ก').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('กางเกงผู้ใหญ่').length).toBeGreaterThan(0);
+        expect(
+            screen.getAllByText('เสื้อไซต์เด็ก แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.getAllByText('กางเกงเด็ก ขาสั้น').length).toBeGreaterThan(
+            0,
+        );
+        expect(
+            screen.getAllByText('กางเกงผู้ใหญ่ ขาสั้น').length,
+        ).toBeGreaterThan(0);
     });
 
     it('renders only one print page when only one production group has data', () => {
         mockPage.props = {
             productionPricingMap: {
                 '62': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -614,7 +845,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 62' },
             creator_user: { name: 'ผู้สร้าง 62' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -632,7 +869,7 @@ describe('production board timeline sync', () => {
             ],
         } as Order;
 
-        const { container } = render(
+        render(
             <ProductionBoardPage
                 orders={[singleGroupOrder]}
                 branches={[]}
@@ -646,12 +883,18 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
         expect(screen.getAllByText('ผู้ใหญ่').length).toBeGreaterThan(0);
         expect(screen.queryByText('เด็ก')).not.toBeInTheDocument();
-        expect(screen.getByText('วิธีคิดคำนวณเงิน (ผู้ใหญ่)')).toBeInTheDocument();
-        expect(screen.queryByText('วิธีคิดคำนวณเงิน (เด็ก)')).not.toBeInTheDocument();
+        expect(
+            screen.getByText('วิธีคิดคำนวณเงิน (ผู้ใหญ่)'),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByText('วิธีคิดคำนวณเงิน (เด็ก)'),
+        ).not.toBeInTheDocument();
         expect(screen.getByText('4 x 20.00 = 80.00')).toBeInTheDocument();
         expect(screen.getByText('จำนวน 0 โหล')).toBeInTheDocument();
     });
@@ -660,7 +903,9 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '63': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
                     pants_components: [],
                     child_unit_total: 10,
                     adult_unit_total: 20,
@@ -687,7 +932,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 63' },
             creator_user: { name: 'ผู้สร้าง 63' },
             items: [
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 11 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 11,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -721,7 +972,9 @@ describe('production board timeline sync', () => {
         expect(screen.getAllByText('เด็ก').length).toBeGreaterThan(0);
         expect(screen.queryByText('ผู้ใหญ่')).not.toBeInTheDocument();
         expect(screen.getByText('วิธีคิดคำนวณเงิน (เด็ก)')).toBeInTheDocument();
-        expect(screen.queryByText('วิธีคิดคำนวณเงิน (ผู้ใหญ่)')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('วิธีคิดคำนวณเงิน (ผู้ใหญ่)'),
+        ).not.toBeInTheDocument();
         expect(screen.getByText('11 x 10.00 = 110.00')).toBeInTheDocument();
         expect(screen.getByText('จำนวน 0 โหล')).toBeInTheDocument();
     });
@@ -730,8 +983,12 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '65': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 0,
                     pants_child_unit_total: 5,
@@ -757,7 +1014,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 65' },
             creator_user: { name: 'ผู้สร้าง 65' },
             items: [
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 6 },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 6,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -789,10 +1052,18 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('กางเกงเด็ก').length).toBeGreaterThan(0);
-        expect(screen.queryByText('เสื้อไซต์เด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('เสื้อไซต์ผู้ใหญ่')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงผู้ใหญ่')).not.toBeInTheDocument();
+        expect(screen.getAllByText('กางเกงเด็ก ขาสั้น').length).toBeGreaterThan(
+            0,
+        );
+        expect(
+            screen.queryByText('เสื้อไซต์เด็ก แขนสั้น'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกงผู้ใหญ่ ขาสั้น'),
+        ).not.toBeInTheDocument();
         expect(screen.getAllByText('เด็ก').length).toBeGreaterThan(0);
         expect(screen.queryByText('ผู้ใหญ่')).not.toBeInTheDocument();
         expect(screen.getByText('6 x 5.00 = 30.00')).toBeInTheDocument();
@@ -803,8 +1074,12 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '66': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 0,
                     pants_child_unit_total: 5,
@@ -830,7 +1105,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 66' },
             creator_user: { name: 'ผู้สร้าง 66' },
             items: [
-                { item_type: 'pants', size_group: 'oversize', size_label: '2XL', quantity: 7 },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'oversize',
+                    size_label: '2XL',
+                    quantity: 7,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -862,10 +1143,16 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('กางเกงผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('เสื้อไซต์เด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('เสื้อไซต์ผู้ใหญ่')).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('กางเกงผู้ใหญ่ ขาสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('เสื้อไซต์เด็ก แขนสั้น'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น'),
+        ).not.toBeInTheDocument();
         expect(screen.getAllByText('ผู้ใหญ่').length).toBeGreaterThan(0);
         expect(screen.queryByText('เด็ก')).not.toBeInTheDocument();
         expect(screen.getByText('7 x 15.00 = 105.00')).toBeInTheDocument();
@@ -876,8 +1163,12 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '67': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 0,
                     pants_child_unit_total: 5,
@@ -903,8 +1194,20 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 67' },
             creator_user: { name: 'ผู้สร้าง 67' },
             items: [
-                { item_type: 'pants', size_group: 'kids', size_label: 'JM', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -936,10 +1239,18 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(2);
-        expect(screen.getAllByText('กางเกงเด็ก').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('กางเกงผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('เสื้อไซต์เด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('เสื้อไซต์ผู้ใหญ่')).not.toBeInTheDocument();
+        expect(screen.getAllByText('กางเกงเด็ก ขาสั้น').length).toBeGreaterThan(
+            0,
+        );
+        expect(
+            screen.getAllByText('กางเกงผู้ใหญ่ ขาสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.queryByText('เสื้อไซต์เด็ก แขนสั้น'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น'),
+        ).not.toBeInTheDocument();
         expect(screen.getByText('4 x 5.00 = 20.00')).toBeInTheDocument();
         expect(screen.getByText('3 x 15.00 = 45.00')).toBeInTheDocument();
     });
@@ -948,8 +1259,12 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '68': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -975,10 +1290,34 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 68' },
             creator_user: { name: 'ผู้สร้าง 68' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 0 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 0 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'M', quantity: 0 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 0,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 0,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 0,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1010,18 +1349,28 @@ describe('production board timeline sync', () => {
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
         expect(document.querySelectorAll('.p-print-page').length).toBe(1);
-        expect(screen.getAllByText('เสื้อไซต์ผู้ใหญ่').length).toBeGreaterThan(0);
-        expect(screen.queryByText('เสื้อไซต์เด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงเด็ก')).not.toBeInTheDocument();
-        expect(screen.queryByText('กางเกงผู้ใหญ่')).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('เสื้อไซต์ผู้ใหญ่ แขนสั้น').length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.queryByText('เสื้อไซต์เด็ก แขนสั้น'),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByText('กางเกงเด็ก ขาสั้น')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('กางเกงผู้ใหญ่ ขาสั้น'),
+        ).not.toBeInTheDocument();
     });
 
     it('uses shirt and pants artwork by group when all artwork sources exist', () => {
         mockPage.props = {
             productionPricingMap: {
                 '69': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 20,
                     pants_child_unit_total: 0,
@@ -1050,8 +1399,20 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 69' },
             creator_user: { name: 'ผู้สร้าง 69' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1082,19 +1443,31 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1');
-        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork-1');
+        const shirtArtwork = screen.getByAltText(
+            'เสื้อไซต์ผู้ใหญ่ แขนสั้น-artwork-1',
+        );
+        const pantsArtwork = screen.getByAltText(
+            'กางเกงผู้ใหญ่ ขาสั้น-artwork-1',
+        );
 
-        expect(shirtArtwork.getAttribute('src')).toBe('https://example.com/shirt-art.webp');
-        expect(pantsArtwork.getAttribute('src')).toBe('https://example.com/pants-art.webp');
+        expect(shirtArtwork.getAttribute('src')).toBe(
+            'https://example.com/shirt-art.webp',
+        );
+        expect(pantsArtwork.getAttribute('src')).toBe(
+            'https://example.com/pants-art.webp',
+        );
     });
 
     it('counts every uploaded shirt and pants artwork image in the attached-images gallery', () => {
         mockPage.props = {
             productionPricingMap: {
                 '71': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 20,
                     pants_child_unit_total: 0,
@@ -1117,15 +1490,30 @@ describe('production board timeline sync', () => {
             order_date: '2026-08-01',
             due_date: '2026-08-05',
             artwork_url: null,
-            shirt_artwork_urls: ['https://example.com/shirt-art-1.webp', 'https://example.com/shirt-art-2.webp'],
+            shirt_artwork_urls: [
+                'https://example.com/shirt-art-1.webp',
+                'https://example.com/shirt-art-2.webp',
+            ],
             pants_artwork_urls: ['https://example.com/pants-art-1.webp'],
             reference_designs: ['https://example.com/reference-1.webp'],
             branch: { branch_name: 'สาขา 1' },
             customer: { customer_name: 'ลูกค้า 71' },
             creator_user: { name: 'ผู้สร้าง 71' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1163,7 +1551,9 @@ describe('production board timeline sync', () => {
         mockPage.props = {
             productionPricingMap: {
                 '70': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
                     pants_components: [],
                     child_unit_total: 0,
                     adult_unit_total: 20,
@@ -1193,7 +1583,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 70' },
             creator_user: { name: 'ผู้สร้าง 70' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1224,9 +1620,13 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const shirtArtwork = screen.getByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1');
+        const shirtArtwork = screen.getByAltText(
+            'เสื้อไซต์ผู้ใหญ่ แขนสั้น-artwork-1',
+        );
 
-        expect(shirtArtwork.getAttribute('src')).toBe('https://example.com/general-art.webp');
+        expect(shirtArtwork.getAttribute('src')).toBe(
+            'https://example.com/general-art.webp',
+        );
     });
 
     it('falls back pants section artwork to general artwork when pants artwork is missing', () => {
@@ -1234,7 +1634,9 @@ describe('production board timeline sync', () => {
             productionPricingMap: {
                 '75': {
                     components: [],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 0,
                     pants_child_unit_total: 0,
@@ -1263,7 +1665,13 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 75' },
             creator_user: { name: 'ผู้สร้าง 75' },
             items: [
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1294,17 +1702,25 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const pantsArtwork = screen.getByAltText('กางเกงผู้ใหญ่-artwork-1');
+        const pantsArtwork = screen.getByAltText(
+            'กางเกงผู้ใหญ่ ขาสั้น-artwork-1',
+        );
 
-        expect(pantsArtwork.getAttribute('src')).toBe('https://example.com/general-art.webp');
+        expect(pantsArtwork.getAttribute('src')).toBe(
+            'https://example.com/general-art.webp',
+        );
     });
 
     it('shows placeholder in both shirt and pants sections when all artwork sources are missing', () => {
         mockPage.props = {
             productionPricingMap: {
                 '76': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 0,
                     adult_unit_total: 20,
                     pants_child_unit_total: 0,
@@ -1333,8 +1749,20 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 76' },
             creator_user: { name: 'ผู้สร้าง 76' },
             items: [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'L', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 3 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 3,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1365,17 +1793,27 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        expect(screen.queryByAltText('เสื้อไซต์ผู้ใหญ่-artwork-1')).not.toBeInTheDocument();
-        expect(screen.queryByAltText('กางเกงผู้ใหญ่-artwork-1')).not.toBeInTheDocument();
-        expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThanOrEqual(2);
+        expect(
+            screen.queryByAltText('เสื้อไซต์ผู้ใหญ่ แขนสั้น-artwork-1'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByAltText('กางเกงผู้ใหญ่ ขาสั้น-artwork-1'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.getAllByText('ไม่มีรูป Artwork').length,
+        ).toBeGreaterThanOrEqual(2);
     });
 
     it('keeps group header colors and spec rows isolated by garment type in dialog and pdf', () => {
         mockPage.props = {
             productionPricingMap: {
                 '77': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -1436,10 +1874,34 @@ describe('production board timeline sync', () => {
                 updated_at: '2026-08-01T10:00:00.000000Z',
             },
             items: [
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 2 },
-                { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 3 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 4 },
-                { item_type: 'pants', size_group: 'adults', size_label: 'L', quantity: 1 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 2,
+                },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 3,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 4,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    quantity: 1,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1470,10 +1932,10 @@ describe('production board timeline sync', () => {
 
         fireEvent.click(screen.getByTitle('ดูรายละเอียดออเดอร์'));
 
-        const shirtKidHeader = screen.getByText('เสื้อไซต์เด็ก');
-        const shirtAdultHeader = screen.getByText('เสื้อไซต์ผู้ใหญ่');
-        const pantsKidHeader = screen.getByText('กางเกงเด็ก');
-        const pantsAdultHeader = screen.getByText('กางเกงผู้ใหญ่');
+        const shirtKidHeader = sheetHeader('เสื้อไซต์เด็ก แขนสั้น');
+        const shirtAdultHeader = sheetHeader('เสื้อไซต์ผู้ใหญ่ แขนสั้น');
+        const pantsKidHeader = sheetHeader('กางเกงเด็ก ขาสั้น');
+        const pantsAdultHeader = sheetHeader('กางเกงผู้ใหญ่ ขาสั้น');
 
         const shirtKidStyle = shirtKidHeader.getAttribute('style') ?? '';
         const shirtAdultStyle = shirtAdultHeader.getAttribute('style') ?? '';
@@ -1483,7 +1945,9 @@ describe('production board timeline sync', () => {
         expect(shirtKidStyle).toContain('background-color: rgb(15, 118, 110)');
         expect(shirtAdultStyle).toContain('background-color: rgb(29, 78, 216)');
         expect(pantsKidStyle).toContain('background-color: rgb(180, 83, 9)');
-        expect(pantsAdultStyle).toContain('background-color: rgb(124, 58, 237)');
+        expect(pantsAdultStyle).toContain(
+            'background-color: rgb(124, 58, 237)',
+        );
         expect(shirtKidStyle).not.toBe(shirtAdultStyle);
         expect(shirtKidStyle).not.toBe(pantsKidStyle);
         expect(shirtKidStyle).not.toBe(pantsAdultStyle);
@@ -1491,16 +1955,34 @@ describe('production board timeline sync', () => {
         expect(shirtAdultStyle).not.toBe(pantsAdultStyle);
         expect(pantsKidStyle).not.toBe(pantsAdultStyle);
 
-        const printPages = Array.from(document.querySelectorAll('.p-print-page'));
-        const shirtKidPage = printPages.find((page) => page.textContent?.includes('เสื้อไซต์เด็ก'));
-        const shirtAdultPage = printPages.find((page) => page.textContent?.includes('เสื้อไซต์ผู้ใหญ่'));
-        const pantsKidPage = printPages.find((page) => page.textContent?.includes('กางเกงเด็ก'));
-        const pantsAdultPage = printPages.find((page) => page.textContent?.includes('กางเกงผู้ใหญ่'));
+        const printPages = Array.from(
+            document.querySelectorAll('.p-print-page'),
+        );
+        const shirtKidPage = printPages.find((page) =>
+            page.textContent?.includes('เสื้อไซต์เด็ก แขนสั้น'),
+        );
+        const shirtAdultPage = printPages.find((page) =>
+            page.textContent?.includes('เสื้อไซต์ผู้ใหญ่ แขนสั้น'),
+        );
+        const pantsKidPage = printPages.find((page) =>
+            page.textContent?.includes('กางเกงเด็ก ขาสั้น'),
+        );
+        const pantsAdultPage = printPages.find((page) =>
+            page.textContent?.includes('กางเกงผู้ใหญ่ ขาสั้น'),
+        );
 
-        expect(shirtKidPage?.querySelectorAll('.p-spec-grid-item').length).toBeGreaterThan(0);
-        expect(shirtAdultPage?.querySelectorAll('.p-spec-grid-item').length).toBeGreaterThan(0);
-        expect(pantsKidPage?.querySelectorAll('.p-spec-grid-item').length).toBeGreaterThan(0);
-        expect(pantsAdultPage?.querySelectorAll('.p-spec-grid-item').length).toBeGreaterThan(0);
+        expect(
+            shirtKidPage?.querySelectorAll('.p-spec-grid-item').length,
+        ).toBeGreaterThan(0);
+        expect(
+            shirtAdultPage?.querySelectorAll('.p-spec-grid-item').length,
+        ).toBeGreaterThan(0);
+        expect(
+            pantsKidPage?.querySelectorAll('.p-spec-grid-item').length,
+        ).toBeGreaterThan(0);
+        expect(
+            pantsAdultPage?.querySelectorAll('.p-spec-grid-item').length,
+        ).toBeGreaterThan(0);
 
         shirtKidPage?.querySelectorAll('.p-spec-grid-item').forEach((row) => {
             expect(row.textContent?.trim()).not.toBe('');
@@ -1518,22 +2000,40 @@ describe('production board timeline sync', () => {
             expect(row.textContent?.trim()).not.toBe('');
         });
 
-        expect(within(shirtKidPage as HTMLElement).queryByText('แบบขา')).not.toBeInTheDocument();
-        expect(within(shirtKidPage as HTMLElement).queryByText('ปลายขา')).not.toBeInTheDocument();
-        expect(within(pantsKidPage as HTMLElement).queryByText('แบบแขน')).not.toBeInTheDocument();
-        expect(within(pantsKidPage as HTMLElement).queryByText('ปลายแขน')).not.toBeInTheDocument();
+        expect(
+            within(shirtKidPage as HTMLElement).queryByText('แบบขา'),
+        ).not.toBeInTheDocument();
+        expect(
+            within(shirtKidPage as HTMLElement).queryByText('ปลายขา'),
+        ).not.toBeInTheDocument();
+        expect(
+            within(pantsKidPage as HTMLElement).queryByText('แบบแขน'),
+        ).not.toBeInTheDocument();
+        expect(
+            within(pantsKidPage as HTMLElement).queryByText('ปลายแขน'),
+        ).not.toBeInTheDocument();
 
-        expect(within(shirtAdultPage as HTMLElement).getByText('แขนสั้นจริง')).toBeInTheDocument();
-        expect(within(pantsAdultPage as HTMLElement).getByText('ขาตรงจริง')).toBeInTheDocument();
-        expect(within(pantsAdultPage as HTMLElement).queryByText('แขนสั้นจริง')).not.toBeInTheDocument();
+        expect(
+            within(shirtAdultPage as HTMLElement).getByText('แขนสั้นจริง'),
+        ).toBeInTheDocument();
+        expect(
+            within(pantsAdultPage as HTMLElement).getByText('ขาตรงจริง'),
+        ).toBeInTheDocument();
+        expect(
+            within(pantsAdultPage as HTMLElement).queryByText('แขนสั้นจริง'),
+        ).not.toBeInTheDocument();
     });
 
     it('computes dozen count with floor rule for 12 and 24 pieces', () => {
         mockPage.props = {
             productionPricingMap: {
                 '64': {
-                    components: [{ name: 'เย็บคอ', child_price: 10, adult_price: 20 }],
-                    pants_components: [{ name: 'เย็บขา', child_price: 5, adult_price: 15 }],
+                    components: [
+                        { name: 'เย็บคอ', child_price: 10, adult_price: 20 },
+                    ],
+                    pants_components: [
+                        { name: 'เย็บขา', child_price: 5, adult_price: 15 },
+                    ],
                     child_unit_total: 10,
                     adult_unit_total: 20,
                     pants_child_unit_total: 5,
@@ -1559,8 +2059,20 @@ describe('production board timeline sync', () => {
             customer: { customer_name: 'ลูกค้า 64' },
             creator_user: { name: 'ผู้สร้าง 64' },
             items: [
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 12 },
-                { item_type: 'pants', size_group: 'kids', size_label: 'JL', quantity: 24 },
+                {
+                    item_type: 'shirt',
+                    shirt_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 12,
+                },
+                {
+                    item_type: 'pants',
+                    pants_style: 'short',
+                    size_group: 'kids',
+                    size_label: 'JL',
+                    quantity: 24,
+                },
             ],
             receipts: [],
             status_histories: [],
@@ -1593,7 +2105,9 @@ describe('production board timeline sync', () => {
 
         expect(screen.getByText('จำนวน 1 โหล')).toBeInTheDocument();
         expect(screen.getByText('จำนวน 2 โหล')).toBeInTheDocument();
-        expect(screen.queryByText(/หน้า\s*\d+\s*\/\s*\d+/)).not.toBeInTheDocument();
+        expect(
+            screen.queryByText(/หน้า\s*\d+\s*\/\s*\d+/),
+        ).not.toBeInTheDocument();
         expect(screen.queryByText(/พิมพ์:/)).not.toBeInTheDocument();
     });
 
@@ -1944,8 +2458,12 @@ describe('production board timeline sync', () => {
         );
 
         fireEvent.click(screen.getAllByRole('button', { name: 'ไทม์ไลน์' })[0]);
-        expect(screen.getByText('Timeline ออเดอร์ ORD-051')).toBeInTheDocument();
-        expect(within(screen.getByRole('dialog')).getByText('ลูกค้า A')).toBeInTheDocument();
+        expect(
+            screen.getByText('Timeline ออเดอร์ ORD-051'),
+        ).toBeInTheDocument();
+        expect(
+            within(screen.getByRole('dialog')).getByText('ลูกค้า A'),
+        ).toBeInTheDocument();
 
         const updatedOrderB = {
             ...orderB,
@@ -1970,8 +2488,14 @@ describe('production board timeline sync', () => {
             />,
         );
 
-        expect(screen.getByText('Timeline ออเดอร์ ORD-051')).toBeInTheDocument();
-        expect(within(screen.getByRole('dialog')).getByText('ลูกค้า A')).toBeInTheDocument();
-        expect(within(screen.getByRole('dialog')).queryByText('ลูกค้า B')).not.toBeInTheDocument();
+        expect(
+            screen.getByText('Timeline ออเดอร์ ORD-051'),
+        ).toBeInTheDocument();
+        expect(
+            within(screen.getByRole('dialog')).getByText('ลูกค้า A'),
+        ).toBeInTheDocument();
+        expect(
+            within(screen.getByRole('dialog')).queryByText('ลูกค้า B'),
+        ).not.toBeInTheDocument();
     });
 });

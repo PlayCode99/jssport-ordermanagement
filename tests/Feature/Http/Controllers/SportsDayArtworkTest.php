@@ -11,8 +11,9 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
-use Tests\TestCase;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia as Assert;
+use Tests\TestCase;
 
 /**
  * Form 3 (กีฬาสี): artwork is attached per colour house, so what comes back out
@@ -164,5 +165,42 @@ class SportsDayArtworkTest extends TestCase
         $this->assertCount(2, $grouped['0']);
         $this->assertCount(1, $grouped['1']);
         $this->assertCount(2, $source->fresh()->sports_day_artwork_urls['0']);
+    }
+
+    public function test_reopening_a_bill_hands_the_house_artwork_back_to_the_form(): void
+    {
+        $this->actingAs($this->admin())->post('/orders', $this->payload([
+            0 => [UploadedFile::fake()->image('house-a.png')],
+            1 => [UploadedFile::fake()->image('house-b1.png'), UploadedFile::fake()->image('house-b2.png')],
+        ]))->assertSessionHasNoErrors();
+
+        $order = Order::query()->latest('id')->firstOrFail();
+
+        // The edit form rebuilds each house from this payload. It used to be
+        // missing, so every house came back with an empty gallery and the shop
+        // saw its artwork as lost.
+        $this->actingAs($this->admin())
+            ->get("/orders/{$order->id}/edit")
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Orders/Create')
+                ->has('order.sports_day_artwork_urls.0', 1)
+                ->has('order.sports_day_artwork_urls.1', 2)
+            );
+    }
+
+    public function test_opening_the_bill_again_shows_the_artwork_before_it_is_saved(): void
+    {
+        $this->actingAs($this->admin())->post('/orders', $this->payload([
+            0 => [UploadedFile::fake()->image('house-a.png')],
+        ]))->assertSessionHasNoErrors();
+
+        $order = Order::query()->latest('id')->firstOrFail();
+
+        $this->actingAs($this->admin())
+            ->get("/orders/{$order->id}/duplicate")
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Orders/Create')
+                ->has('order.sports_day_artwork_urls.0', 1)
+            );
     }
 }

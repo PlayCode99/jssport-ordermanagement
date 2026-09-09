@@ -47,11 +47,14 @@ export type RoutingStationName =
     | 'qc'
     | 'shipping';
 
-export type RoutingStatus = 'pending' | 'in_progress' | 'completed' | 'skipped' | 'rejected';
+export type RoutingStatus =
+    'pending' | 'in_progress' | 'completed' | 'skipped' | 'rejected';
 
-export type CuttingOrderStatus = 'draft' | 'cutting' | 'inspected' | 'completed';
+export type CuttingOrderStatus =
+    'draft' | 'cutting' | 'inspected' | 'completed';
 
-export type PaymentType = 'deposit' | 'partially_paid' | 'full_payment' | 'balance_clear';
+export type PaymentType =
+    'deposit' | 'partially_paid' | 'full_payment' | 'balance_clear';
 
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'cheque';
 
@@ -138,8 +141,8 @@ export interface Order {
     shirt_artwork_urls?: string[];
     sports_day_artwork_urls?: Record<string, string[]>;
     pants_artwork_urls?: string[];
-        delivery_method: string | null;
-        shipping_address: string | null;
+    delivery_method: string | null;
+    shipping_address: string | null;
     reference_designs?: string[];
     created_at: DateTimeString;
     updated_at: DateTimeString;
@@ -184,6 +187,9 @@ export interface OrderItem {
     item_type: string;
     size_group: SizeGroup;
     size_label: string;
+    /** Sleeve and leg length, null on rows saved before the columns existed. */
+    shirt_style?: 'short' | 'long' | null;
+    pants_style?: 'short' | 'long' | null;
     quantity: number;
     unit_price: number;
     total_price: number;

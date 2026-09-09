@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildRequestItemsFromIndividual, rowIndividualTotal } from '@/pages/Orders/Create';
+import {
+    buildRequestItemsFromIndividual,
+    rowIndividualTotal,
+} from '@/pages/Orders/Create';
 
 /**
  * Form 2 orders can include pants for each person. When they do, the pants must
@@ -9,13 +12,17 @@ import { buildRequestItemsFromIndividual, rowIndividualTotal } from '@/pages/Ord
  */
 const person = (over = {}) => ({
     id: 'p1',
+    role: 'player' as const,
     name: 'สมชาย',
     size_group: 'adults' as const,
     size: 'M',
+    shirt_style: 'short' as const,
     number: '10',
     quantity: 1,
     unit_price: 250,
     pants_size: 'L',
+    pants_style: 'short' as const,
+    pants_number: '',
     pants_quantity: 1,
     pants_unit_price: 180,
     ...over,
@@ -34,12 +41,19 @@ describe('form 2 with pants', () => {
         const items = buildRequestItemsFromIndividual([person()], true);
 
         expect(items.map((item) => item.item_type)).toEqual(['shirt', 'pants']);
-        expect(items[1]).toMatchObject({ size_label: 'L', quantity: 1, unit_price: 180 });
+        expect(items[1]).toMatchObject({
+            size_label: 'L',
+            quantity: 1,
+            unit_price: 180,
+        });
         expect(rowIndividualTotal(person(), true)).toBe(430);
     });
 
     it('falls back to the shirt size when no pants size was picked', () => {
-        const items = buildRequestItemsFromIndividual([person({ pants_size: '' })], true);
+        const items = buildRequestItemsFromIndividual(
+            [person({ pants_size: '' })],
+            true,
+        );
 
         expect(items[1].size_label).toBe('M');
     });
@@ -50,7 +64,11 @@ describe('form 2 with pants', () => {
             true,
         );
 
-        expect(items.map((item) => item.item_type)).toEqual(['shirt', 'pants', 'shirt']);
+        expect(items.map((item) => item.item_type)).toEqual([
+            'shirt',
+            'pants',
+            'shirt',
+        ]);
     });
 
     it('keeps each person on their own size group', () => {
@@ -64,14 +82,22 @@ describe('form 2 with pants', () => {
     });
 
     it('totals several people with pants correctly', () => {
-        const rows = [person({ id: 'a' }), person({ id: 'b', quantity: 2, pants_quantity: 2 })];
-        const total = rows.reduce((sum, row) => sum + rowIndividualTotal(row, true), 0);
+        const rows = [
+            person({ id: 'a' }),
+            person({ id: 'b', quantity: 2, pants_quantity: 2 }),
+        ];
+        const total = rows.reduce(
+            (sum, row) => sum + rowIndividualTotal(row, true),
+            0,
+        );
 
         // (250 + 180) + (500 + 360)
         expect(total).toBe(1290);
 
-        const lineTotal = buildRequestItemsFromIndividual(rows, true)
-            .reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+        const lineTotal = buildRequestItemsFromIndividual(rows, true).reduce(
+            (sum, item) => sum + item.quantity * item.unit_price,
+            0,
+        );
         expect(lineTotal).toBe(total);
     });
 });

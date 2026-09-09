@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Production;
 
-use App\Support\Production\ProductionCostCalculation;
-use App\Enums\GarmentCategory;
 use App\Enums\OrderStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\CatalogItem;
 use App\Models\CuttingTeam;
 use App\Models\EmbroideryTeam;
-use App\Models\GarmentOperation;
 use App\Models\GarmentType;
 use App\Models\HeatPressMachine;
 use App\Models\Order;
 use App\Models\PieceworkPrice;
 use App\Models\ScreenTeam;
 use App\Models\SewingTeam;
+use App\Support\Production\ProductionCostCalculation;
 use App\Support\UserAccessControl;
-use Illuminate\Support\Collection;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -33,12 +30,12 @@ class ProductionKanbanController extends Controller
     private const ORDERS_PER_PAGE = 10;
 
     /**
-     * @var array<string, array<string, string>>|null
+     * @var array<string, array<array-key, string>>|null
      */
     private ?array $catalogLookupCache = null;
 
     /**
-     * @return array<string, array<string, string>>
+     * @return array<string, array<array-key, string>>
      */
     private function catalogLookups(): array
     {
@@ -227,6 +224,7 @@ class ProductionKanbanController extends Controller
             ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
             ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
             ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
+            ['key' => 'seat_style_text', 'label' => 'กุ้นกางเกง', 'type' => 'text'],
             ['key' => 'panel_style_text', 'label' => 'แบบต่อ', 'type' => 'text'],
             ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
@@ -293,8 +291,7 @@ class ProductionKanbanController extends Controller
         bool $showDepartmentFilter,
         string $pageTitle,
         string $pageHref,
-    ): Response
-    {
+    ): Response {
         $allowedDepartments = ['all', 'design', 'print_room', 'heat_press', 'embroidery', 'cutting', 'sewing', 'screen_flex', 'qc', 'shipping'];
         $initialDepartmentFilter = in_array($department, $allowedDepartments, true) ? $department : 'all';
         $actor = request()->user();

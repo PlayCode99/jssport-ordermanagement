@@ -9,8 +9,18 @@ describe('deriveFloorStats', () => {
                 job_type: 'Screen Print',
                 details: {
                     routings: [
-                        { id: 1, is_required: true, station_name: 'print', status: 'pending' },
-                        { id: 2, is_required: true, station_name: 'embroidery', status: 'pending' },
+                        {
+                            id: 1,
+                            is_required: true,
+                            station_name: 'print',
+                            status: 'pending',
+                        },
+                        {
+                            id: 2,
+                            is_required: true,
+                            station_name: 'embroidery',
+                            status: 'pending',
+                        },
                     ],
                 },
             },
@@ -26,7 +36,12 @@ describe('deriveFloorStats', () => {
                 job_type: 'DTG',
                 details: {
                     routings: [
-                        { id: 10, is_required: true, station_name: 'screen', status: 'pending' },
+                        {
+                            id: 10,
+                            is_required: true,
+                            station_name: 'screen',
+                            status: 'pending',
+                        },
                     ],
                 },
             },

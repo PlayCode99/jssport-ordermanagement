@@ -4,11 +4,12 @@ import type { Team, User } from '@/types';
 
 export function UserInfo({
     user,
-    showEmail = false,
+    showEmployeeCode = false,
     team = null,
 }: {
     user: User;
-    showEmail?: boolean;
+    /** The staff code, shown in place of the generated login address. */
+    showEmployeeCode?: boolean;
     team?: Team | null;
 }) {
     const getInitials = useInitials();
@@ -31,9 +32,9 @@ export function UserInfo({
                         {team.name}
                     </span>
                 ) : null}
-                {!team && showEmail ? (
+                {!team && showEmployeeCode && user.employee_code ? (
                     <span className="truncate text-xs text-muted-foreground">
-                        {user.email}
+                        {user.employee_code}
                     </span>
                 ) : null}
             </div>

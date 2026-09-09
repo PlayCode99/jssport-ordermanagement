@@ -3,7 +3,7 @@
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetTeamUrlDefaults;
-use App\Support\UserAccessControl;
+use App\Support\UserLandingPage;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -27,16 +27,15 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             $team = $user->currentTeam ?? $user->personalTeam() ?? $user->fallbackTeam();
+            $landing = UserLandingPage::routeFor($user);
 
-            if ($team !== null) {
+            // Same rule as the sign-in redirect: the first menu this account may
+            // open. Counter staff keep their team-scoped dashboard.
+            if ($team !== null && $landing === route('counter.fallback', absolute: false)) {
                 return route('index', ['current_team' => $team->slug]);
             }
 
-            if (UserAccessControl::canAccessMenu($user, 'counter')) {
-                return route('counter.fallback');
-            }
-
-            return route('orders.create');
+            return $landing;
         });
 
         $middleware->web(append: [

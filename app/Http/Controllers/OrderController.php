@@ -12,15 +12,16 @@ use App\Models\Branch;
 use App\Models\CatalogItem;
 use App\Models\Customer;
 use App\Models\GarmentType;
+use App\Models\Order;
+use App\Models\ProductionDailySetting;
+use App\Support\UserAccessControl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
-use App\Models\Order;
-use App\Models\ProductionDailySetting;
-use App\Support\UserAccessControl;
 
 class OrderController extends Controller
 {
@@ -174,9 +175,9 @@ class OrderController extends Controller
      * filled in, fall back to the types already used on orders so the form is
      * never left with an empty dropdown.
      *
-     * @return \Illuminate\Support\Collection<int, array{id: int, name: string}>
+     * @return Collection<int, array{id: int, name: string}>
      */
-    private function jobTypeOptions(): \Illuminate\Support\Collection
+    private function jobTypeOptions(): Collection
     {
         $catalogNames = CatalogItem::query()
             ->where('storage_key', ShirtCatalogController::JOB_TYPES_STORAGE_KEY)
@@ -240,9 +241,6 @@ class OrderController extends Controller
         return back()->with('success', "ลบออเดอร์ {$order->order_code} เรียบร้อยแล้ว");
     }
 
-    /**
-     * @return Response
-     */
     private function renderOrderForm(Request $request, ?Order $order, ?Order $duplicateFrom = null): Response
     {
         $actor = $request->user();
@@ -304,9 +302,9 @@ class OrderController extends Controller
                 'duplicate_from_id' => $isDuplicate ? $order->id : null,
                 'customer_id' => $order->customer_id,
                 'branch_id' => $order->branch_id,
-                'customer_name' => $order->customer?->customer_name ?? '',
-                'customer_phone' => $order->customer?->phone ?? '',
-                'contact_detail' => $isDuplicate ? '' : ($order->receipts->sortByDesc('payment_date')->first()?->note ?? ''),
+                'customer_name' => $order->customer->customer_name ?? '',
+                'customer_phone' => $order->customer->phone ?? '',
+                'contact_detail' => $isDuplicate ? '' : ($order->receipts->sortByDesc('payment_date')->first()->note ?? ''),
                 'job_name' => $order->job_name,
                 'job_type' => $order->job_type,
                 'billing_date' => $isDuplicate
@@ -326,17 +324,30 @@ class OrderController extends Controller
                 // Payments belong to the original bill only - carrying them over
                 // would fabricate a receipt for money nobody has paid yet.
                 'deposit_amount' => $isDuplicate ? 0.0 : (float) $order->receipts->sum('amount_paid'),
-                'payment_method' => $isDuplicate ? 'cash' : ($order->receipts->sortByDesc('payment_date')->first()?->payment_method ?? 'cash'),
-                'order_status' => $isDuplicate ? null : ($order->order_status?->value ?? null),
+                'payment_method' => $isDuplicate ? 'cash' : ($order->receipts->sortByDesc('payment_date')->first()->payment_method ?? 'cash'),
+                'order_status' => $isDuplicate ? null : ($order->order_status->value ?? null),
                 'artwork_url' => $order->artwork_url,
                 'shirt_artwork_urls' => $order->shirt_artwork_urls,
                 'pants_artwork_urls' => $order->pants_artwork_urls,
+                // Keyed by colour house index. Without this the form rebuilt every
+                // house with an empty gallery, so reopening or duplicating a
+                // sports day bill looked like the artwork had been thrown away.
+                'sports_day_artwork_urls' => $order->sports_day_artwork_urls,
+                'pe_uniform_artwork_urls' => $order->pe_uniform_artwork_urls,
                 'reference_designs' => $order->reference_designs,
+                // Same images as the URL lists above, but carrying their media id
+                // so the edit form can ask for one to be removed by identity.
+                'artwork_media' => $order->artworkMedia('artwork'),
+                'shirt_artwork_media' => $order->artworkMedia('shirt_artwork'),
+                'pants_artwork_media' => $order->artworkMedia('pants_artwork'),
+                'reference_design_media' => $order->artworkMedia('reference_designs'),
                 'items' => $order->items
                     ->map(fn ($item): array => [
                         'item_type' => $item->item_type,
                         'size_group' => $item->size_group,
                         'size_label' => $item->size_label,
+                        'shirt_style' => $item->shirt_style,
+                        'pants_style' => $item->pants_style,
                         'quantity' => (int) $item->quantity,
                         'unit_price' => (float) $item->unit_price,
                         'total_price' => (float) $item->total_price,
@@ -344,9 +355,9 @@ class OrderController extends Controller
                     ->values()
                     ->all(),
                 'specification' => [
-                    'pattern_id' => $specification?->pattern_id ?? null,
-                    'fabric_id' => $specification?->fabric_id ?? null,
-                    'neck_style_id' => $specification?->neck_style_id ?? null,
+                    'pattern_id' => $specification->pattern_id ?? null,
+                    'fabric_id' => $specification->fabric_id ?? null,
+                    'neck_style_id' => $specification->neck_style_id ?? null,
                     'screen_print_detail' => $screenPrintDetail,
                     'decoded' => is_array($decodedSpec) ? $decodedSpec : null,
                 ],
@@ -364,8 +375,11 @@ class OrderController extends Controller
             ->selectRaw('DATE(orders.due_date) as due_date, SUM(order_items.quantity) as total_quantity')
             ->groupByRaw('DATE(orders.due_date)')
             ->orderBy('due_date')
+            // Aggregate rows, not orders: drop to the query builder so the
+            // computed columns are read from a plain row object.
+            ->toBase()
             ->get()
-            ->map(fn ($row): array => [
+            ->map(fn (object $row): array => [
                 'date' => Carbon::parse((string) $row->due_date)->toDateString(),
                 'total_quantity' => (int) $row->total_quantity,
             ])
@@ -375,6 +389,7 @@ class OrderController extends Controller
             'customers' => $customers,
             'branches' => $branches,
             'jobTypes' => $jobTypes,
+            'jobNames' => $this->optionsFromStorageKey(ShirtCatalogController::JOB_NAMES_STORAGE_KEY, []),
             'contactChannels' => $this->contactChannelOptions(),
             'discounts' => $this->discountOptions(),
             'shirtCatalogs' => $this->shirtCatalogOptions(),
@@ -384,7 +399,7 @@ class OrderController extends Controller
             'kidsSizes' => $this->sizeOptionsFromStorageKey('jssport.size-kids'),
             'adultSizes' => $this->sizeOptionsFromStorageKey('jssport.size-adults'),
             'defaultBranchId' => ($order === null || $isDuplicate) ? $actor->branch_id : null,
-            'dailyProductionCapacity' => ProductionDailySetting::query()->first()?->daily_capacity ?? 200,
+            'dailyProductionCapacity' => ProductionDailySetting::query()->first()->daily_capacity ?? 200,
             'deliveryDateLoads' => $deliveryDateLoads,
             'order' => $orderPayload,
         ]);

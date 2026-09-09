@@ -18,6 +18,7 @@
 - --ring: #E21E26
 
 Sidebar tokens
+
 - --sidebar: #111318
 - --sidebar-foreground: #cbd5e1
 - --sidebar-primary: #E21E26
@@ -32,15 +33,18 @@ Sidebar tokens
 อ้างอิงไฟล์ resources/js/components/ui/sidebar.tsx
 
 Sidebar menu active state
+
 - background: #E21E26
 - text: #FFFFFF
 - radius: rounded-xl
 - shadow: shadow-sm
 
 Class (source of truth)
+
 - bg-[#E21E26] text-white rounded-xl shadow-sm
 
 ใช้กับทั้ง
+
 - sidebarMenuButtonVariants.active.true
 - sidebarMenuSubButtonVariants.active.true
 
@@ -49,6 +53,7 @@ Class (source of truth)
 ใช้เหมือนกันทั้งหน้า Counter และหน้า Production
 
 Visual spec
+
 - Background: #174395
 - Border: #174395
 - Text: #FFFFFF
@@ -57,20 +62,24 @@ Visual spec
 - Hover text: #FFFFFF
 
 Class (source of truth)
+
 - h-7 border-[#174395] bg-[#174395] px-2 text-[11px] text-white transition-colors duration-150 ease-out hover:border-[#12367A] hover:bg-[#12367A] hover:text-white
 
 Applied in
+
 - resources/js/pages/Counter.tsx
 - resources/js/components/domain/production/ProductionKanbanBoard.tsx
 
 ## 5) Do/Don't สำหรับความสม่ำเสมอ
 
 Do
+
 - ใช้ค่า HEX ตามเอกสารนี้ตรงๆ
 - ใช้คลาส Timeline Button เดียวกันทั้ง Counter และ Production
 - ใช้ active state ของ Sidebar ตาม variant ที่กำหนด
 
 Don't
+
 - ห้ามสลับไปใช้โทน cyan/amber/blue อื่นนอกเหนือจาก palette นี้โดยไม่อัปเดตเอกสาร
 - ห้ามสร้างคลาสใหม่ที่ให้พฤติกรรม Timeline button แตกต่างจากมาตรฐาน
 
@@ -82,5 +91,6 @@ Don't
 - Hover ของ Timeline เป็น #12367A ทั้งสองหน้า
 
 ---
+
 Last updated: 2026-07-30
 Owner: Frontend UI Theme

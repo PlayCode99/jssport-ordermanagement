@@ -6,6 +6,7 @@ use App\Domain\OrderManagement\Actions\CreateOrderAction;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\GarmentType;
@@ -72,7 +73,7 @@ class OwnerDashboardTest extends TestCase
         $branch = Branch::firstOrCreate(['branch_code' => 'BR-OD-1'], ['branch_name' => 'Dashboard Branch']);
         $creator = User::factory()->create(['role' => UserRole::Sales, 'station_department' => StationDepartment::None]);
 
-        $order = (new CreateOrderAction())->execute(array_merge([
+        $order = (new CreateOrderAction)->execute(array_merge([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Dashboard Order',
@@ -178,7 +179,7 @@ class OwnerDashboardTest extends TestCase
         ], $shirt->id, $pants->id));
 
         // Ground truth: the production controller's own summary.
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $method = (new \ReflectionClass($controller))->getMethod('buildProductionPricingSummary');
         $method->setAccessible(true);
         $types = GarmentType::query()

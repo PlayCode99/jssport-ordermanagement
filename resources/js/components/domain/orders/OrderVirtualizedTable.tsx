@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -10,7 +10,8 @@ type OrderVirtualizedTableProps = {
     onRowClick?: (order: Order) => void;
 };
 
-type SortField = 'order_code' | 'order_date' | 'due_date' | 'net_amount' | 'order_status';
+type SortField =
+    'order_code' | 'order_date' | 'due_date' | 'net_amount' | 'order_status';
 type SortOrder = 'asc' | 'desc';
 
 const HEADER_HEIGHT = 56;
@@ -54,7 +55,11 @@ function formatDueDate(rawDate: string): string {
     return dateFormatter.format(date);
 }
 
-function compareValues(left: Order, right: Order, sortField: SortField): number {
+function compareValues(
+    left: Order,
+    right: Order,
+    sortField: SortField,
+): number {
     if (sortField === 'net_amount') {
         return left.net_amount - right.net_amount;
     }
@@ -69,7 +74,10 @@ function compareValues(left: Order, right: Order, sortField: SortField): number 
     return String(left[sortField]).localeCompare(String(right[sortField]));
 }
 
-export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTableProps) {
+export function OrderVirtualizedTable({
+    orders,
+    onRowClick,
+}: OrderVirtualizedTableProps) {
     const scrollParentRef = useRef<HTMLDivElement | null>(null);
     const [sortField, setSortField] = useState<SortField | null>(null);
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -113,7 +121,9 @@ export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTa
     const toggleSort = (field: SortField) => {
         setSortField((current) => {
             if (current === field) {
-                setSortOrder((currentOrder) => (currentOrder === 'asc' ? 'desc' : 'asc'));
+                setSortOrder((currentOrder) =>
+                    currentOrder === 'asc' ? 'desc' : 'asc',
+                );
 
                 return current;
             }
@@ -132,7 +142,10 @@ export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTa
         if (event.key === 'ArrowDown') {
             event.preventDefault();
             setSelectedIndex((current) => {
-                const nextIndex = Math.min(current + 1, sortedOrders.length - 1);
+                const nextIndex = Math.min(
+                    current + 1,
+                    sortedOrders.length - 1,
+                );
                 virtualizer.scrollToIndex(nextIndex, { align: 'auto' });
 
                 return nextIndex;
@@ -179,22 +192,42 @@ export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTa
                 tabIndex={0}
                 onKeyDown={onTableKeyDown}
             >
-                <div className="sticky top-0 z-10 grid grid-cols-[1.2fr_1.1fr_1.3fr_1.2fr_1fr_1fr_1fr] bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 shadow-sm dark:bg-gray-900">
-                    <button type="button" className="text-left" onClick={() => toggleSort('order_code')}>
+                <div className="sticky top-0 z-10 grid grid-cols-[1.2fr_1.1fr_1.3fr_1.2fr_1fr_1fr_1fr] bg-white px-4 py-3 text-xs font-semibold tracking-wide text-slate-600 uppercase shadow-sm dark:bg-gray-900">
+                    <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => toggleSort('order_code')}
+                    >
                         Order Code {sortIndicator('order_code')}
                     </button>
-                    <button type="button" className="text-left" onClick={() => toggleSort('order_date')}>
+                    <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => toggleSort('order_date')}
+                    >
                         Order Date {sortIndicator('order_date')}
                     </button>
                     <div>Job Name</div>
                     <div>Customer</div>
-                    <button type="button" className="text-right" onClick={() => toggleSort('net_amount')}>
+                    <button
+                        type="button"
+                        className="text-right"
+                        onClick={() => toggleSort('net_amount')}
+                    >
                         Net Amount {sortIndicator('net_amount')}
                     </button>
-                    <button type="button" className="text-center" onClick={() => toggleSort('order_status')}>
+                    <button
+                        type="button"
+                        className="text-center"
+                        onClick={() => toggleSort('order_status')}
+                    >
                         Status {sortIndicator('order_status')}
                     </button>
-                    <button type="button" className="text-right" onClick={() => toggleSort('due_date')}>
+                    <button
+                        type="button"
+                        className="text-right"
+                        onClick={() => toggleSort('due_date')}
+                    >
                         Due Date {sortIndicator('due_date')}
                     </button>
                 </div>
@@ -208,19 +241,23 @@ export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTa
                 {hasRows && (
                     <div
                         className="relative w-full"
-                        style={{ height: `${virtualizer.getTotalSize() + HEADER_HEIGHT}px` }}
+                        style={{
+                            height: `${virtualizer.getTotalSize() + HEADER_HEIGHT}px`,
+                        }}
                     >
                         {virtualRows.map((virtualRow) => {
                             const order = sortedOrders[virtualRow.index];
-                            const isSelected = virtualRow.index === selectedIndex;
+                            const isSelected =
+                                virtualRow.index === selectedIndex;
 
                             return (
                                 <button
                                     key={order.id}
                                     type="button"
                                     className={cn(
-                                        'absolute left-0 top-0 grid w-full grid-cols-[1.2fr_1.1fr_1.3fr_1.2fr_1fr_1fr_1fr] items-center border-b border-slate-100 px-4 text-left text-sm text-slate-700 transition hover:bg-slate-50',
-                                        isSelected && 'ring-2 ring-indigo-500 bg-indigo-50/50',
+                                        'absolute top-0 left-0 grid w-full grid-cols-[1.2fr_1.1fr_1.3fr_1.2fr_1fr_1fr_1fr] items-center border-b border-slate-100 px-4 text-left text-sm text-slate-700 transition hover:bg-slate-50',
+                                        isSelected &&
+                                            'bg-indigo-50/50 ring-2 ring-indigo-500',
                                     )}
                                     style={{
                                         height: `${virtualRow.size}px`,
@@ -231,19 +268,36 @@ export function OrderVirtualizedTable({ orders, onRowClick }: OrderVirtualizedTa
                                         onRowClick?.(order);
                                     }}
                                 >
-                                    <div className="truncate font-medium text-slate-900">{order.order_code}</div>
-                                    <div className="truncate">{formatDueDate(order.order_date)}</div>
-                                    <div className="truncate">{order.job_name}</div>
-                                    <div className="truncate">{order.customer?.customer_name ?? '-'}</div>
+                                    <div className="truncate font-medium text-slate-900">
+                                        {order.order_code}
+                                    </div>
+                                    <div className="truncate">
+                                        {formatDueDate(order.order_date)}
+                                    </div>
+                                    <div className="truncate">
+                                        {order.job_name}
+                                    </div>
+                                    <div className="truncate">
+                                        {order.customer?.customer_name ?? '-'}
+                                    </div>
                                     <div className="text-right font-medium text-slate-900">
-                                        {moneyFormatter.format(order.net_amount)}
+                                        {moneyFormatter.format(
+                                            order.net_amount,
+                                        )}
                                     </div>
                                     <div className="flex justify-center">
-                                        <Badge variant="outline" className={getStatusBadgeClass(order.order_status)}>
+                                        <Badge
+                                            variant="outline"
+                                            className={getStatusBadgeClass(
+                                                order.order_status,
+                                            )}
+                                        >
                                             {order.order_status}
                                         </Badge>
                                     </div>
-                                    <div className="text-right">{formatDueDate(order.due_date)}</div>
+                                    <div className="text-right">
+                                        {formatDueDate(order.due_date)}
+                                    </div>
                                 </button>
                             );
                         })}

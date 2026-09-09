@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import UserManagementPage from '@/pages/settings/users/index';
 import { createBlankUserForm } from '@/hooks/useUserManagement';
-import { USER_ACCESS_ROLES, type UserManagementPageProps } from '@/types/user-management';
+import UserManagementPage from '@/pages/settings/users/index';
+import { USER_ACCESS_ROLES } from '@/types/user-management';
+import type { UserManagementPageProps } from '@/types/user-management';
 
 const inertiaRouterMocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -9,7 +10,8 @@ const inertiaRouterMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@inertiajs/react', () => ({
-    Head: ({ title }: { title?: string }) => (title ? <title>{title}</title> : null),
+    Head: ({ title }: { title?: string }) =>
+        title ? <title>{title}</title> : null,
     router: {
         get: inertiaRouterMocks.get,
         reload: inertiaRouterMocks.reload,
@@ -42,6 +44,18 @@ vi.mock('@/hooks/useUserManagement', () => ({
         submitEdit: vi.fn(),
         toggleActive: vi.fn(),
         deleteUser: vi.fn(),
+        resettingUser: null,
+        resetPasswordForm: {
+            data: { password: '', password_confirmation: '' },
+            errors: {},
+            processing: false,
+            setData: vi.fn(),
+            reset: vi.fn(),
+            clearErrors: vi.fn(),
+        },
+        openResetPassword: vi.fn(),
+        closeResetPassword: vi.fn(),
+        submitResetPassword: vi.fn(),
     }),
 }));
 
@@ -147,11 +161,19 @@ describe('settings/users/index', () => {
         const { container } = render(<UserManagementPage {...baseProps} />);
 
         expect(screen.getByText('Administration')).toBeInTheDocument();
-        expect(screen.getByRole('heading', { name: 'จัดการผู้ใช้งาน' })).toBeInTheDocument();
-        expect(screen.getByText('จัดการสิทธิ์ผู้ใช้แบบปลอดภัย แยกตามสาขา พร้อมติดตามสถานะการใช้งานในหน้าจอเดียว')).toBeInTheDocument();
+        expect(
+            screen.getByRole('heading', { name: 'จัดการผู้ใช้งาน' }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                'จัดการสิทธิ์ผู้ใช้แบบปลอดภัย แยกตามสาขา พร้อมติดตามสถานะการใช้งานในหน้าจอเดียว',
+            ),
+        ).toBeInTheDocument();
 
         expect(screen.queryByText('Settings')).not.toBeInTheDocument();
-        expect(screen.queryByText('Manage your profile and account settings')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('Manage your profile and account settings'),
+        ).not.toBeInTheDocument();
 
         const root = container.querySelector('div.flex.h-full.flex-1.flex-col');
         expect(root).toBeInTheDocument();
@@ -162,8 +184,12 @@ describe('settings/users/index', () => {
         render(<UserManagementPage {...baseProps} />);
 
         expect(screen.getByText('ตัวกรองข้อมูล')).toBeInTheDocument();
-        expect(screen.getByPlaceholderText('ค้นหาชื่อ หรือรหัสผู้ใช้งาน')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'เพิ่มผู้ใช้งาน' })).toBeInTheDocument();
+        expect(
+            screen.getByPlaceholderText('ค้นหาชื่อ หรือรหัสผู้ใช้งาน'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: 'เพิ่มผู้ใช้งาน' }),
+        ).toBeInTheDocument();
         expect(screen.getByTestId('user-table')).toHaveTextContent('rows:2');
     });
 });

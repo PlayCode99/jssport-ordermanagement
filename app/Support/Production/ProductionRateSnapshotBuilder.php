@@ -6,6 +6,7 @@ namespace App\Support\Production;
 
 use App\Models\GarmentType;
 use App\Models\Order;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
 /**
@@ -26,7 +27,9 @@ class ProductionRateSnapshotBuilder
     }
 
     /**
-     * @return Collection<string, Collection<int, GarmentType>>
+     * Active garment types grouped by category.
+     *
+     * @return Collection<array-key, EloquentCollection<int, GarmentType>>
      */
     public function activeGarmentTypes(): Collection
     {
@@ -37,6 +40,9 @@ class ProductionRateSnapshotBuilder
                 ->orderBy('id')])
             ->where('is_active', true)
             ->get()
-            ->groupBy(fn (GarmentType $type): string => $type->category->value);
+            ->groupBy(fn (GarmentType $type): string => $type->category->value ?? '')
+            // Eloquent's collection may only hold models, and this one holds
+            // groups, so the grouped result is a plain collection.
+            ->toBase();
     }
 }

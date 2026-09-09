@@ -19,7 +19,9 @@ const resolveAppearance = (mode: Appearance): ResolvedAppearance => {
             return 'light';
         }
 
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        return window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light';
     }
 
     return mode;
@@ -50,6 +52,7 @@ export function initializeTheme(): void {
     }
 
     const saved = window.localStorage.getItem(APPEARANCE_STORAGE_KEY);
+
     if (saved === 'light' || saved === 'dark' || saved === 'system') {
         currentAppearance = saved;
     } else {
@@ -58,12 +61,14 @@ export function initializeTheme(): void {
 
     applyTheme();
 
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-        if (currentAppearance === 'system') {
-            applyTheme();
-            notify();
-        }
-    });
+    window
+        .matchMedia('(prefers-color-scheme: dark)')
+        .addEventListener('change', () => {
+            if (currentAppearance === 'system') {
+                applyTheme();
+                notify();
+            }
+        });
 }
 
 export function useAppearance(): UseAppearanceReturn {
@@ -73,13 +78,16 @@ export function useAppearance(): UseAppearanceReturn {
         () => 'system',
     );
 
-    const resolvedAppearance: ResolvedAppearance = resolveAppearance(appearance);
+    const resolvedAppearance: ResolvedAppearance =
+        resolveAppearance(appearance);
 
     const updateAppearance = (mode: Appearance): void => {
         currentAppearance = mode;
+
         if (typeof window !== 'undefined') {
             window.localStorage.setItem(APPEARANCE_STORAGE_KEY, mode);
         }
+
         applyTheme();
         notify();
     };

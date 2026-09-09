@@ -5,9 +5,12 @@ namespace Tests\Feature\Http\Controllers;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Models\Branch;
 use App\Models\CatalogItem;
+use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -107,10 +110,10 @@ class JobTypeCatalogTest extends TestCase
         // report must not drop work that has actually been done.
         $this->seedTypes('งานปัก');
 
-        \Illuminate\Support\Facades\DB::table('orders')->insert([
+        DB::table('orders')->insert([
             'order_code' => 'ORD-LEGACY-1',
-            'branch_id' => \App\Models\Branch::create(['branch_code' => 'BR-JT', 'branch_name' => 'JT'])->id,
-            'customer_id' => \App\Models\Customer::create(['customer_code' => 'CUS-JT', 'customer_name' => 'JT'])->id,
+            'branch_id' => Branch::create(['branch_code' => 'BR-JT', 'branch_name' => 'JT'])->id,
+            'customer_id' => Customer::create(['customer_code' => 'CUS-JT', 'customer_name' => 'JT'])->id,
             'creator_user_id' => $this->admin()->id,
             'job_name' => 'legacy',
             'job_type' => 'ประเภทเก่า',
@@ -128,10 +131,10 @@ class JobTypeCatalogTest extends TestCase
     public function test_the_order_form_falls_back_to_used_types_while_the_catalog_is_empty(): void
     {
         // No catalog rows at all — a site mid-migration must still be usable.
-        \Illuminate\Support\Facades\DB::table('orders')->insert([
+        DB::table('orders')->insert([
             'order_code' => 'ORD-LEGACY-2',
-            'branch_id' => \App\Models\Branch::create(['branch_code' => 'BR-JT2', 'branch_name' => 'JT2'])->id,
-            'customer_id' => \App\Models\Customer::create(['customer_code' => 'CUS-JT2', 'customer_name' => 'JT2'])->id,
+            'branch_id' => Branch::create(['branch_code' => 'BR-JT2', 'branch_name' => 'JT2'])->id,
+            'customer_id' => Customer::create(['customer_code' => 'CUS-JT2', 'customer_name' => 'JT2'])->id,
             'creator_user_id' => $this->admin()->id,
             'job_name' => 'legacy',
             'job_type' => 'ประเภทเก่า',

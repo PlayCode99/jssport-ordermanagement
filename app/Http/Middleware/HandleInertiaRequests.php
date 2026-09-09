@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Models\GarmentType;
+use App\Support\UserAccessControl;
+use App\Support\UserLandingPage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Middleware;
@@ -38,7 +40,7 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
-        $user?->loadMissing('branch:id,branch_code');
+        $user?->loadMissing('branch:id,branch_code,branch_name');
 
         return [
             ...parent::share($request),
@@ -47,10 +49,17 @@ class HandleInertiaRequests extends Middleware
                 'user' => $user ? [
                     ...$user->toArray(),
                     'branch_code' => $user->branch?->branch_code,
+                    // Shown in the page header on every screen, so the person at
+                    // the machine can see whose account is signed in.
+                    'branch_name' => $user->branch?->branch_name,
                     'access_role' => $user->access_role?->value,
+                    'access_role_label' => UserAccessControl::resolveAccessRole($user)->label(),
                 ] : null,
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            // The page this account calls home. Shared from here so the logo and
+            // the sign-in redirect can never point at different pages.
+            'landingPath' => $user !== null ? UserLandingPage::routeFor($user) : null,
             'currentTeam' => fn () => $user?->currentTeam ? $user->toUserTeam($user->currentTeam) : null,
             'teams' => fn () => $user?->toUserTeams(includeCurrent: true) ?? [],
             'garmentSidebarShirtTypes' => function (): array {

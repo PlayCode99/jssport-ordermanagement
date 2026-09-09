@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Settings;
 
 use App\Domain\UserManagement\Actions\CreateManagedUserAction;
 use App\Domain\UserManagement\Actions\DeleteManagedUserAction;
+use App\Domain\UserManagement\Actions\ResetManagedUserPasswordAction;
 use App\Domain\UserManagement\Actions\ToggleManagedUserActiveAction;
 use App\Domain\UserManagement\Actions\UpdateManagedUserAction;
 use App\Enums\AccessRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Settings\ResetManagedUserPasswordRequest;
 use App\Http\Requests\Settings\StoreManagedUserRequest;
 use App\Http\Requests\Settings\ToggleManagedUserActiveRequest;
 use App\Http\Requests\Settings\UpdateManagedUserRequest;
@@ -121,6 +123,16 @@ class UserManagementController extends Controller
         $action->execute($request->user(), $user, (bool) $request->boolean('is_active'));
 
         return back()->with('success', 'Updated user status successfully.');
+    }
+
+    public function resetPassword(
+        ResetManagedUserPasswordRequest $request,
+        User $user,
+        ResetManagedUserPasswordAction $action,
+    ): RedirectResponse {
+        $action->execute($request->user(), $user, (string) $request->validated()['password']);
+
+        return back()->with('success', 'รีเซ็ตรหัสผ่านเรียบร้อยแล้ว');
     }
 
     public function destroy(Request $request, User $user, DeleteManagedUserAction $action): RedirectResponse

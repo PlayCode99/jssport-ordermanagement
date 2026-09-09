@@ -14,25 +14,25 @@ use Inertia\Response;
 
 class ShirtCatalogController extends Controller
 {
-        /**
-         * @return array<int, array{id: int, createdAt: string, name: string, createdBy: string, active: bool}>
-         */
-        private function loadCatalogRows(string $storageKey): array
-        {
-            return CatalogItem::query()
-                ->where('storage_key', $storageKey)
-                ->orderByDesc('created_at')
-                ->get()
-                ->map(fn (CatalogItem $item): array => [
-                    'id' => (int) $item->item_id,
-                    'createdAt' => $item->created_at?->toIso8601String() ?? now()->toIso8601String(),
-                    'name' => $item->name,
-                    'createdBy' => $item->created_by ?? '-',
-                    'active' => (bool) $item->active,
-                ])
-                ->values()
-                ->all();
-        }
+    /**
+     * @return array<int, array{id: int, createdAt: string, name: string, createdBy: string, active: bool}>
+     */
+    private function loadCatalogRows(string $storageKey): array
+    {
+        return CatalogItem::query()
+            ->where('storage_key', $storageKey)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn (CatalogItem $item): array => [
+                'id' => (int) $item->item_id,
+                'createdAt' => $item->created_at?->toIso8601String() ?? now()->toIso8601String(),
+                'name' => $item->name,
+                'createdBy' => $item->created_by ?? '-',
+                'active' => (bool) $item->active,
+            ])
+            ->values()
+            ->all();
+    }
 
     /**
      * @var array<string, array{title: string, routePath: string, storageKey: string}>
@@ -119,6 +119,7 @@ class ShirtCatalogController extends Controller
         'jssport.shirt-placket-inner-colors',
         'jssport.shirt-screen-colors',
         'jssport.shirt-embroidery-colors',
+        self::JOB_NAMES_STORAGE_KEY,
     ];
 
     public function patterns(Request $request): Response
@@ -196,6 +197,9 @@ class ShirtCatalogController extends Controller
 
     public const JOB_TYPES_STORAGE_KEY = 'jssport.job-types';
 
+    /** Organisation / job names offered on the order form. */
+    public const JOB_NAMES_STORAGE_KEY = 'jssport.job-names';
+
     public function jobTypes(Request $request): Response
     {
         return Inertia::render('settings/data/job-types/index', [
@@ -204,11 +208,34 @@ class ShirtCatalogController extends Controller
         ]);
     }
 
+    /**
+     * Job names reuse the shared catalog screen, so the shop gets the same
+     * add / rename / retire / delete controls it already knows from the colour
+     * catalogs. Deleting a name here only retires the master-data row: orders
+     * keep their own copy of the text in orders.job_name.
+     */
+    public function jobNames(Request $request): Response
+    {
+        return $this->renderSharedCatalog(
+            title: 'ชื่อหน่วยงาน, ชื่องาน',
+            routePath: '/settings/data/job-names',
+            storageKey: self::JOB_NAMES_STORAGE_KEY,
+            dataLabel: 'Order Data',
+            parentTitle: 'จัดการข้อมูล',
+            parentPath: '/settings/data',
+            pagePrefix: 'จัดการข้อมูล'
+        );
+    }
+
     public function syncCatalogItems(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'storage_key' => ['required', 'string', 'max:255'],
-            'rows' => ['required', 'array'],
+            // 'present', not 'required': this endpoint replaces the whole list,
+            // so deleting the last remaining row legitimately sends []. With
+            // 'required' that came back 422 while the screen had already hidden
+            // the row, so the deletion looked done until the next refresh.
+            'rows' => ['present', 'array'],
             'rows.*.id' => ['required', 'integer', 'min:1'],
             'rows.*.createdAt' => ['required', 'string'],
             'rows.*.name' => ['required', 'string', 'max:255'],

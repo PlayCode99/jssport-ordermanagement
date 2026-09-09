@@ -126,4 +126,16 @@ export default [
             '@stylistic/brace-style': ['error', '1tbs', { allowSingleLine: false }],
         },
     },
+    {
+        // These two come from the React Compiler rules in
+        // reactHooks 'recommended-latest'. This app does not run the compiler,
+        // and the sites they flag are deliberate: server props synced into local
+        // optimistic state on the counter and production boards. They are kept
+        // as warnings so they stay visible without failing the build, and should
+        // be worked through screen by screen rather than in one sweep.
+        rules: {
+            'react-hooks/set-state-in-effect': 'warn',
+            'react-hooks/preserve-manual-memoization': 'warn',
+        },
+    },
 ];

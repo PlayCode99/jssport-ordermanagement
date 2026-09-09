@@ -33,7 +33,11 @@ function toWebpBlob(canvas: HTMLCanvasElement): Promise<Blob> {
         canvas.toBlob(
             (blob) => {
                 if (!blob) {
-                    reject(new Error('Canvas could not produce a compressed blob.'));
+                    reject(
+                        new Error(
+                            'Canvas could not produce a compressed blob.',
+                        ),
+                    );
 
                     return;
                 }
@@ -66,7 +70,11 @@ export function useWebpCompress(): UseWebpCompressResult {
 
         try {
             const image = await loadImage(file);
-            const scale = Math.min(1, MAX_SIDE / image.width, MAX_SIDE / image.height);
+            const scale = Math.min(
+                1,
+                MAX_SIDE / image.width,
+                MAX_SIDE / image.height,
+            );
             const targetWidth = Math.max(1, Math.round(image.width * scale));
             const targetHeight = Math.max(1, Math.round(image.height * scale));
 
@@ -75,8 +83,11 @@ export function useWebpCompress(): UseWebpCompressResult {
             canvas.height = targetHeight;
 
             const context = canvas.getContext('2d');
+
             if (!context) {
-                throw new Error('2D canvas context is unavailable in this browser.');
+                throw new Error(
+                    '2D canvas context is unavailable in this browser.',
+                );
             }
 
             context.drawImage(image, 0, 0, targetWidth, targetHeight);
@@ -88,7 +99,10 @@ export function useWebpCompress(): UseWebpCompressResult {
                 lastModified: Date.now(),
             });
         } catch (compressError) {
-            const message = compressError instanceof Error ? compressError.message : 'Image compression failed.';
+            const message =
+                compressError instanceof Error
+                    ? compressError.message
+                    : 'Image compression failed.';
             setError(message);
 
             return file;

@@ -35,7 +35,11 @@ const pricing = {
 };
 
 const sportsDaySpec = (groups: unknown[]) =>
-    JSON.stringify({ schema: 'spec-v2', mode: 'sports_day', sports_day_groups: groups });
+    JSON.stringify({
+        schema: 'spec-v2',
+        mode: 'sports_day',
+        sports_day_groups: groups,
+    });
 
 const makeOrder = (
     spec: string,
@@ -93,11 +97,48 @@ describe('sports day print form', () => {
     it('prints one page per colour house', () => {
         const order = makeOrder(
             sportsDaySpec([
-                { team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 35, pants_qty: 0 }] },
-                { team_name: 'คณะสีน้ำเงิน', rows: [{ size_group: 'adults', size_label: 'L', shirt_qty: 40, pants_qty: 0 }] },
-                { team_name: 'คณะสีเหลือง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 20, pants_qty: 0 }] },
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 35,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+                {
+                    team_name: 'คณะสีน้ำเงิน',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'L',
+                            shirt_qty: 40,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+                {
+                    team_name: 'คณะสีเหลือง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 20,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 95 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 95,
+                },
+            ],
         );
 
         openDetail(order);
@@ -114,12 +155,29 @@ describe('sports day print form', () => {
                 {
                     team_name: 'คณะสีแดง',
                     rows: [
-                        { size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 0 },
-                        { size_group: 'kids', size_label: 'JM', shirt_qty: 10, pants_qty: 0 },
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 0,
+                        },
+                        {
+                            size_group: 'kids',
+                            size_label: 'JM',
+                            shirt_qty: 10,
+                            pants_qty: 0,
+                        },
                     ],
                 },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 40 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 40,
+                },
+            ],
         );
 
         openDetail(order);
@@ -133,9 +191,26 @@ describe('sports day print form', () => {
     it('gives shirts and pants of one house separate pages', () => {
         const order = makeOrder(
             sportsDaySpec([
-                { team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 30 }] },
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 30,
+                        },
+                    ],
+                },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 60 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 60,
+                },
+            ],
         );
 
         openDetail(order);
@@ -146,10 +221,37 @@ describe('sports day print form', () => {
     it('skips a house/garment combination that has no quantity', () => {
         const order = makeOrder(
             sportsDaySpec([
-                { team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 0 }] },
-                { team_name: 'คณะสีว่าง', rows: [{ size_group: 'adults', size_label: 'L', shirt_qty: 0, pants_qty: 0 }] },
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+                {
+                    team_name: 'คณะสีว่าง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'L',
+                            shirt_qty: 0,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 30 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 30,
+                },
+            ],
         );
 
         openDetail(order);
@@ -162,8 +264,18 @@ describe('sports day print form', () => {
         const order = makeOrder(
             JSON.stringify({ schema: 'spec-v2', mode: 'matrix' }),
             [
-                { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 3 },
-                { item_type: 'shirt', size_group: 'kids', size_label: 'JM', quantity: 2 },
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 3,
+                },
+                {
+                    item_type: 'shirt',
+                    size_group: 'kids',
+                    size_label: 'JM',
+                    quantity: 2,
+                },
             ],
         );
 
@@ -176,13 +288,44 @@ describe('sports day print form', () => {
     it('prints exactly the artwork attached to each colour house, on that house’s page', () => {
         const order = makeOrder(
             sportsDaySpec([
-                { team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 0 }] },
-                { team_name: 'คณะสีน้ำเงิน', rows: [{ size_group: 'adults', size_label: 'L', shirt_qty: 20, pants_qty: 0 }] },
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+                {
+                    team_name: 'คณะสีน้ำเงิน',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'L',
+                            shirt_qty: 20,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 50 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 50,
+                },
+            ],
             {
                 // 3 attached to the red house, 1 to the blue one.
-                '0': ['/storage/red-1.webp', '/storage/red-2.webp', '/storage/red-3.webp'],
+                '0': [
+                    '/storage/red-1.webp',
+                    '/storage/red-2.webp',
+                    '/storage/red-3.webp',
+                ],
                 '1': ['/storage/blue-1.webp'],
             },
         );
@@ -198,7 +341,11 @@ describe('sports day print form', () => {
                 .filter((src) => !src?.includes('/images/logo/'));
 
         // Attached 3 -> 3 printed, and only the red house's own files.
-        expect(imagesOn(pages[0])).toEqual(['/storage/red-1.webp', '/storage/red-2.webp', '/storage/red-3.webp']);
+        expect(imagesOn(pages[0])).toEqual([
+            '/storage/red-1.webp',
+            '/storage/red-2.webp',
+            '/storage/red-3.webp',
+        ]);
         // Attached 1 -> 1 printed.
         expect(imagesOn(pages[1])).toEqual(['/storage/blue-1.webp']);
     });
@@ -206,10 +353,37 @@ describe('sports day print form', () => {
     it('does not leak one house’s artwork onto another house’s page', () => {
         const order = makeOrder(
             sportsDaySpec([
-                { team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 0 }] },
-                { team_name: 'คณะสีเหลือง', rows: [{ size_group: 'adults', size_label: 'L', shirt_qty: 20, pants_qty: 0 }] },
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+                {
+                    team_name: 'คณะสีเหลือง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'L',
+                            shirt_qty: 20,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
             ]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 50 }],
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 50,
+                },
+            ],
             { '0': ['/storage/red-only.webp'] },
         );
 
@@ -225,13 +399,34 @@ describe('sports day print form', () => {
 
     it('falls back to the empty-artwork placeholder for a house with nothing attached', () => {
         const order = makeOrder(
-            sportsDaySpec([{ team_name: 'คณะสีแดง', rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 30, pants_qty: 0 }] }]),
-            [{ item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 30 }],
+            sportsDaySpec([
+                {
+                    team_name: 'คณะสีแดง',
+                    rows: [
+                        {
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_qty: 30,
+                            pants_qty: 0,
+                        },
+                    ],
+                },
+            ]),
+            [
+                {
+                    item_type: 'shirt',
+                    size_group: 'adults',
+                    size_label: 'M',
+                    quantity: 30,
+                },
+            ],
             {},
         );
 
         openDetail(order);
 
-        expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('ไม่มีรูป Artwork').length).toBeGreaterThan(
+            0,
+        );
     });
 });

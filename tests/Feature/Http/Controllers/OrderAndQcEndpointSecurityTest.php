@@ -3,28 +3,26 @@
 namespace Tests\Feature\Http\Controllers;
 
 use App\Domain\OrderManagement\Actions\CreateOrderAction;
+use App\Enums\AccessRole;
 use App\Enums\OrderStatus;
 use App\Enums\RoutingStatus;
 use App\Enums\StationDepartment;
-use App\Enums\AccessRole;
 use App\Enums\UserRole;
 use App\Http\Requests\StoreOrderRequest;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\Order;
-use App\Models\OrderRouting;
-use App\Models\OrderStatusHistory;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Carbon;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inertia\Testing\AssertableInertia as Assert;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Router;
-use Tests\TestCase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Inertia\Testing\AssertableInertia as Assert;
+use Tests\TestCase;
 
 class OrderAndQcEndpointSecurityTest extends TestCase
 {
@@ -824,6 +822,7 @@ class OrderAndQcEndpointSecurityTest extends TestCase
     {
         $qcUser = User::factory()->create([
             'role' => UserRole::Qc,
+            'access_role' => AccessRole::QcStaff,
             'station_department' => StationDepartment::Qc,
         ]);
 
@@ -845,6 +844,7 @@ class OrderAndQcEndpointSecurityTest extends TestCase
     {
         $qcUser = User::factory()->create([
             'role' => UserRole::Qc,
+            'access_role' => AccessRole::QcStaff,
             'station_department' => StationDepartment::Qc,
         ]);
 
@@ -882,6 +882,7 @@ class OrderAndQcEndpointSecurityTest extends TestCase
     {
         $managerUser = User::factory()->create([
             'role' => UserRole::ProductionManager,
+            'access_role' => AccessRole::AdminProduction,
             'station_department' => StationDepartment::None,
         ]);
 
@@ -934,6 +935,7 @@ class OrderAndQcEndpointSecurityTest extends TestCase
     {
         $qcDepartmentWorker = User::factory()->create([
             'role' => UserRole::Worker,
+            'access_role' => AccessRole::QcStaff,
             'station_department' => StationDepartment::Qc,
         ]);
 

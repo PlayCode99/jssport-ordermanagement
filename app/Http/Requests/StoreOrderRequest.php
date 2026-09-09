@@ -5,8 +5,8 @@ namespace App\Http\Requests;
 use App\Enums\RoutingStationName;
 use App\Models\Order;
 use Illuminate\Contracts\Validation\ValidationRule;
-use Illuminate\Support\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 
 class StoreOrderRequest extends FormRequest
@@ -95,16 +95,28 @@ class StoreOrderRequest extends FormRequest
             'sports_day_artwork' => ['nullable', 'array'],
             'sports_day_artwork.*' => ['array'],
             'sports_day_artwork.*.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
+            // ชุดพละ: keyed by the size table, so only kids and adults exist.
+            'pe_uniform_artwork' => ['nullable', 'array'],
+            'pe_uniform_artwork.kids' => ['nullable', 'array'],
+            'pe_uniform_artwork.adults' => ['nullable', 'array'],
+            'pe_uniform_artwork.*.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
 
             // Set when the form was opened via "เปิดบิลอีกครั้ง": the artwork of
             // the source order is copied onto the new one server-side, because
             // the browser only ever holds display URLs for already-saved images.
             'duplicate_from_id' => ['nullable', 'integer', 'exists:orders,id'],
 
+            // Saved artwork the user removed while editing. Ownership is checked
+            // again when deleting, so an id from another order is simply ignored.
+            'removed_media_ids' => ['sometimes', 'array'],
+            'removed_media_ids.*' => ['integer', 'min:1'],
+
             'items' => ['required', 'array', 'min:1'],
             'items.*.item_type' => ['required', 'string'],
             'items.*.size_group' => ['required', 'string', Rule::in(['kids', 'adults', 'oversize'])],
             'items.*.size_label' => ['required', 'string', 'max:50'],
+            'items.*.shirt_style' => ['nullable', 'string', Rule::in(['short', 'long'])],
+            'items.*.pants_style' => ['nullable', 'string', Rule::in(['short', 'long'])],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
 
@@ -145,6 +157,9 @@ class StoreOrderRequest extends FormRequest
             'sports_day_artwork.*.*.image' => 'ไฟล์ Art Work คณะสี ต้องเป็นไฟล์รูปภาพเท่านั้น',
             'sports_day_artwork.*.*.mimes' => 'ไฟล์ Art Work คณะสี ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
             'sports_day_artwork.*.*.max' => 'ไฟล์ Art Work คณะสี ต้องมีขนาดไม่เกิน 5MB',
+            'pe_uniform_artwork.*.*.image' => 'ไฟล์ Art Work ชุดพละ ต้องเป็นไฟล์รูปภาพเท่านั้น',
+            'pe_uniform_artwork.*.*.mimes' => 'ไฟล์ Art Work ชุดพละ ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
+            'pe_uniform_artwork.*.*.max' => 'ไฟล์ Art Work ชุดพละ ต้องมีขนาดไม่เกิน 5MB',
         ];
     }
 }

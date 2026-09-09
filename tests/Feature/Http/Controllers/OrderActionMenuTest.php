@@ -15,9 +15,9 @@ use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Covers the counter row "Action" menu: ลบ (delete) and เปิดบิลอีกครั้ง
@@ -83,7 +83,7 @@ class OrderActionMenuTest extends TestCase
 
     private function makeOrder(User $creator, array $overrides = []): Order
     {
-        $order = (new CreateOrderAction())->execute(array_merge([
+        $order = (new CreateOrderAction)->execute(array_merge([
             'customer_id' => $this->customer->id,
             'branch_id' => $this->branch->id,
             'job_name' => 'Action Menu Order',

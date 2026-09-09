@@ -2,13 +2,16 @@ import type { Order, ScreenTeam } from '@/types/models';
 
 export type ScreenFlexRouting = NonNullable<Order['routings']>[number];
 
-export type ScreenFlexStatusBucket = 'new_job' | 'assigned' | 'rework' | 'completed' | 'none';
+export type ScreenFlexStatusBucket =
+    'new_job' | 'assigned' | 'rework' | 'completed' | 'none';
 
 function isRoutingReady(order: Order, routingId: number): boolean {
     const requiredRoutings = [...(order.routings ?? [])]
         .filter((routing) => routing.is_required)
         .sort((a, b) => a.id - b.id);
-    const targetIndex = requiredRoutings.findIndex((routing) => routing.id === routingId);
+    const targetIndex = requiredRoutings.findIndex(
+        (routing) => routing.id === routingId,
+    );
 
     if (targetIndex === -1) {
         return false;
@@ -29,7 +32,9 @@ export function getScreenFlexRoutings(order: Order): ScreenFlexRouting[] {
         .sort((a, b) => a.id - b.id);
 }
 
-export function resolveScreenFlexRouting(order: Order): ScreenFlexRouting | null {
+export function resolveScreenFlexRouting(
+    order: Order,
+): ScreenFlexRouting | null {
     const routings = getScreenFlexRoutings(order);
 
     if (routings.length === 0) {
@@ -40,44 +45,66 @@ export function resolveScreenFlexRouting(order: Order): ScreenFlexRouting | null
         .filter((routing) => routing.is_required)
         .sort((a, b) => a.id - b.id);
 
-    const requiredScreenFlexRoutings = requiredRoutings.filter((routing) => ['screen', 'flex'].includes(routing.station_name));
+    const requiredScreenFlexRoutings = requiredRoutings.filter((routing) =>
+        ['screen', 'flex'].includes(routing.station_name),
+    );
 
     if (requiredScreenFlexRoutings.length === 0) {
         return routings[0];
     }
 
-    const routingById = (routingId: number) => routings.find((routing) => routing.id === routingId) ?? null;
+    const routingById = (routingId: number) =>
+        routings.find((routing) => routing.id === routingId) ?? null;
 
-    const inProgressRouting = requiredScreenFlexRoutings.find((routing) => routing.status === 'in_progress');
+    const inProgressRouting = requiredScreenFlexRoutings.find(
+        (routing) => routing.status === 'in_progress',
+    );
 
     if (inProgressRouting) {
         return routingById(inProgressRouting.id);
     }
 
-    const rejectedRouting = requiredScreenFlexRoutings.find((routing) => routing.status === 'rejected');
+    const rejectedRouting = requiredScreenFlexRoutings.find(
+        (routing) => routing.status === 'rejected',
+    );
 
     if (rejectedRouting) {
         return routingById(rejectedRouting.id);
     }
 
-    const readyPendingRouting = requiredScreenFlexRoutings.find((routing) => routing.status === 'pending' && isRoutingReady(order, routing.id));
+    const readyPendingRouting = requiredScreenFlexRoutings.find(
+        (routing) =>
+            routing.status === 'pending' && isRoutingReady(order, routing.id),
+    );
 
     if (readyPendingRouting) {
         return routingById(readyPendingRouting.id);
     }
 
-    const pendingRouting = requiredScreenFlexRoutings.find((routing) => routing.status === 'pending');
+    const pendingRouting = requiredScreenFlexRoutings.find(
+        (routing) => routing.status === 'pending',
+    );
 
     if (pendingRouting) {
         return routingById(pendingRouting.id);
     }
 
-    return [...requiredScreenFlexRoutings].reverse().find((routing) => ['completed', 'skipped'].includes(routing.status))
-        ? routingById([...requiredScreenFlexRoutings].reverse().find((routing) => ['completed', 'skipped'].includes(routing.status))!.id)
+    return [...requiredScreenFlexRoutings]
+        .reverse()
+        .find((routing) => ['completed', 'skipped'].includes(routing.status))
+        ? routingById(
+              [...requiredScreenFlexRoutings]
+                  .reverse()
+                  .find((routing) =>
+                      ['completed', 'skipped'].includes(routing.status),
+                  )!.id,
+          )
         : routings[0];
 }
 
-export function resolveScreenFlexStatusBucket(order: Order): ScreenFlexStatusBucket {
+export function resolveScreenFlexStatusBucket(
+    order: Order,
+): ScreenFlexStatusBucket {
     const routing = resolveScreenFlexRouting(order);
 
     if (!routing) {
@@ -103,7 +130,9 @@ export function resolveScreenFlexStatusBucket(order: Order): ScreenFlexStatusBuc
     return 'none';
 }
 
-export function resolveScreenFlexActionStatus(order: Order): { label: string; className: string } | null {
+export function resolveScreenFlexActionStatus(
+    order: Order,
+): { label: string; className: string } | null {
     const bucket = resolveScreenFlexStatusBucket(order);
 
     if (bucket === 'new_job') {
@@ -161,7 +190,8 @@ export function resolveScreenFlexCurrentStatusLabel(
         return 'งานเข้าใหม่';
     }
 
-    const teamLabel = routing.screen_team?.team_name ?? screenTeamByOrderId[order.id];
+    const teamLabel =
+        routing.screen_team?.team_name ?? screenTeamByOrderId[order.id];
     const reworkNote = routing.rework_note ?? screenReworkByOrderId[order.id];
 
     if (routing.status === 'pending') {
@@ -183,14 +213,24 @@ export function resolveScreenFlexCurrentStatusLabel(
     return 'งานเข้าใหม่';
 }
 
-export function canAssignScreenFlexStation(order: Order | null, station: 'screen' | 'flex'): boolean {
+export function canAssignScreenFlexStation(
+    order: Order | null,
+    station: 'screen' | 'flex',
+): boolean {
     if (!order) {
         return false;
     }
 
-    return getScreenFlexRoutings(order).some((routing) => routing.station_name === station);
+    return getScreenFlexRoutings(order).some(
+        (routing) => routing.station_name === station,
+    );
 }
 
-export function resolveScreenTeamOptionLabel(station: 'screen' | 'flex', team: ScreenTeam): string {
-    return station === 'flex' ? `แจกงาน - ${team.team_name}` : `ทีมสกรีน - ${team.team_name}`;
+export function resolveScreenTeamOptionLabel(
+    station: 'screen' | 'flex',
+    team: ScreenTeam,
+): string {
+    return station === 'flex'
+        ? `แจกงาน - ${team.team_name}`
+        : `ทีมสกรีน - ${team.team_name}`;
 }

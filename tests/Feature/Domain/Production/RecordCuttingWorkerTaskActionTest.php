@@ -31,7 +31,7 @@ class RecordCuttingWorkerTaskActionTest extends TestCase
             'price_per_unit' => 15.00,
         ]);
 
-        $task = (new RecordCuttingWorkerTaskAction())->execute([
+        $task = (new RecordCuttingWorkerTaskAction)->execute([
             'cutting_order_id' => $context['cutting_order']->id,
             'price_master_id' => $price->id,
             'worker_user_id' => $context['worker']->id,
@@ -54,7 +54,7 @@ class RecordCuttingWorkerTaskActionTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Failed to record cutting worker task.');
 
-        (new RecordCuttingWorkerTaskAction())->execute([
+        (new RecordCuttingWorkerTaskAction)->execute([
             'cutting_order_id' => $context['cutting_order']->id,
             'price_master_id' => 999999,
             'worker_user_id' => $context['worker']->id,

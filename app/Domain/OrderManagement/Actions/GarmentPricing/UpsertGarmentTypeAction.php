@@ -11,7 +11,7 @@ class UpsertGarmentTypeAction
      */
     public function execute(array $data, ?GarmentType $garmentType = null): GarmentType
     {
-        $model = $garmentType ?? new GarmentType();
+        $model = $garmentType ?? new GarmentType;
 
         $model->fill([
             'category' => (string) $data['category'],

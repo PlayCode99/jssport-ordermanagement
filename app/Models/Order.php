@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Models;
@@ -10,10 +11,41 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
+/**
+ * Cast attributes, spelled out because static analysis reads the database
+ * schema and would otherwise see the raw column types rather than what the
+ * casts hand back at runtime.
+ *
+ * @property int $id
+ * @property Carbon|null $deleted_at
+ * @property array<string, mixed>|null $production_rate_snapshot
+ * @property Carbon|null $order_date
+ * @property Carbon|null $due_date
+ * @property float $total_amount
+ * @property float $discount_percent
+ * @property float $discount_amount
+ * @property float $net_amount
+ * @property array<string, mixed>|null $shipping_delivery_info
+ * @property OrderStatus|null $order_status
+ * @property string $order_code
+ * @property int $customer_id
+ * @property int|null $branch_id
+ * @property int|null $creator_user_id
+ * @property string|null $job_name
+ * @property string|null $job_type
+ * @property string|null $delivery_method
+ * @property string|null $shipping_address
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property-read Customer|null $customer
+ * @property-read Branch|null $branch
+ * @property-read User|null $creatorUser
+ */
 class Order extends Model implements HasMedia
 {
     use HasFactory, InteractsWithMedia, SoftDeletes;
@@ -24,7 +56,7 @@ class Order extends Model implements HasMedia
     protected $guarded = [];
 
     /**
-     * @var array<int, string>
+     * @var list<string>
      */
     protected $appends = [
         'artwork_url',
@@ -33,6 +65,7 @@ class Order extends Model implements HasMedia
         'shirt_artwork_urls',
         'pants_artwork_urls',
         'sports_day_artwork_urls',
+        'pe_uniform_artwork_urls',
         'reference_designs',
     ];
 
@@ -51,46 +84,73 @@ class Order extends Model implements HasMedia
         ];
     }
 
+    /**
+     * @return BelongsTo<Customer, $this>
+     */
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
     }
 
+    /**
+     * @return BelongsTo<Branch, $this>
+     */
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
     }
 
+    /**
+     * @return BelongsTo<User, $this>
+     */
     public function creatorUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'creator_user_id');
     }
 
+    /**
+     * @return HasOne<OrderSpecification, $this>
+     */
     public function specification(): HasOne
     {
         return $this->hasOne(OrderSpecification::class);
     }
 
+    /**
+     * @return HasMany<OrderItem, $this>
+     */
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
     }
 
+    /**
+     * @return HasMany<OrderStatusHistory, $this>
+     */
     public function statusHistories(): HasMany
     {
         return $this->hasMany(OrderStatusHistory::class);
     }
 
+    /**
+     * @return HasMany<OrderRouting, $this>
+     */
     public function routings(): HasMany
     {
         return $this->hasMany(OrderRouting::class);
     }
 
+    /**
+     * @return HasMany<Receipt, $this>
+     */
     public function receipts(): HasMany
     {
         return $this->hasMany(Receipt::class);
     }
 
+    /**
+     * @return HasMany<CuttingOrder, $this>
+     */
     public function cuttingOrders(): HasMany
     {
         return $this->hasMany(CuttingOrder::class);
@@ -105,6 +165,7 @@ class Order extends Model implements HasMedia
         // a `sports_day_group` custom property naming the colour house it
         // belongs to, so the artwork follows that house onto its printed sheet.
         $this->addMediaCollection('sports_day_artwork');
+        $this->addMediaCollection('pe_uniform_artwork');
         $this->addMediaCollection('reference_designs');
     }
 
@@ -130,6 +191,29 @@ class Order extends Model implements HasMedia
     }
 
     /**
+     * ชุดพละ artwork grouped by the size table it belongs to, keyed 'kids' or
+     * 'adults' so the form can hand each table back its own gallery.
+     *
+     * @return array<string, list<string>>
+     */
+    public function getPeUniformArtworkUrlsAttribute(): array
+    {
+        $grouped = [];
+
+        foreach ($this->getMedia('pe_uniform_artwork') as $media) {
+            $table = $media->getCustomProperty('pe_table');
+
+            if ($table !== 'kids' && $table !== 'adults') {
+                continue;
+            }
+
+            $grouped[$table][] = $media->getUrl();
+        }
+
+        return $grouped;
+    }
+
+    /**
      * @return array<int, string>
      */
     public function getShirtArtworkUrlsAttribute(): array
@@ -143,7 +227,7 @@ class Order extends Model implements HasMedia
      * Artwork grouped by colour house, keyed by the house index as a string so
      * it survives JSON encoding. Houses with no artwork are simply absent.
      *
-     * @return array<string, array<int, string>>
+     * @return array<array-key, list<string>>
      */
     public function getSportsDayArtworkUrlsAttribute(): array
     {
@@ -180,5 +264,30 @@ class Order extends Model implements HasMedia
         return $this->getMedia('reference_designs')
             ->map(fn (Media $media): string => $media->getUrl())
             ->toArray();
+    }
+
+    /**
+     * The artwork collections a user may attach to and remove from. Anything
+     * outside this list is off limits to the edit form's delete path.
+     *
+     * @return array<int, string>
+     */
+    public static function artworkCollections(): array
+    {
+        return ['artwork', 'shirt_artwork', 'pants_artwork', 'sports_day_artwork', 'pe_uniform_artwork', 'reference_designs'];
+    }
+
+    /**
+     * Saved artwork with its media id, so the edit form can ask for a specific
+     * image to be removed instead of guessing from a URL.
+     *
+     * @return array<int, array{id: int, url: string}>
+     */
+    public function artworkMedia(string $collection): array
+    {
+        return $this->getMedia($collection)
+            ->map(fn (Media $media): array => ['id' => (int) $media->id, 'url' => $media->getUrl()])
+            ->values()
+            ->all();
     }
 }

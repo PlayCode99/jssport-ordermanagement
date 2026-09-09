@@ -34,8 +34,8 @@ class ListSewingOperationsAction
             ->map(static fn (SewingOperation $operation): array => [
                 'id' => (int) $operation->id,
                 'shirt_type_id' => (int) $operation->shirt_type_id,
-                'shirt_type_code' => (string) ($operation->shirtType?->code ?? ''),
-                'shirt_type_name' => (string) ($operation->shirtType?->name ?? ''),
+                'shirt_type_code' => (string) ($operation->shirtType->code ?? ''),
+                'shirt_type_name' => (string) ($operation->shirtType->name ?? ''),
                 'target_group' => ($operation->target_group instanceof SewingTargetGroup)
                     ? $operation->target_group->value
                     : (string) $operation->target_group,

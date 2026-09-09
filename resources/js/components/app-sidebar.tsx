@@ -15,9 +15,6 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
-import { getActivePantsMenuLinks, pantsMenuUpdatedEventName, type PantsMenuLink } from '@/lib/pants-menu-store';
-import { canAccessMenu, USER_MENUS } from '@/lib/permissionHelpers';
-import { getActiveShirtMenuLinks, shirtMenuUpdatedEventName, type ShirtMenuLink } from '@/lib/shirt-style-menu-store';
 import {
     Sidebar,
     SidebarContent,
@@ -27,8 +24,24 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import {
+    getActivePantsMenuLinks,
+    pantsMenuUpdatedEventName,
+} from '@/lib/pants-menu-store';
+import type { PantsMenuLink } from '@/lib/pants-menu-store';
+import {
+    canAccessMenu,
+    resolveLogoHref,
+    USER_MENUS,
+} from '@/lib/permissionHelpers';
+import {
+    getActiveShirtMenuLinks,
+    shirtMenuUpdatedEventName,
+} from '@/lib/shirt-style-menu-store';
+import type { ShirtMenuLink } from '@/lib/shirt-style-menu-store';
 import type { NavItem } from '@/types';
-import { USER_ACCESS_ROLES, type UserAccessRole } from '@/types/user-management';
+import { USER_ACCESS_ROLES } from '@/types/user-management';
+import type { UserAccessRole } from '@/types/user-management';
 
 function uniqueNavItemsByHref(items: NavItem[]): NavItem[] {
     const seen = new Set<string>();
@@ -41,18 +54,31 @@ function uniqueNavItemsByHref(items: NavItem[]): NavItem[] {
         }
 
         seen.add(key);
+
         return true;
     });
 }
 
 export function AppSidebar() {
     const page = usePage();
-    const authUser = (page.props.auth as { user?: { access_role?: string; role?: string; station_department?: string } })?.user;
+    const authUser = (
+        page.props.auth as {
+            user?: {
+                access_role?: string;
+                role?: string;
+                station_department?: string;
+            };
+        }
+    )?.user;
 
     const resolvedRole = useMemo<UserAccessRole>(() => {
         const accessRole = String(authUser?.access_role ?? '').trim();
 
-        if (Object.values(USER_ACCESS_ROLES).includes(accessRole as UserAccessRole)) {
+        if (
+            Object.values(USER_ACCESS_ROLES).includes(
+                accessRole as UserAccessRole,
+            )
+        ) {
             return accessRole as UserAccessRole;
         }
 
@@ -72,21 +98,27 @@ export function AppSidebar() {
             return authUser?.station_department === 'cutting'
                 ? USER_ACCESS_ROLES.CUTTING_STAFF
                 : authUser?.station_department === 'print'
-                    ? USER_ACCESS_ROLES.PRINTING_STAFF
-                    : authUser?.station_department === 'embroidery'
-                        ? USER_ACCESS_ROLES.EMBROIDERY_STAFF
-                        : authUser?.station_department === 'sewing'
-                            ? USER_ACCESS_ROLES.SEWING_STAFF
-                            : authUser?.station_department === 'screen' || authUser?.station_department === 'flex'
-                                ? USER_ACCESS_ROLES.SCREEN_FLEX_STAFF
-                                : USER_ACCESS_ROLES.DELIVERY_STAFF;
+                  ? USER_ACCESS_ROLES.PRINTING_STAFF
+                  : authUser?.station_department === 'embroidery'
+                    ? USER_ACCESS_ROLES.EMBROIDERY_STAFF
+                    : authUser?.station_department === 'sewing'
+                      ? USER_ACCESS_ROLES.SEWING_STAFF
+                      : authUser?.station_department === 'screen' ||
+                          authUser?.station_department === 'flex'
+                        ? USER_ACCESS_ROLES.SCREEN_FLEX_STAFF
+                        : USER_ACCESS_ROLES.DELIVERY_STAFF;
         }
 
         return USER_ACCESS_ROLES.COUNTER;
     }, [authUser?.access_role, authUser?.role, authUser?.station_department]);
-    const shirtTypeMenus = (page.props.garmentSidebarShirtTypes ?? []) as Array<{ id: number; code: string; name: string }>;
-    const [dynamicShirtMenus, setDynamicShirtMenus] = useState<ShirtMenuLink[]>([]);
-    const [dynamicPantsMenus, setDynamicPantsMenus] = useState<PantsMenuLink[]>([]);
+    const shirtTypeMenus = (page.props.garmentSidebarShirtTypes ??
+        []) as Array<{ id: number; code: string; name: string }>;
+    const [dynamicShirtMenus, setDynamicShirtMenus] = useState<ShirtMenuLink[]>(
+        [],
+    );
+    const [dynamicPantsMenus, setDynamicPantsMenus] = useState<PantsMenuLink[]>(
+        [],
+    );
 
     useEffect(() => {
         const syncMenus = () => {
@@ -110,21 +142,39 @@ export function AppSidebar() {
         ? `/${page.props.currentTeam.slug}/counter`
         : '/counter';
 
+    // The server shares the page each account lands on after signing in, so the
+    // logo and that redirect can never point at different pages.
+    const logoHref = resolveLogoHref({
+        canOpenCounter: canAccessMenu(resolvedRole, USER_MENUS.COUNTER),
+        counterUrl: mainUrl,
+        landingPath: (page.props as { landingPath?: string | null })
+            .landingPath,
+    });
+
     const dynamicShirtChildren = useMemo<NavItem[]>(
-        () => dynamicShirtMenus.map((item) => ({ title: item.title, href: item.href })),
+        () =>
+            dynamicShirtMenus.map((item) => ({
+                title: item.title,
+                href: item.href,
+            })),
         [dynamicShirtMenus],
     );
 
     const dynamicPantsChildren = useMemo<NavItem[]>(
-        () => dynamicPantsMenus.map((item) => ({ title: item.title, href: item.href })),
+        () =>
+            dynamicPantsMenus.map((item) => ({
+                title: item.title,
+                href: item.href,
+            })),
         [dynamicPantsMenus],
     );
 
     const shirtTypeChildren = useMemo<NavItem[]>(
-        () => shirtTypeMenus.map((item) => ({
-            title: item.name,
-            href: `/settings/data/garments/prices?category=SHIRT&garment_type_id=${item.id}`,
-        })),
+        () =>
+            shirtTypeMenus.map((item) => ({
+                title: item.name,
+                href: `/settings/data/garments/prices?category=SHIRT&garment_type_id=${item.id}`,
+            })),
         [shirtTypeMenus],
     );
 
@@ -226,7 +276,10 @@ export function AppSidebar() {
         });
     }
 
-    if (resolvedRole === USER_ACCESS_ROLES.OWNER || resolvedRole === USER_ACCESS_ROLES.ADMIN_SYSTEM) {
+    if (
+        resolvedRole === USER_ACCESS_ROLES.OWNER ||
+        resolvedRole === USER_ACCESS_ROLES.ADMIN_SYSTEM
+    ) {
         mainNavItems.push({
             title: 'จัดการข้อมูล',
             href: '/settings/data',
@@ -243,6 +296,10 @@ export function AppSidebar() {
                 {
                     title: 'ประเภทงาน',
                     href: '/settings/data/job-types',
+                },
+                {
+                    title: 'ชื่อหน่วยงาน, ชื่องาน',
+                    href: '/settings/data/job-names',
                 },
                 {
                     title: 'รายละเอียด / ราคาชิ้นงาน',
@@ -262,14 +319,15 @@ export function AppSidebar() {
                 {
                     title: 'ประเภทเสื้อ',
                     href: '/settings/data/garments/prices?category=SHIRT',
-                    children: shirtTypeChildren.length > 0
-                        ? shirtTypeChildren
-                        : [
-                            {
-                                title: 'เสื้อโปโล',
-                                href: '/settings/data/garments/prices?category=SHIRT',
-                            },
-                        ],
+                    children:
+                        shirtTypeChildren.length > 0
+                            ? shirtTypeChildren
+                            : [
+                                  {
+                                      title: 'เสื้อโปโล',
+                                      href: '/settings/data/garments/prices?category=SHIRT',
+                                  },
+                              ],
                 },
                 {
                     title: 'แบบกางเกง',
@@ -315,9 +373,13 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton
                             asChild
-                            className="h-auto w-full justify-start p-0 hover:bg-transparent data-[active=true]:bg-transparent group-data-[collapsible=icon]:!size-12 group-data-[collapsible=icon]:!p-0"
+                            className="h-auto w-full justify-start p-0 group-data-[collapsible=icon]:!size-12 group-data-[collapsible=icon]:!p-0 hover:bg-transparent data-[active=true]:bg-transparent"
                         >
-                            <Link href={mainUrl} prefetch className="block w-full group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
+                            <Link
+                                href={logoHref}
+                                prefetch
+                                className="block w-full group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center"
+                            >
                                 <img
                                     src="/images/logo/logo.png"
                                     alt="JS Sport Order"

@@ -1,8 +1,15 @@
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { fireEvent, render, screen } from '@testing-library/react';
-
-import { buildHeatPressStats, buildStageStats, buildVisibleStageStats, getLatestRequiredRoutingForStation, mapRoutingStationToDepartmentStatus, ProductionKanbanBoard, shouldMapOrderToHeatPressView } from '@/components/domain/production/ProductionKanbanBoard';
+import {
+    buildHeatPressStats,
+    buildStageStats,
+    buildVisibleStageStats,
+    getLatestRequiredRoutingForStation,
+    mapRoutingStationToDepartmentStatus,
+    ProductionKanbanBoard,
+    shouldMapOrderToHeatPressView,
+} from '@/components/domain/production/ProductionKanbanBoard';
 import type { Order } from '@/types/models';
 
 const { mockRouterPost, mockRouterReload } = vi.hoisted(() => ({
@@ -19,7 +26,9 @@ vi.mock('@inertiajs/react', () => ({
 
 describe('production kanban room mapping', () => {
     it('maps screen and flex stations to the screen_flex department', () => {
-        expect(mapRoutingStationToDepartmentStatus('screen')).toBe('screen_flex');
+        expect(mapRoutingStationToDepartmentStatus('screen')).toBe(
+            'screen_flex',
+        );
         expect(mapRoutingStationToDepartmentStatus('flex')).toBe('screen_flex');
     });
 
@@ -240,7 +249,9 @@ describe('production kanban room mapping', () => {
             />,
         );
 
-        expect(screen.getByText('ไม่พบข้อมูลออเดอร์ตามเงื่อนไขที่เลือก')).toBeInTheDocument();
+        expect(
+            screen.getByText('ไม่พบข้อมูลออเดอร์ตามเงื่อนไขที่เลือก'),
+        ).toBeInTheDocument();
     });
 
     it('counts a screen/flex order as new work when a later screen/flex step is still pending', () => {
@@ -359,13 +370,25 @@ describe('production kanban room mapping', () => {
             />,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: /วันที่งานเข้ามา/i }));
-        expect(screen.getByLabelText('วันที่งานเข้ามา จาก')).toBeInTheDocument();
-        expect(screen.getByLabelText('วันที่งานเข้ามา ถึง')).toBeInTheDocument();
+        fireEvent.click(
+            screen.getByRole('button', { name: /วันที่งานเข้ามา/i }),
+        );
+        expect(
+            screen.getByLabelText('วันที่งานเข้ามา จาก'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByLabelText('วันที่งานเข้ามา ถึง'),
+        ).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: /วันที่เสร็จสิ้น/i }));
-        expect(screen.getByLabelText('วันที่เสร็จสิ้น จาก')).toBeInTheDocument();
-        expect(screen.getByLabelText('วันที่เสร็จสิ้น ถึง')).toBeInTheDocument();
+        fireEvent.click(
+            screen.getByRole('button', { name: /วันที่เสร็จสิ้น/i }),
+        );
+        expect(
+            screen.getByLabelText('วันที่เสร็จสิ้น จาก'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByLabelText('วันที่เสร็จสิ้น ถึง'),
+        ).toBeInTheDocument();
     });
 
     it('shows only new-job and completed options for the print-room status filter', () => {
@@ -446,17 +469,27 @@ describe('production kanban room mapping', () => {
             />,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: /วันที่งานเข้ามา/i }));
-        fireEvent.change(screen.getByLabelText('วันที่งานเข้ามา จาก'), { target: { value: '2026-07-29' } });
+        fireEvent.click(
+            screen.getByRole('button', { name: /วันที่งานเข้ามา/i }),
+        );
+        fireEvent.change(screen.getByLabelText('วันที่งานเข้ามา จาก'), {
+            target: { value: '2026-07-29' },
+        });
 
         expect(screen.getByText('ORD-014')).toBeInTheDocument();
         expect(screen.queryByText('ORD-015')).not.toBeInTheDocument();
     });
 
     it('reloads data immediately after shipping completion succeeds', () => {
-        mockRouterPost.mockImplementation((_url: string, _payload: unknown, options: { onSuccess?: () => void }) => {
-            options.onSuccess?.();
-        });
+        mockRouterPost.mockImplementation(
+            (
+                _url: string,
+                _payload: unknown,
+                options: { onSuccess?: () => void },
+            ) => {
+                options.onSuccess?.();
+            },
+        );
 
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
@@ -509,12 +542,22 @@ describe('production kanban room mapping', () => {
 
     it('does not reload data when shipping completion fails', () => {
         mockRouterReload.mockClear();
-        mockRouterPost.mockImplementation((_url: string, _payload: unknown, options: { onError?: (errors: Record<string, string[]>) => void }) => {
-            options.onError?.({ status: ['ไม่สามารถอัปเดตสถานะได้'] });
-        });
+        mockRouterPost.mockImplementation(
+            (
+                _url: string,
+                _payload: unknown,
+                options: {
+                    onError?: (errors: Record<string, string[]>) => void;
+                },
+            ) => {
+                options.onError?.({ status: ['ไม่สามารถอัปเดตสถานะได้'] });
+            },
+        );
 
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+        const alertSpy = vi
+            .spyOn(window, 'alert')
+            .mockImplementation(() => undefined);
 
         const order = {
             id: 100,
@@ -559,5 +602,56 @@ describe('production kanban room mapping', () => {
 
         alertSpy.mockRestore();
         confirmSpy.mockRestore();
+    });
+});
+
+/**
+ * The job is what the floor looks a row up by; the customer is the context
+ * under it. The counter table and this table's own card view already read that
+ * way, and the desktop table used to have them the other way round.
+ */
+describe('the job column', () => {
+    it('puts the job name above the customer name', () => {
+        const order = {
+            id: 41,
+            order_code: 'ORD-041',
+            job_name: 'เสื้อทีมโรงเรียนทดสอบ',
+            job_type: 'งานสกรีน',
+            items: [{ quantity: 3 }],
+            routings: [
+                {
+                    id: 410,
+                    is_required: true,
+                    station_name: 'sewing',
+                    status: 'pending',
+                },
+            ],
+            branch: { branch_name: 'สาขา 1' },
+            customer: { customer_name: 'โรงเรียนทดสอบ' },
+            receipts: [],
+            creator_user: { name: 'พนักงาน' },
+            order_date: '2026-01-01',
+            due_date: '2026-01-02',
+        } as unknown as Order;
+
+        render(
+            <ProductionKanbanBoard
+                orders={[order]}
+                initialDepartmentFilter="sewing"
+                showDepartmentFilter={false}
+                hideBillingColumns={true}
+                onOpenDetail={() => undefined}
+                onOpenTimeline={() => undefined}
+            />,
+        );
+
+        const cell = screen
+            .getAllByTitle('เสื้อทีมโรงเรียนทดสอบ — โรงเรียนทดสอบ')
+            .at(0) as HTMLElement;
+        const lines = [...cell.querySelectorAll('span')].map((span) =>
+            span.textContent?.trim(),
+        );
+
+        expect(lines).toEqual(['เสื้อทีมโรงเรียนทดสอบ', 'โรงเรียนทดสอบ']);
     });
 });

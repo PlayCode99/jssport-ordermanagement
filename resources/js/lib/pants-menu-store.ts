@@ -52,6 +52,7 @@ function buildMenuHref(slug: string, title: string): string {
 
 function storageKeyBySlug(slug: string): string {
     const known = KNOWN_CATALOGS[slug];
+
     if (known) {
         return known.storageKey;
     }
@@ -95,12 +96,14 @@ function persistItems(win: Window, items: PantsMenuItem[]) {
 
 export function getPantsMenuItems(): PantsMenuItem[] {
     const win = safeWindow();
+
     if (!win) {
         return defaultMenuItems();
     }
 
     try {
         const raw = win.localStorage.getItem(PANTS_MENU_KEY);
+
         if (!raw) {
             const seeded = defaultMenuItems();
             persistItems(win, seeded);
@@ -109,6 +112,7 @@ export function getPantsMenuItems(): PantsMenuItem[] {
         }
 
         const parsed = JSON.parse(raw) as PantsMenuItem[];
+
         if (!Array.isArray(parsed)) {
             const seeded = defaultMenuItems();
             persistItems(win, seeded);
@@ -117,6 +121,7 @@ export function getPantsMenuItems(): PantsMenuItem[] {
         }
 
         const normalized = normalizeItems(parsed);
+
         if (normalized.length !== parsed.length) {
             persistItems(win, normalized);
         }
@@ -132,6 +137,7 @@ export function getPantsMenuItems(): PantsMenuItem[] {
 
 export function savePantsMenuItems(items: PantsMenuItem[]): void {
     const win = safeWindow();
+
     if (!win) {
         return;
     }
@@ -140,19 +146,29 @@ export function savePantsMenuItems(items: PantsMenuItem[]): void {
     persistItems(win, normalized);
 }
 
-export function addPantsMenuItem(title: string, createdBy: string): PantsMenuItem | null {
+export function addPantsMenuItem(
+    title: string,
+    createdBy: string,
+): PantsMenuItem | null {
     const normalizedTitle = title.trim();
+
     if (normalizedTitle.length === 0) {
         return null;
     }
 
     const slug = slugify(normalizedTitle);
+
     if (!slug) {
         return null;
     }
 
     const current = getPantsMenuItems();
-    const alreadyExists = current.some((item) => item.slug === slug || item.title.toLowerCase() === normalizedTitle.toLowerCase());
+    const alreadyExists = current.some(
+        (item) =>
+            item.slug === slug ||
+            item.title.toLowerCase() === normalizedTitle.toLowerCase(),
+    );
+
     if (alreadyExists) {
         return null;
     }
@@ -185,28 +201,52 @@ export function pantsMenuUpdatedEventName(): string {
     return PANTS_MENU_UPDATED_EVENT;
 }
 
-export function updatePantsMenuItemTitle(items: PantsMenuItem[], id: string, title: string): PantsMenuItem[] {
+export function updatePantsMenuItemTitle(
+    items: PantsMenuItem[],
+    id: string,
+    title: string,
+): PantsMenuItem[] {
     const normalizedTitle = title.trim();
+
     if (!normalizedTitle) {
         return items;
     }
 
-    return items.map((item) => (item.id === id ? { ...item, title: normalizedTitle } : item));
+    return items.map((item) =>
+        item.id === id ? { ...item, title: normalizedTitle } : item,
+    );
 }
 
-export function togglePantsMenuItem(items: PantsMenuItem[], id: string): PantsMenuItem[] {
-    return items.map((item) => (item.id === id ? { ...item, active: !item.active } : item));
+export function togglePantsMenuItem(
+    items: PantsMenuItem[],
+    id: string,
+): PantsMenuItem[] {
+    return items.map((item) =>
+        item.id === id ? { ...item, active: !item.active } : item,
+    );
 }
 
-export function deletePantsMenuItem(items: PantsMenuItem[], id: string): PantsMenuItem[] {
+export function deletePantsMenuItem(
+    items: PantsMenuItem[],
+    id: string,
+): PantsMenuItem[] {
     return items.filter((item) => item.id !== id);
 }
 
-export function hasDuplicatePantsMenuTitle(items: PantsMenuItem[], title: string, ignoreId?: string): boolean {
+export function hasDuplicatePantsMenuTitle(
+    items: PantsMenuItem[],
+    title: string,
+    ignoreId?: string,
+): boolean {
     const normalizedTitle = title.trim().toLowerCase();
+
     if (!normalizedTitle) {
         return false;
     }
 
-    return items.some((item) => item.id !== ignoreId && item.title.trim().toLowerCase() === normalizedTitle);
+    return items.some(
+        (item) =>
+            item.id !== ignoreId &&
+            item.title.trim().toLowerCase() === normalizedTitle,
+    );
 }

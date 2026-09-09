@@ -1,4 +1,5 @@
-import { USER_ACCESS_ROLES, type UserAccessRole } from '@/types/user-management';
+import { USER_ACCESS_ROLES } from '@/types/user-management';
+import type { UserAccessRole } from '@/types/user-management';
 
 export const USER_MENUS = {
     DASHBOARD: 'dashboard',
@@ -83,12 +84,18 @@ function normalizeBranchCode(raw: string | null | undefined): string | null {
 /**
  * Check if a role can access a menu.
  */
-export function canAccessMenu(userRole: UserAccessRole, menuName: UserMenuName): boolean {
+export function canAccessMenu(
+    userRole: UserAccessRole,
+    menuName: UserMenuName,
+): boolean {
     if (userRole === USER_ACCESS_ROLES.OWNER) {
         return true;
     }
 
-    if (userRole === USER_ACCESS_ROLES.ADMIN_SYSTEM && menuName === USER_MENUS.DASHBOARD) {
+    if (
+        userRole === USER_ACCESS_ROLES.ADMIN_SYSTEM &&
+        menuName === USER_MENUS.DASHBOARD
+    ) {
         return false;
     }
 
@@ -102,7 +109,10 @@ export function canAccessMenu(userRole: UserAccessRole, menuName: UserMenuName):
  * - same branch allowed
  * - branch code "01" can access all
  */
-export function canAccessBranch(currentUserBranch: string | null | undefined, targetBranch: string | null | undefined): boolean {
+export function canAccessBranch(
+    currentUserBranch: string | null | undefined,
+    targetBranch: string | null | undefined,
+): boolean {
     const currentCode = normalizeBranchCode(currentUserBranch);
     const targetCode = normalizeBranchCode(targetBranch);
 
@@ -111,4 +121,28 @@ export function canAccessBranch(currentUserBranch: string | null | undefined, ta
     }
 
     return currentCode === '01' || currentCode === targetCode;
+}
+
+/**
+ * Where the logo should lead. Home is not the counter for everyone -- a QC or
+ * sewing account cannot open it -- so anyone without the counter goes to the
+ * page the server says they land on. Counter staff keep the team-scoped counter
+ * URL they have always had.
+ */
+export function resolveLogoHref({
+    canOpenCounter,
+    counterUrl,
+    landingPath,
+}: {
+    canOpenCounter: boolean;
+    counterUrl: string;
+    landingPath?: string | null;
+}): string {
+    if (canOpenCounter) {
+        return counterUrl;
+    }
+
+    // A page served before this prop existed, or one that failed to carry it,
+    // must still leave the logo pointing somewhere.
+    return landingPath && landingPath !== '' ? landingPath : counterUrl;
 }

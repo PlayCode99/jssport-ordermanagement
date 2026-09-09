@@ -11,7 +11,7 @@ class UpsertSewingOperationAction
      */
     public function execute(array $data, ?SewingOperation $sewingOperation = null): SewingOperation
     {
-        $model = $sewingOperation ?? new SewingOperation();
+        $model = $sewingOperation ?? new SewingOperation;
 
         $model->fill([
             'shirt_type_id' => (int) $data['shirt_type_id'],

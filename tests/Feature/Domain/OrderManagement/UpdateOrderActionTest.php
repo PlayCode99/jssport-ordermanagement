@@ -46,7 +46,7 @@ class UpdateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Regression Order',
@@ -68,13 +68,13 @@ class UpdateOrderActionTest extends TestCase
         // Advance the first station (cutting) to in_progress, then complete it,
         // and start the second station (embroidery), to simulate real production
         // progress that must never be lost by an unrelated order edit.
-        $cutting = (new AdvanceRoutingStationAction())->execute(
+        $cutting = (new AdvanceRoutingStationAction)->execute(
             $order, RoutingStationName::Cutting, RoutingStatus::InProgress, $creator->id,
         );
-        $cutting = (new AdvanceRoutingStationAction())->execute(
+        $cutting = (new AdvanceRoutingStationAction)->execute(
             $order, RoutingStationName::Cutting, RoutingStatus::Completed, $creator->id,
         );
-        $embroidery = (new AdvanceRoutingStationAction())->execute(
+        $embroidery = (new AdvanceRoutingStationAction)->execute(
             $order, RoutingStationName::Embroidery, RoutingStatus::InProgress, $creator->id,
         );
 
@@ -89,7 +89,7 @@ class UpdateOrderActionTest extends TestCase
         // Simulate the counter staff editing unrelated fields (phone number, discount)
         // on the order while it is mid-production, exactly like the real UI does:
         // it recomputes and resubmits a 'routings' array derived from job_type.
-        $updatedOrder = (new UpdateOrderAction())->execute($order, [
+        $updatedOrder = (new UpdateOrderAction)->execute($order, [
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Regression Order (updated)',
@@ -154,7 +154,7 @@ class UpdateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Artwork Update Order',
@@ -179,7 +179,7 @@ class UpdateOrderActionTest extends TestCase
         $this->assertCount(1, $order->getMedia('shirt_artwork'));
         $this->assertCount(1, $order->getMedia('pants_artwork'));
 
-        $updatedOrder = (new UpdateOrderAction())->execute($order, [
+        $updatedOrder = (new UpdateOrderAction)->execute($order, [
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Artwork Update Order',

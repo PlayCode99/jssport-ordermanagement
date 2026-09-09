@@ -12,7 +12,6 @@ use App\Enums\UserRole;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\CuttingOrder;
-use App\Models\CuttingWorkerTask;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PieceworkPrice;
@@ -29,7 +28,7 @@ class OrderAndPayrollSecurityTest extends TestCase
     {
         $context = $this->makeOrderContext();
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $context['customer']->id,
             'branch_id' => $context['branch']->id,
             'job_name' => 'Security Test Order',
@@ -69,7 +68,7 @@ class OrderAndPayrollSecurityTest extends TestCase
         try {
             $this->expectException(RuntimeException::class);
 
-            (new CreateOrderAction())->execute([
+            (new CreateOrderAction)->execute([
                 'customer_id' => $context['customer']->id,
                 'branch_id' => $context['branch']->id,
                 'job_name' => 'Rollback Test',
@@ -125,7 +124,7 @@ class OrderAndPayrollSecurityTest extends TestCase
             'status' => 'draft',
         ]);
 
-        $task = (new RecordCuttingWorkerTaskAction())->execute([
+        $task = (new RecordCuttingWorkerTaskAction)->execute([
             'cutting_order_id' => $cuttingOrder->id,
             'price_master_id' => $priceMaster->id,
             'worker_user_id' => $context['worker']->id,

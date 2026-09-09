@@ -1,7 +1,8 @@
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import OwnerDashboard, { type OwnerDashboardProps } from '@/pages/Dashboard/Owner';
+import OwnerDashboard from '@/pages/Dashboard/Owner';
+import type { OwnerDashboardProps } from '@/pages/Dashboard/Owner';
 
 const { mockRouterGet } = vi.hoisted(() => ({ mockRouterGet: vi.fn() }));
 
@@ -10,9 +11,19 @@ vi.mock('@inertiajs/react', () => ({
     router: { get: mockRouterGet },
 }));
 
-const baseProps = (over: Partial<OwnerDashboardProps> = {}): OwnerDashboardProps => ({
-    filters: { date_from: null, date_to: null, branch_id: null, job_type: null },
-    filterOptions: { branches: [{ value: '1', label: 'สาขา 1' }], jobTypes: [{ value: 'งานปัก', label: 'งานปัก' }] },
+const baseProps = (
+    over: Partial<OwnerDashboardProps> = {},
+): OwnerDashboardProps => ({
+    filters: {
+        date_from: null,
+        date_to: null,
+        branch_id: null,
+        job_type: null,
+    },
+    filterOptions: {
+        branches: [{ value: '1', label: 'สาขา 1' }],
+        jobTypes: [{ value: 'งานปัก', label: 'งานปัก' }],
+    },
     revenue: {
         net: 9000,
         gross: 10000,
@@ -22,9 +33,22 @@ const baseProps = (over: Partial<OwnerDashboardProps> = {}): OwnerDashboardProps
         pieces: { shirt: 30, pants: 10, set: 10, unspecified: 0 },
         monthly: [{ month: '2026-07', net: 9000 }],
     },
-    expense: { shirt: 800, pants: 200, total: 1000, monthly: [{ month: '2026-07', shirt: 800, pants: 200, total: 1000 }] },
+    expense: {
+        shirt: 800,
+        pants: 200,
+        total: 1000,
+        monthly: [{ month: '2026-07', shirt: 800, pants: 200, total: 1000 }],
+    },
     orderCounts: { completed: 3, in_progress: 7, total: 10 },
-    jobTypeBreakdown: [{ job_type: 'งานปัก', completed: 2, in_progress: 3, total: 5, quantity: 120 }],
+    jobTypeBreakdown: [
+        {
+            job_type: 'งานปัก',
+            completed: 2,
+            in_progress: 3,
+            total: 5,
+            quantity: 120,
+        },
+    ],
     garmentTypeUsage: {
         shirt: [{ name: 'เสื้อโปโล', orders: 4, pieces: 90 }],
         pants: [{ name: 'กางเกงขาสั้น', orders: 2, pieces: 30 }],
@@ -37,8 +61,32 @@ const baseProps = (over: Partial<OwnerDashboardProps> = {}): OwnerDashboardProps
                 count: 2,
                 quantity: 45,
                 orders: [
-                    { id: 1, order_code: 'ORD-001', customer_name: 'ลูกค้า A', job_name: 'เสื้อทีม A', job_type: 'ปัก', delivery_method: 'shipping', delivery_label: 'ขนส่ง', order_status: 'in_production', status_label: 'ห้องปัก (กำลังทำ)', is_closed: false, quantity: 20 },
-                    { id: 2, order_code: 'ORD-002', customer_name: 'ลูกค้า B', job_name: 'เสื้อทีม B', job_type: 'สกรีน เฟล๊กซ์', delivery_method: null, delivery_label: 'รับที่ร้าน', order_status: 'shipping', status_label: 'ปิดงาน', is_closed: true, quantity: 25 },
+                    {
+                        id: 1,
+                        order_code: 'ORD-001',
+                        customer_name: 'ลูกค้า A',
+                        job_name: 'เสื้อทีม A',
+                        job_type: 'ปัก',
+                        delivery_method: 'shipping',
+                        delivery_label: 'ขนส่ง',
+                        order_status: 'in_production',
+                        status_label: 'ห้องปัก (กำลังทำ)',
+                        is_closed: false,
+                        quantity: 20,
+                    },
+                    {
+                        id: 2,
+                        order_code: 'ORD-002',
+                        customer_name: 'ลูกค้า B',
+                        job_name: 'เสื้อทีม B',
+                        job_type: 'สกรีน เฟล๊กซ์',
+                        delivery_method: null,
+                        delivery_label: 'รับที่ร้าน',
+                        order_status: 'shipping',
+                        status_label: 'ปิดงาน',
+                        is_closed: true,
+                        quantity: 25,
+                    },
                 ],
             },
         },
@@ -54,7 +102,9 @@ describe('owner dashboard figures', () => {
         expect(screen.getAllByText('฿ 800.00').length).toBeGreaterThan(0);
         expect(screen.getAllByText('฿ 200.00').length).toBeGreaterThan(0);
         // The split is shown as a proportional bar rather than a percentage caption.
-        expect(screen.getByLabelText('เสื้อ 80% กางเกง 20%')).toBeInTheDocument();
+        expect(
+            screen.getByLabelText('เสื้อ 80% กางเกง 20%'),
+        ).toBeInTheDocument();
     });
 
     it('shows completed and in-progress counts', () => {
@@ -77,8 +127,12 @@ describe('owner dashboard figures', () => {
             />,
         );
 
-        expect(screen.getByText('ไม่มีรายจ่ายในช่วงที่เลือก')).toBeInTheDocument();
-        expect(screen.getByText('ไม่มีออเดอร์ในช่วงที่เลือก')).toBeInTheDocument();
+        expect(
+            screen.getByText('ไม่มีรายจ่ายในช่วงที่เลือก'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText('ไม่มีออเดอร์ในช่วงที่เลือก'),
+        ).toBeInTheDocument();
         expect(document.body.textContent).not.toContain('NaN');
         expect(document.body.textContent).not.toContain('Infinity');
     });
@@ -96,11 +150,15 @@ describe('owner dashboard figures', () => {
     it('renders the top 5 garment tables', () => {
         render(<OwnerDashboard {...baseProps()} />);
 
-        const shirtRow = screen.getByText('เสื้อโปโล').closest('tr') as HTMLElement;
+        const shirtRow = screen
+            .getByText('เสื้อโปโล')
+            .closest('tr') as HTMLElement;
         expect(within(shirtRow).getByText('4')).toBeInTheDocument();
         expect(within(shirtRow).getByText('90')).toBeInTheDocument();
 
-        const pantsRow = screen.getByText('กางเกงขาสั้น').closest('tr') as HTMLElement;
+        const pantsRow = screen
+            .getByText('กางเกงขาสั้น')
+            .closest('tr') as HTMLElement;
         expect(within(pantsRow).getByText('2')).toBeInTheDocument();
         expect(within(pantsRow).getByText('30')).toBeInTheDocument();
     });
@@ -113,14 +171,18 @@ describe('owner dashboard calendar', () => {
         // 1 July 2026 is a Wednesday -> 3 blank cells before day 1.
         const dayOne = screen.getByRole('button', { name: /^1 ก\.ค\. 2569/ });
         expect(dayOne).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^31 ก\.ค\. 2569/ })).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: /^31 ก\.ค\. 2569/ }),
+        ).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^32 / })).toBeNull();
     });
 
     it('marks the day that has deliveries and opens its orders', () => {
         render(<OwnerDashboard {...baseProps()} />);
 
-        const day20 = screen.getByRole('button', { name: /20 ก\.ค\. 2569 มี 2 ออเดอร์ต้องส่ง/ });
+        const day20 = screen.getByRole('button', {
+            name: /20 ก\.ค\. 2569 มี 2 ออเดอร์ต้องส่ง/,
+        });
         fireEvent.click(day20);
 
         expect(screen.getByText('ORD-001')).toBeInTheDocument();
@@ -139,7 +201,9 @@ describe('owner dashboard calendar', () => {
     it('tells the owner plainly when nothing ships today', () => {
         render(<OwnerDashboard {...baseProps()} />);
 
-        expect(screen.getByText(/วันนี้ไม่มีออเดอร์ที่ต้องส่ง/)).toBeInTheDocument();
+        expect(
+            screen.getByText(/วันนี้ไม่มีออเดอร์ที่ต้องส่ง/),
+        ).toBeInTheDocument();
     });
 
     it('opens today automatically when today has deliveries', () => {
@@ -154,7 +218,19 @@ describe('owner dashboard calendar', () => {
                                 count: 1,
                                 quantity: 5,
                                 orders: [
-                                    { id: 9, order_code: 'ORD-TODAY', customer_name: 'ลูกค้าวันนี้', job_name: 'งานวันนี้', job_type: 'ปัก', delivery_method: 'onsite', delivery_label: 'ส่งหน้างาน', order_status: 'shipping', status_label: 'จัดส่ง (รอคิว)', is_closed: false, quantity: 5 },
+                                    {
+                                        id: 9,
+                                        order_code: 'ORD-TODAY',
+                                        customer_name: 'ลูกค้าวันนี้',
+                                        job_name: 'งานวันนี้',
+                                        job_type: 'ปัก',
+                                        delivery_method: 'onsite',
+                                        delivery_label: 'ส่งหน้างาน',
+                                        order_status: 'shipping',
+                                        status_label: 'จัดส่ง (รอคิว)',
+                                        is_closed: false,
+                                        quantity: 5,
+                                    },
                                 ],
                             },
                         },
@@ -170,14 +246,30 @@ describe('owner dashboard calendar', () => {
     it('moves to another month through the server, keeping the current filters', () => {
         mockRouterGet.mockClear();
 
-        render(<OwnerDashboard {...baseProps({ filters: { date_from: '2026-07-01', date_to: null, branch_id: 1, job_type: 'งานปัก' } })} />);
+        render(
+            <OwnerDashboard
+                {...baseProps({
+                    filters: {
+                        date_from: '2026-07-01',
+                        date_to: null,
+                        branch_id: 1,
+                        job_type: 'งานปัก',
+                    },
+                })}
+            />,
+        );
 
         fireEvent.click(screen.getByRole('button', { name: 'เดือนถัดไป' }));
 
         expect(mockRouterGet).toHaveBeenCalledTimes(1);
         const [url, query] = mockRouterGet.mock.calls[0];
         expect(url).toBe('/owner-dashboard');
-        expect(query).toMatchObject({ calendar_month: '2026-08', date_from: '2026-07-01', branch_id: '1', job_type: 'งานปัก' });
+        expect(query).toMatchObject({
+            calendar_month: '2026-08',
+            date_from: '2026-07-01',
+            branch_id: '1',
+            job_type: 'งานปัก',
+        });
     });
 });
 
@@ -187,9 +279,27 @@ describe('owner dashboard job type table', () => {
             <OwnerDashboard
                 {...baseProps({
                     jobTypeBreakdown: [
-                        { job_type: 'งานปัก', completed: 2, in_progress: 3, total: 5, quantity: 120 },
-                        { job_type: 'งานสกรีน', completed: 0, in_progress: 0, total: 0, quantity: 0 },
-                        { job_type: 'ซับลิเมชั่น', completed: 0, in_progress: 0, total: 0, quantity: 0 },
+                        {
+                            job_type: 'งานปัก',
+                            completed: 2,
+                            in_progress: 3,
+                            total: 5,
+                            quantity: 120,
+                        },
+                        {
+                            job_type: 'งานสกรีน',
+                            completed: 0,
+                            in_progress: 0,
+                            total: 0,
+                            quantity: 0,
+                        },
+                        {
+                            job_type: 'ซับลิเมชั่น',
+                            completed: 0,
+                            in_progress: 0,
+                            total: 0,
+                            quantity: 0,
+                        },
                     ],
                 })}
             />,
@@ -198,8 +308,12 @@ describe('owner dashboard job type table', () => {
         expect(screen.getByText('งานสกรีน')).toBeInTheDocument();
         expect(screen.getByText('ซับลิเมชั่น')).toBeInTheDocument();
 
-        const zeroRow = screen.getByText('งานสกรีน').closest('tr') as HTMLElement;
-        expect(within(zeroRow).getAllByText('0').length).toBeGreaterThanOrEqual(4);
+        const zeroRow = screen
+            .getByText('งานสกรีน')
+            .closest('tr') as HTMLElement;
+        expect(within(zeroRow).getAllByText('0').length).toBeGreaterThanOrEqual(
+            4,
+        );
 
         const busyRow = screen.getByText('งานปัก').closest('tr') as HTMLElement;
         expect(within(busyRow).getByText('120')).toBeInTheDocument();
@@ -209,7 +323,10 @@ describe('owner dashboard job type table', () => {
         Object.defineProperty(window, 'localStorage', {
             configurable: true,
             value: {
-                getItem: () => JSON.stringify([{ id: 1, name: 'เฉพาะเครื่องนี้', active: true }]),
+                getItem: () =>
+                    JSON.stringify([
+                        { id: 1, name: 'เฉพาะเครื่องนี้', active: true },
+                    ]),
                 setItem: () => undefined,
                 removeItem: () => undefined,
                 clear: () => undefined,
@@ -221,5 +338,49 @@ describe('owner dashboard job type table', () => {
         render(<OwnerDashboard {...baseProps()} />);
 
         expect(screen.queryByText('เฉพาะเครื่องนี้')).not.toBeInTheDocument();
+    });
+});
+
+/**
+ * The dashboard is read on a phone. A grid item defaults to min-width:auto, so a
+ * table with a min-width inside one stretches its track and pushes the whole
+ * card past the screen edge -- which is what made the expense card poke out.
+ * Marking those cards min-w-0 lets the track shrink and hands the scrolling back
+ * to the wrapper that was already there.
+ */
+describe('owner dashboard on a phone', () => {
+    it('lets every card holding a wide table shrink to the screen', () => {
+        const { container } = render(<OwnerDashboard {...baseProps()} />);
+
+        const wideTables = [...container.querySelectorAll('table')].filter(
+            (table) => /min-w-\[\d+px\]/.test(table.className),
+        );
+
+        expect(wideTables.length).toBeGreaterThan(0);
+
+        wideTables.forEach((table) => {
+            const card = table.closest('section');
+
+            expect(
+                card,
+                `a wide table sits outside a section: ${table.className}`,
+            ).not.toBeNull();
+            expect(
+                card!.className,
+                `card of ${table.className} may not shrink`,
+            ).toContain('min-w-0');
+        });
+    });
+
+    it('keeps every wide table inside a scrollable wrapper', () => {
+        const { container } = render(<OwnerDashboard {...baseProps()} />);
+
+        [...container.querySelectorAll('table')]
+            .filter((table) => /min-w-\[\d+px\]/.test(table.className))
+            .forEach((table) => {
+                expect(table.parentElement?.className).toContain(
+                    'overflow-x-auto',
+                );
+            });
     });
 });

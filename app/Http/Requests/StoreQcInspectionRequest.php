@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
-use App\Enums\StationDepartment;
-use App\Enums\UserRole;
 use App\Models\Order;
+use App\Support\UserAccessControl;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -22,11 +21,12 @@ class StoreQcInspectionRequest extends FormRequest
             return false;
         }
 
-        if (in_array($user->role, [UserRole::Qc, UserRole::Admin, UserRole::ProductionManager], true)) {
-            return true;
-        }
-
-        return $user->station_department === StationDepartment::Qc;
+        // Whoever may open the QC room may sign its inspections off. Asking the
+        // access-role config keeps this in step with the menu the user is
+        // standing in; the old check read only the legacy `role` column, which
+        // users created through user management never have, so an owner or a
+        // system admin was refused their own QC screen.
+        return $user->is_active && UserAccessControl::canAccessMenu($user, 'qc');
     }
 
     /**

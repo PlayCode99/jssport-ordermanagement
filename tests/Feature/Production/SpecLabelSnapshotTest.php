@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Production;
 
+use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\CatalogItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -21,7 +22,7 @@ class SpecLabelSnapshotTest extends TestCase
      */
     private function sectionsFor(array $decoded): array
     {
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $method = (new \ReflectionClass($controller))->getMethod('mapSpecificationSections');
         $method->setAccessible(true);
 

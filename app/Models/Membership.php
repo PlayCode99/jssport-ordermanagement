@@ -19,6 +19,10 @@ use Illuminate\Support\Carbon;
  * @property-read User $user
  */
 #[Fillable(['team_id', 'user_id', 'role'])]
+/**
+ * @property-read Team|null $team
+ * @property-read User|null $user
+ */
 class Membership extends Pivot
 {
     /**

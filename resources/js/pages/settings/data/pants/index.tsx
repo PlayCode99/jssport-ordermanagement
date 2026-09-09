@@ -11,7 +11,13 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import {
     addPantsMenuItem,
     deletePantsMenuItem,
@@ -19,9 +25,9 @@ import {
     hasDuplicatePantsMenuTitle,
     savePantsMenuItems,
     togglePantsMenuItem,
-    type PantsMenuItem,
     updatePantsMenuItemTitle,
 } from '@/lib/pants-menu-store';
+import type { PantsMenuItem } from '@/lib/pants-menu-store';
 import type { Auth } from '@/types';
 
 type PageProps = {
@@ -43,13 +49,22 @@ export default function PantsMenuManagementPage() {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [newName, setNewName] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | 'active' | 'inactive'
+    >('all');
     const [editId, setEditId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState('');
-    const [rows, setRows] = useState<PantsMenuItem[]>(() => getPantsMenuItems());
+    const [rows, setRows] = useState<PantsMenuItem[]>(() =>
+        getPantsMenuItems(),
+    );
 
     const sortedRows = useMemo(
-        () => [...rows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        () =>
+            [...rows].sort(
+                (a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime(),
+            ),
         [rows],
     );
 
@@ -79,12 +94,15 @@ export default function PantsMenuManagementPage() {
     const addRow = () => {
         if (hasDuplicatePantsMenuTitle(rows, newName)) {
             window.alert('มีชื่อเมนูนี้อยู่แล้ว');
+
             return;
         }
 
         const created = addPantsMenuItem(newName, auth.user.name);
+
         if (!created) {
             window.alert('ไม่สามารถเพิ่มเมนูได้ กรุณาตรวจสอบชื่อเมนู');
+
             return;
         }
 
@@ -105,12 +123,14 @@ export default function PantsMenuManagementPage() {
 
     const saveEdit = (id: string) => {
         const nextTitle = editValue.trim();
+
         if (!nextTitle) {
             return;
         }
 
         if (hasDuplicatePantsMenuTitle(rows, nextTitle, id)) {
             window.alert('มีชื่อเมนูนี้อยู่แล้ว');
+
             return;
         }
 
@@ -121,6 +141,7 @@ export default function PantsMenuManagementPage() {
 
     const deleteRow = (id: string, title: string) => {
         const ok = window.confirm(`ยืนยันการลบเมนู ${title} ใช่หรือไม่`);
+
         if (!ok) {
             return;
         }
@@ -136,13 +157,23 @@ export default function PantsMenuManagementPage() {
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">Pants Data</p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">แบบกางเกง</h1>
-                            <p className="mt-2 text-sm text-slate-600">จัดการรายการเมนูย่อยของแบบกางเกง และกำหนดเปิด-ปิดการใช้งาน</p>
+                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                Pants Data
+                            </p>
+                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                แบบกางเกง
+                            </h1>
+                            <p className="mt-2 text-sm text-slate-600">
+                                จัดการรายการเมนูย่อยของแบบกางเกง
+                                และกำหนดเปิด-ปิดการใช้งาน
+                            </p>
                         </div>
 
                         <div className="flex w-full justify-start xl:w-auto xl:justify-end">
-                            <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
+                            <Button
+                                onClick={() => setIsCreateModalOpen(true)}
+                                className="gap-2"
+                            >
                                 <Plus className="size-4" />
                                 เพิ่มข้อมูลแบบกางเกง
                             </Button>
@@ -153,8 +184,12 @@ export default function PantsMenuManagementPage() {
                 <section className="flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
                         <div>
-                            <h2 className="text-base font-semibold text-slate-900">รายการเมนูแบบกางเกง</h2>
-                            <p className="text-sm text-slate-500">ทั้งหมด {filteredRows.length} รายการ</p>
+                            <h2 className="text-base font-semibold text-slate-900">
+                                รายการเมนูแบบกางเกง
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                ทั้งหมด {filteredRows.length} รายการ
+                            </p>
                         </div>
 
                         <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
@@ -162,20 +197,33 @@ export default function PantsMenuManagementPage() {
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    onChange={(event) =>
+                                        setSearchTerm(event.target.value)
+                                    }
                                     placeholder="ค้นหาชื่อเมนูหรือผู้สร้าง"
                                     className="bg-white pl-9"
                                 />
                             </div>
 
-                            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(
+                                    value: 'all' | 'active' | 'inactive',
+                                ) => setStatusFilter(value)}
+                            >
                                 <SelectTrigger className="w-full bg-white md:w-[180px]">
                                     <SelectValue placeholder="สถานะ" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกสถานะ</SelectItem>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกสถานะ
+                                    </SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -185,32 +233,60 @@ export default function PantsMenuManagementPage() {
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">วันที่สร้าง</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ชื่อเมนู</th>
-                                    <th className="w-[180px] px-4 py-3 text-left font-semibold text-slate-700">ผู้สร้าง</th>
-                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">Active</th>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">จัดการ</th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        วันที่สร้าง
+                                    </th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                                        ชื่อเมนู
+                                    </th>
+                                    <th className="w-[180px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        ผู้สร้าง
+                                    </th>
+                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        Active
+                                    </th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        จัดการ
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRows.length === 0 ? (
                                     <tr>
-                                        <td className="px-4 py-5 text-center text-slate-500" colSpan={5}>
+                                        <td
+                                            className="px-4 py-5 text-center text-slate-500"
+                                            colSpan={5}
+                                        >
                                             ไม่พบข้อมูลเมนูแบบกางเกงที่ตรงกับเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRows.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-3 align-top text-slate-700">{formatDate(row.createdAt)}</td>
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-50/60"
+                                        >
+                                            <td className="px-4 py-3 align-top text-slate-700">
+                                                {formatDate(row.createdAt)}
+                                            </td>
                                             <td className="px-4 py-3 text-slate-800">
                                                 {editId === row.id ? (
                                                     <div className="flex items-center gap-2">
                                                         <Input
                                                             value={editValue}
-                                                            onChange={(event) => setEditValue(event.target.value)}
+                                                            onChange={(event) =>
+                                                                setEditValue(
+                                                                    event.target
+                                                                        .value,
+                                                                )
+                                                            }
                                                         />
-                                                        <Button size="sm" onClick={() => saveEdit(row.id)}>
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                saveEdit(row.id)
+                                                            }
+                                                        >
                                                             บันทึก
                                                         </Button>
                                                     </div>
@@ -218,26 +294,49 @@ export default function PantsMenuManagementPage() {
                                                     row.title
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 align-top text-slate-700">{row.createdBy}</td>
+                                            <td className="px-4 py-3 align-top text-slate-700">
+                                                {row.createdBy}
+                                            </td>
                                             <td className="px-4 py-3 align-top">
                                                 <Button
-                                                    variant={row.active ? 'default' : 'outline'}
+                                                    variant={
+                                                        row.active
+                                                            ? 'default'
+                                                            : 'outline'
+                                                    }
                                                     size="sm"
-                                                    onClick={() => toggleActive(row.id)}
+                                                    onClick={() =>
+                                                        toggleActive(row.id)
+                                                    }
                                                     className="gap-1"
                                                 >
                                                     <Power className="size-4" />
-                                                    {row.active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                                                    {row.active
+                                                        ? 'เปิดใช้งาน'
+                                                        : 'ปิดใช้งาน'}
                                                 </Button>
                                             </td>
                                             <td className="px-4 py-3 align-top">
                                                 <div className="flex items-center gap-2">
                                                     {editId === row.id ? (
-                                                        <Button variant="ghost" size="sm" onClick={() => setEditId(null)}>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                setEditId(null)
+                                                            }
+                                                        >
                                                             ยกเลิก
                                                         </Button>
                                                     ) : (
-                                                        <Button variant="outline" size="sm" onClick={() => startEdit(row)} className="gap-1">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                startEdit(row)
+                                                            }
+                                                            className="gap-1"
+                                                        >
                                                             <Pencil className="size-4" />
                                                             แก้ไข
                                                         </Button>
@@ -245,7 +344,12 @@ export default function PantsMenuManagementPage() {
                                                     <Button
                                                         variant="destructive"
                                                         size="sm"
-                                                        onClick={() => deleteRow(row.id, row.title)}
+                                                        onClick={() =>
+                                                            deleteRow(
+                                                                row.id,
+                                                                row.title,
+                                                            )
+                                                        }
                                                         className="gap-1"
                                                     >
                                                         <Trash2 className="size-4" />
@@ -262,15 +366,24 @@ export default function PantsMenuManagementPage() {
                 </section>
             </div>
 
-            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+            <Dialog
+                open={isCreateModalOpen}
+                onOpenChange={setIsCreateModalOpen}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>เพิ่มข้อมูลแบบกางเกง</DialogTitle>
-                        <DialogDescription>กรอกชื่อเมนูใหม่ ระบบจะบันทึกผู้สร้างจากบัญชีที่ล็อกอินอยู่โดยอัตโนมัติ</DialogDescription>
+                        <DialogDescription>
+                            กรอกชื่อเมนูใหม่
+                            ระบบจะบันทึกผู้สร้างจากบัญชีที่ล็อกอินอยู่โดยอัตโนมัติ
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-2">
-                        <label htmlFor="pants-menu-name" className="text-sm font-medium text-slate-700">
+                        <label
+                            htmlFor="pants-menu-name"
+                            className="text-sm font-medium text-slate-700"
+                        >
                             ชื่อเมนู
                         </label>
                         <Input
@@ -288,7 +401,10 @@ export default function PantsMenuManagementPage() {
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsCreateModalOpen(false)}
+                        >
                             ยกเลิก
                         </Button>
                         <Button onClick={addRow}>บันทึก</Button>
@@ -299,7 +415,9 @@ export default function PantsMenuManagementPage() {
     );
 }
 
-PantsMenuManagementPage.layout = (props: { currentTeam?: { slug: string } | null }) => ({
+PantsMenuManagementPage.layout = (props: {
+    currentTeam?: { slug: string } | null;
+}) => ({
     breadcrumbs: [
         {
             title: 'เคาว์เตอร์',

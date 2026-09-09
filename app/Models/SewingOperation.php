@@ -7,12 +7,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property-read ShirtType|null $shirtType
+ */
 class SewingOperation extends Model
 {
     use HasFactory;
 
     /**
-     * @var array<int, string>
+     * @var list<string>
      */
     protected $fillable = [
         'shirt_type_id',
@@ -36,6 +39,9 @@ class SewingOperation extends Model
         ];
     }
 
+    /**
+     * @return BelongsTo<ShirtType, $this>
+     */
     public function shirtType(): BelongsTo
     {
         return $this->belongsTo(ShirtType::class);

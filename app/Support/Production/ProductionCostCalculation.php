@@ -55,7 +55,14 @@ trait ProductionCostCalculation
             }
         }
 
-        return $garmentTypesById->first();
+        // Last resort. Prefer a type that actually has rates: picking the very
+        // first one meant that deactivating the priced type silently costed
+        // every new bill at zero instead of failing loudly.
+        $priced = $garmentTypesById->first(
+            fn (GarmentType $type): bool => $type->operations->isNotEmpty()
+        );
+
+        return $priced ?? $garmentTypesById->first();
     }
 
     /**
@@ -185,7 +192,7 @@ trait ProductionCostCalculation
      * Builds the snapshot to store on an order: the operation prices in force
      * right now, plus the garment type names they belong to.
      *
-     * @param  \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, GarmentType>>  $garmentTypesByCategory
+     * @param  Collection<string, Collection<int, GarmentType>>  $garmentTypesByCategory
      * @return array<string, mixed>
      */
     public function buildProductionRateSnapshot(Order $order, Collection $garmentTypesByCategory): array
@@ -193,15 +200,8 @@ trait ProductionCostCalculation
         $shirtType = $this->resolveShirtType($order, $garmentTypesByCategory->get(GarmentCategory::Shirt->value, collect()));
         $pantsType = $this->resolvePantsType($order, $garmentTypesByCategory->get(GarmentCategory::Pants->value, collect()));
 
-        $components = static fn (?GarmentType $type): array => $type instanceof GarmentType
-            ? $type->operations
-                ->map(fn (GarmentOperation $operation): array => [
-                    'name' => $operation->name,
-                    'child_price' => (float) ($operation->child_price ?? 0),
-                    'adult_price' => (float) ($operation->adult_price ?? 0),
-                ])
-                ->values()
-                ->all()
+        $components = fn (?GarmentType $type): array => $type instanceof GarmentType
+            ? $this->rateComponents($type)
             : [];
 
         return [
@@ -213,6 +213,90 @@ trait ProductionCostCalculation
             'components' => $components($shirtType),
             'pants_components' => $components($pantsType),
         ];
+    }
+
+    /**
+     * Production splits the work by sleeve and leg length as well as by garment
+     * and size group, so each batch gets its own sheet on the floor. Rows saved
+     * before order_items carried a style land in 'unspecified' rather than being
+     * guessed into one of the real batches.
+     *
+     * @var list<string>
+     */
+    private const PRODUCTION_GROUP_STYLES = ['short', 'long', 'unspecified'];
+
+    /** @var array<string, string> */
+    private const PRODUCTION_GROUP_BASE_LABELS = [
+        'shirt_kids' => 'เสื้อไซต์เด็ก',
+        'shirt_adults' => 'เสื้อไซต์ผู้ใหญ่',
+        'pants_kids' => 'กางเกงเด็ก',
+        'pants_adults' => 'กางเกงผู้ใหญ่',
+    ];
+
+    /** @var array<string, array<string, string>> */
+    private const PRODUCTION_STYLE_LABELS = [
+        'shirt' => ['short' => 'แขนสั้น', 'long' => 'แขนยาว', 'unspecified' => 'ไม่ระบุแขน'],
+        'pants' => ['short' => 'ขาสั้น', 'long' => 'ขายาว', 'unspecified' => 'ไม่ระบุขา'],
+    ];
+
+    /**
+     * One operation per entry, with the rates that price it. Long prices stay
+     * null when the shop has not set them, so unitTotalForBatch() can tell
+     * "not priced separately" apart from "free".
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function rateComponents(GarmentType $garmentType): array
+    {
+        return $garmentType->operations
+            ->map(fn (GarmentOperation $operation): array => [
+                'name' => $operation->name,
+                'child_price' => (float) ($operation->child_price ?? 0),
+                'adult_price' => (float) ($operation->adult_price ?? 0),
+                'child_price_long' => $operation->child_price_long === null ? null : (float) $operation->child_price_long,
+                'adult_price_long' => $operation->adult_price_long === null ? null : (float) $operation->adult_price_long,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The labour cost of one garment in a batch.
+     *
+     * Long sleeves and long legs are priced per operation, and an operation the
+     * shop has not priced separately simply costs the same either way. Snapshots
+     * taken before those columns existed carry no long price at all, so they fall
+     * back the same way and already-booked work keeps the cost it was booked at.
+     *
+     * @param  Collection<int, mixed>  $components
+     */
+    private function unitTotalForBatch(Collection $components, string $sizeGroup, string $style): float
+    {
+        $baseKey = $sizeGroup === 'kids' ? 'child_price' : 'adult_price';
+        $longKey = $sizeGroup === 'kids' ? 'child_price_long' : 'adult_price_long';
+
+        return (float) $components->sum(function ($component) use ($baseKey, $longKey, $style): float {
+            if (! is_array($component)) {
+                return 0.0;
+            }
+
+            $base = (float) ($component[$baseKey] ?? 0);
+
+            if ($style !== 'long') {
+                return $base;
+            }
+
+            $long = $component[$longKey] ?? null;
+
+            return is_numeric($long) ? (float) $long : $base;
+        });
+    }
+
+    private function normalizeProductionStyle(?string $style): string
+    {
+        $normalized = mb_strtolower(trim((string) $style));
+
+        return in_array($normalized, ['short', 'long'], true) ? $normalized : 'unspecified';
     }
 
     private function normalizePricingSizeGroup(string $sizeGroup): ?string
@@ -231,16 +315,26 @@ trait ProductionCostCalculation
     }
 
     /**
-     * @return array{shirt_kids: int, shirt_adults: int, pants_kids: int, pants_adults: int}
+     * Quantities per production batch: garment x size group x garment style.
+     *
+     * A "set" row is one shirt and one pair of pants, so it feeds two batches,
+     * and each takes its own style from the row — a set can be short sleeved
+     * and long legged at the same time.
+     *
+     * @return array<string, int>
      */
-    private function summarizeOrderQuantitiesByPricingGroup(Order $order): array
+    private function summarizeOrderQuantitiesByProductionGroup(Order $order): array
     {
-        $totals = [
-            'shirt_kids' => 0,
-            'shirt_adults' => 0,
-            'pants_kids' => 0,
-            'pants_adults' => 0,
-        ];
+        $totals = [];
+
+        foreach (['shirt', 'pants'] as $garment) {
+            foreach (['kids', 'adults'] as $sizeGroup) {
+                foreach (self::PRODUCTION_GROUP_STYLES as $style) {
+                    $totals[$garment.'_'.$sizeGroup.'_'.$style] = 0;
+                }
+            }
+        }
+
         $garmentAvailability = $this->resolveSpecificationGarmentAvailability($order->specification?->toArray() ?? []);
 
         foreach ($order->items ?? collect() as $item) {
@@ -257,9 +351,35 @@ trait ProductionCostCalculation
             );
 
             foreach ($garmentGroups as $garmentGroup) {
-                $key = $garmentGroup.'_'.$sizeGroup;
-                $totals[$key] += (int) ($item->quantity ?? 0);
+                $style = $this->normalizeProductionStyle(
+                    $garmentGroup === 'pants' ? $item->pants_style : $item->shirt_style,
+                );
+
+                $totals[$garmentGroup.'_'.$sizeGroup.'_'.$style] += (int) ($item->quantity ?? 0);
             }
+        }
+
+        return $totals;
+    }
+
+    /**
+     * The same quantities folded back to garment x size group, for callers that
+     * only need "how many shirts" and not which batch they belong to.
+     *
+     * @return array{shirt_kids: int, shirt_adults: int, pants_kids: int, pants_adults: int}
+     */
+    private function summarizeOrderQuantitiesByPricingGroup(Order $order): array
+    {
+        $totals = [
+            'shirt_kids' => 0,
+            'shirt_adults' => 0,
+            'pants_kids' => 0,
+            'pants_adults' => 0,
+        ];
+
+        foreach ($this->summarizeOrderQuantitiesByProductionGroup($order) as $key => $quantity) {
+            [$garment, $sizeGroup] = explode('_', $key);
+            $totals[$garment.'_'.$sizeGroup] += $quantity;
         }
 
         return $totals;
@@ -277,19 +397,12 @@ trait ProductionCostCalculation
         $shirtType = $this->resolveShirtType($order, $shirtTypes);
         $pantsType = $this->resolvePantsType($order, $pantsTypes);
 
+        $batchQuantities = $this->summarizeOrderQuantitiesByProductionGroup($order);
         $quantities = $this->summarizeOrderQuantitiesByPricingGroup($order);
         $shirtChildQuantity = (int) $quantities['shirt_kids'];
         $shirtAdultQuantity = (int) $quantities['shirt_adults'];
         $pantsChildQuantity = (int) $quantities['pants_kids'];
         $pantsAdultQuantity = (int) $quantities['pants_adults'];
-
-        $buildComponents = static fn (GarmentType $garmentType): Collection => $garmentType->operations
-            ->map(fn (GarmentOperation $operation): array => [
-                'name' => $operation->name,
-                'child_price' => (float) ($operation->child_price ?? 0),
-                'adult_price' => (float) ($operation->adult_price ?? 0),
-            ])
-            ->values();
 
         // The rate the order was taken at wins. Master data only prices orders
         // that have no snapshot yet, so changing a rate never re-prices work
@@ -298,68 +411,74 @@ trait ProductionCostCalculation
 
         $shirtComponents = $snapshot !== null
             ? collect($snapshot['components'] ?? [])
-            : ($shirtType instanceof GarmentType ? $buildComponents($shirtType) : collect());
+            : collect($shirtType instanceof GarmentType ? $this->rateComponents($shirtType) : []);
         $pantsComponents = $snapshot !== null
             ? collect($snapshot['pants_components'] ?? [])
-            : ($pantsType instanceof GarmentType ? $buildComponents($pantsType) : collect());
+            : collect($pantsType instanceof GarmentType ? $this->rateComponents($pantsType) : []);
 
-        $shirtTypeName = $snapshot['shirt_type_name'] ?? $shirtType?->name ?? null;
-        $pantsTypeName = $snapshot['pants_type_name'] ?? $pantsType?->name ?? null;
+        $shirtTypeName = $snapshot['shirt_type_name'] ?? $shirtType->name ?? null;
+        $pantsTypeName = $snapshot['pants_type_name'] ?? $pantsType->name ?? null;
 
         $shirtChildUnitTotal = (float) $shirtComponents->sum('child_price');
         $shirtAdultUnitTotal = (float) $shirtComponents->sum('adult_price');
         $pantsChildUnitTotal = (float) $pantsComponents->sum('child_price');
         $pantsAdultUnitTotal = (float) $pantsComponents->sum('adult_price');
 
-        $shirtChildTotal = $shirtChildUnitTotal * $shirtChildQuantity;
-        $shirtAdultTotal = $shirtAdultUnitTotal * $shirtAdultQuantity;
-        $pantsChildTotal = $pantsChildUnitTotal * $pantsChildQuantity;
-        $pantsAdultTotal = $pantsAdultUnitTotal * $pantsAdultQuantity;
+        // One batch per garment x size group x style, which is one printed sheet
+        // on the production floor. Batches with nothing in them are dropped so a
+        // bill never prints an empty page.
+        $groups = [];
 
-        $groups = collect([
-            [
-                'key' => 'shirt_kids',
-                'label' => 'เสื้อไซต์เด็ก',
-                'garment' => 'shirt',
-                'size_group' => 'kids',
-                'quantity' => $shirtChildQuantity,
-                'unit_total' => $shirtChildUnitTotal,
-                'subtotal' => $shirtChildTotal,
-            ],
-            [
-                'key' => 'shirt_adults',
-                'label' => 'เสื้อไซต์ผู้ใหญ่',
-                'garment' => 'shirt',
-                'size_group' => 'adults',
-                'quantity' => $shirtAdultQuantity,
-                'unit_total' => $shirtAdultUnitTotal,
-                'subtotal' => $shirtAdultTotal,
-            ],
-            [
-                'key' => 'pants_kids',
-                'label' => 'กางเกงเด็ก',
-                'garment' => 'pants',
-                'size_group' => 'kids',
-                'quantity' => $pantsChildQuantity,
-                'unit_total' => $pantsChildUnitTotal,
-                'subtotal' => $pantsChildTotal,
-            ],
-            [
-                'key' => 'pants_adults',
-                'label' => 'กางเกงผู้ใหญ่',
-                'garment' => 'pants',
-                'size_group' => 'adults',
-                'quantity' => $pantsAdultQuantity,
-                'unit_total' => $pantsAdultUnitTotal,
-                'subtotal' => $pantsAdultTotal,
-            ],
-        ])->filter(fn (array $group): bool => (int) $group['quantity'] > 0)->values()->all();
+        foreach (['shirt', 'pants'] as $garment) {
+            $components = $garment === 'shirt' ? $shirtComponents : $pantsComponents;
 
-        $grandTotal = $shirtChildTotal + $shirtAdultTotal + $pantsChildTotal + $pantsAdultTotal;
+            foreach (['kids', 'adults'] as $sizeGroup) {
+                foreach (self::PRODUCTION_GROUP_STYLES as $style) {
+                    $key = $garment.'_'.$sizeGroup.'_'.$style;
+                    $quantity = (int) ($batchQuantities[$key] ?? 0);
+
+                    if ($quantity <= 0) {
+                        continue;
+                    }
+
+                    $unitTotal = $this->unitTotalForBatch($components, $sizeGroup, $style);
+
+                    $groups[] = [
+                        'key' => $key,
+                        'label' => self::PRODUCTION_GROUP_BASE_LABELS[$garment.'_'.$sizeGroup]
+                            .' '.self::PRODUCTION_STYLE_LABELS[$garment][$style],
+                        'garment' => $garment,
+                        'size_group' => $sizeGroup,
+                        'style' => $style,
+                        'quantity' => $quantity,
+                        'unit_total' => $unitTotal,
+                        'subtotal' => $unitTotal * $quantity,
+                    ];
+                }
+            }
+        }
+
+        // The bill total follows the batches, so splitting a garment into a short
+        // and a long batch cannot change what the order costs in total.
+        $grandTotal = (float) array_sum(array_column($groups, 'subtotal'));
+
+        $subtotalFor = static function (array $groups, string $garment, string $sizeGroup): float {
+            $matching = array_filter(
+                $groups,
+                static fn (array $group): bool => $group['garment'] === $garment && $group['size_group'] === $sizeGroup,
+            );
+
+            return (float) array_sum(array_column($matching, 'subtotal'));
+        };
+
+        $shirtChildTotal = $subtotalFor($groups, 'shirt', 'kids');
+        $shirtAdultTotal = $subtotalFor($groups, 'shirt', 'adults');
+        $pantsChildTotal = $subtotalFor($groups, 'pants', 'kids');
+        $pantsAdultTotal = $subtotalFor($groups, 'pants', 'adults');
 
         return [
-            'shirt_type_id' => $shirtType?->id ?? null,
-            'pants_type_id' => $pantsType?->id ?? null,
+            'shirt_type_id' => $shirtType->id ?? null,
+            'pants_type_id' => $pantsType->id ?? null,
             'shirt_type_name' => $shirtTypeName,
             'pants_type_name' => $pantsTypeName,
             'child_quantity' => $shirtChildQuantity + $pantsChildQuantity,

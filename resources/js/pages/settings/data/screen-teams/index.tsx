@@ -12,7 +12,13 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type ScreenTeamRow = {
     id: number;
@@ -40,7 +46,11 @@ const INITIAL_FORM: FormState = {
 };
 
 function csrfToken(): string {
-    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+    return (
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
 }
 
 function formatDate(value: string): string {
@@ -66,8 +76,12 @@ function stationLabel(station: 'screen' | 'flex'): string {
 export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
     const [rows, setRows] = useState<ScreenTeamRow[]>(initialRows);
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-    const [stationFilter, setStationFilter] = useState<'all' | 'screen' | 'flex'>('all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | 'active' | 'inactive'
+    >('all');
+    const [stationFilter, setStationFilter] = useState<
+        'all' | 'screen' | 'flex'
+    >('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editId, setEditId] = useState<number | null>(null);
     const [form, setForm] = useState<FormState>(INITIAL_FORM);
@@ -78,12 +92,16 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
 
         return rows
             .filter((row) => {
-                const matchesSearch = keyword.length === 0 || row.team_name.toLowerCase().includes(keyword);
+                const matchesSearch =
+                    keyword.length === 0 ||
+                    row.team_name.toLowerCase().includes(keyword);
                 const matchesStatus =
-                    statusFilter === 'all'
-                    || (statusFilter === 'active' && row.is_active)
-                    || (statusFilter === 'inactive' && !row.is_active);
-                const matchesStation = stationFilter === 'all' || row.station_name === stationFilter;
+                    statusFilter === 'all' ||
+                    (statusFilter === 'active' && row.is_active) ||
+                    (statusFilter === 'inactive' && !row.is_active);
+                const matchesStation =
+                    stationFilter === 'all' ||
+                    row.station_name === stationFilter;
 
                 return matchesSearch && matchesStatus && matchesStation;
             })
@@ -117,10 +135,14 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
 
         if (!payload.team_name) {
             setError('กรุณากรอกชื่อทีม');
+
             return;
         }
 
-        const endpoint = editId === null ? '/settings/data/screen-teams' : `/settings/data/screen-teams/${editId}`;
+        const endpoint =
+            editId === null
+                ? '/settings/data/screen-teams'
+                : `/settings/data/screen-teams/${editId}`;
         const method = editId === null ? 'POST' : 'PUT';
 
         const response = await fetch(endpoint, {
@@ -133,10 +155,14 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
             body: JSON.stringify(payload),
         });
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: ScreenTeamRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: ScreenTeamRow[];
+        } | null;
 
         if (!response.ok) {
             setError(body?.message ?? 'บันทึกข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -164,7 +190,9 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
             }),
         });
 
-        const body = (await response.json().catch(() => null)) as { rows?: ScreenTeamRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            rows?: ScreenTeamRow[];
+        } | null;
 
         if (response.ok && Array.isArray(body?.rows)) {
             setRows(body.rows);
@@ -186,10 +214,14 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
             },
         });
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: ScreenTeamRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: ScreenTeamRow[];
+        } | null;
 
         if (!response.ok) {
             window.alert(body?.message ?? 'ลบข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -206,9 +238,15 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">Screen Team Master</p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">จัดการทีมห้องสกรีน</h1>
-                            <p className="mt-2 text-sm text-slate-600">กำหนดทีมสกรีนและเฟล็กสำหรับหน้าแจกงาน</p>
+                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                Screen Team Master
+                            </p>
+                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                จัดการทีมห้องสกรีน
+                            </h1>
+                            <p className="mt-2 text-sm text-slate-600">
+                                กำหนดทีมสกรีนและเฟล็กสำหรับหน้าแจกงาน
+                            </p>
                         </div>
 
                         <Button onClick={openCreateModal} className="gap-2">
@@ -221,8 +259,12 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
                 <section className="flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
                         <div>
-                            <h2 className="text-base font-semibold text-slate-900">รายการทีม</h2>
-                            <p className="text-sm text-slate-500">ทั้งหมด {filteredRows.length} รายการ</p>
+                            <h2 className="text-base font-semibold text-slate-900">
+                                รายการทีม
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                ทั้งหมด {filteredRows.length} รายการ
+                            </p>
                         </div>
 
                         <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
@@ -230,31 +272,51 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    onChange={(event) =>
+                                        setSearchTerm(event.target.value)
+                                    }
                                     placeholder="ค้นหาชื่อทีม"
                                     className="bg-white pl-9"
                                 />
                             </div>
 
-                            <Select value={stationFilter} onValueChange={(value: 'all' | 'screen' | 'flex') => setStationFilter(value)}>
+                            <Select
+                                value={stationFilter}
+                                onValueChange={(
+                                    value: 'all' | 'screen' | 'flex',
+                                ) => setStationFilter(value)}
+                            >
                                 <SelectTrigger className="w-full bg-white md:w-[160px]">
                                     <SelectValue placeholder="ห้อง" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">ทุกห้อง</SelectItem>
-                                    <SelectItem value="screen">สกรีน</SelectItem>
+                                    <SelectItem value="screen">
+                                        สกรีน
+                                    </SelectItem>
                                     <SelectItem value="flex">เฟล็ก</SelectItem>
                                 </SelectContent>
                             </Select>
 
-                            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(
+                                    value: 'all' | 'active' | 'inactive',
+                                ) => setStatusFilter(value)}
+                            >
                                 <SelectTrigger className="w-full bg-white md:w-[180px]">
                                     <SelectValue placeholder="สถานะ" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกสถานะ</SelectItem>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกสถานะ
+                                    </SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -264,44 +326,88 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">วันที่สร้าง</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ชื่อทีม</th>
-                                    <th className="w-[140px] px-4 py-3 text-left font-semibold text-slate-700">ห้อง</th>
-                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">สถานะ</th>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">จัดการ</th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        วันที่สร้าง
+                                    </th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                                        ชื่อทีม
+                                    </th>
+                                    <th className="w-[140px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        ห้อง
+                                    </th>
+                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        สถานะ
+                                    </th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        จัดการ
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRows.length === 0 ? (
                                     <tr>
-                                        <td className="px-4 py-5 text-center text-slate-500" colSpan={5}>
+                                        <td
+                                            className="px-4 py-5 text-center text-slate-500"
+                                            colSpan={5}
+                                        >
                                             ไม่พบข้อมูลทีมตามเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRows.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-3 text-slate-700">{formatDate(row.created_at)}</td>
-                                            <td className="px-4 py-3 text-slate-800">{row.team_name}</td>
-                                            <td className="px-4 py-3 text-slate-700">{stationLabel(row.station_name)}</td>
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-50/60"
+                                        >
+                                            <td className="px-4 py-3 text-slate-700">
+                                                {formatDate(row.created_at)}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-800">
+                                                {row.team_name}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-700">
+                                                {stationLabel(row.station_name)}
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <Button
-                                                    variant={row.is_active ? 'default' : 'outline'}
+                                                    variant={
+                                                        row.is_active
+                                                            ? 'default'
+                                                            : 'outline'
+                                                    }
                                                     size="sm"
-                                                    onClick={() => toggleActive(row)}
+                                                    onClick={() =>
+                                                        toggleActive(row)
+                                                    }
                                                     className="gap-1"
                                                 >
                                                     <Power className="size-4" />
-                                                    {row.is_active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                                                    {row.is_active
+                                                        ? 'เปิดใช้งาน'
+                                                        : 'ปิดใช้งาน'}
                                                 </Button>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2">
-                                                    <Button variant="outline" size="sm" onClick={() => openEditModal(row)} className="gap-1">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            openEditModal(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Pencil className="size-4" />
                                                         แก้ไข
                                                     </Button>
-                                                    <Button variant="destructive" size="sm" onClick={() => deleteRow(row)} className="gap-1">
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            deleteRow(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Trash2 className="size-4" />
                                                         ลบ
                                                     </Button>
@@ -319,58 +425,101 @@ export default function ScreenTeamsPage({ rows: initialRows }: PageProps) {
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{editId === null ? 'เพิ่มทีมห้องสกรีน' : 'แก้ไขทีมห้องสกรีน'}</DialogTitle>
-                        <DialogDescription>กำหนดชื่อทีม ห้อง และสถานะการใช้งาน</DialogDescription>
+                        <DialogTitle>
+                            {editId === null
+                                ? 'เพิ่มทีมห้องสกรีน'
+                                : 'แก้ไขทีมห้องสกรีน'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            กำหนดชื่อทีม ห้อง และสถานะการใช้งาน
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="grid gap-3">
                         <div className="space-y-1">
-                            <label htmlFor="team_name" className="text-sm font-medium text-slate-700">ชื่อทีม</label>
+                            <label
+                                htmlFor="team_name"
+                                className="text-sm font-medium text-slate-700"
+                            >
+                                ชื่อทีม
+                            </label>
                             <Input
                                 id="team_name"
                                 value={form.team_name}
-                                onChange={(event) => setForm((prev) => ({ ...prev, team_name: event.target.value }))}
+                                onChange={(event) =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        team_name: event.target.value,
+                                    }))
+                                }
                                 placeholder="เช่น ทีมสกรีน A"
                             />
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-sm font-medium text-slate-700">ห้อง</label>
+                            <label className="text-sm font-medium text-slate-700">
+                                ห้อง
+                            </label>
                             <Select
                                 value={form.station_name}
-                                onValueChange={(value: 'screen' | 'flex') => setForm((prev) => ({ ...prev, station_name: value }))}
+                                onValueChange={(value: 'screen' | 'flex') =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        station_name: value,
+                                    }))
+                                }
                             >
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="screen">สกรีน</SelectItem>
+                                    <SelectItem value="screen">
+                                        สกรีน
+                                    </SelectItem>
                                     <SelectItem value="flex">เฟล็ก</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-sm font-medium text-slate-700">สถานะ</label>
+                            <label className="text-sm font-medium text-slate-700">
+                                สถานะ
+                            </label>
                             <Select
                                 value={form.is_active ? 'active' : 'inactive'}
-                                onValueChange={(value: 'active' | 'inactive') => setForm((prev) => ({ ...prev, is_active: value === 'active' }))}
+                                onValueChange={(value: 'active' | 'inactive') =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        is_active: value === 'active',
+                                    }))
+                                }
                             >
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
-                        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+                        {error ? (
+                            <p className="text-sm text-red-600">{error}</p>
+                        ) : null}
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsModalOpen(false)}>ยกเลิก</Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsModalOpen(false)}
+                        >
+                            ยกเลิก
+                        </Button>
                         <Button onClick={saveForm}>บันทึก</Button>
                     </DialogFooter>
                 </DialogContent>

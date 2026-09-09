@@ -14,7 +14,6 @@ use App\Models\CuttingOrder;
 use App\Models\CuttingWorkerTask;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\OrderRouting;
 use App\Models\PieceworkPrice;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;

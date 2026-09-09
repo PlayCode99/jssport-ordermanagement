@@ -28,8 +28,7 @@ class AdvanceRoutingStationAction
         ?int $heatPressMachineId = null,
         ?string $reworkNote = null,
         bool $allowDirectCompletion = false,
-    ): OrderRouting
-    {
+    ): OrderRouting {
         return DB::transaction(function () use ($order, $stationName, $newStatus, $workerUserId, $printMachine, $cuttingTeamId, $sewingTeamId, $embroideryTeamId, $screenTeamId, $heatPressMachineId, $reworkNote, $allowDirectCompletion): OrderRouting {
             $this->ensureSequentialPrerequisites($order, $stationName, $newStatus, $allowDirectCompletion);
 

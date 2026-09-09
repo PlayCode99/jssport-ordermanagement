@@ -31,25 +31,55 @@ const group = (rows: ReturnType<typeof row>[], over = {}) => ({
 
 describe('sports day pricing', () => {
     it('bills shirt and pants at their own price', () => {
-        expect(sportsDayRowTotal(row({ shirt_qty: 40, shirt_price: 200, pants_qty: 40, pants_price: 150 }))).toBe(14000);
+        expect(
+            sportsDayRowTotal(
+                row({
+                    shirt_qty: 40,
+                    shirt_price: 200,
+                    pants_qty: 40,
+                    pants_price: 150,
+                }),
+            ),
+        ).toBe(14000);
     });
 
     it('handles a shirt-only row, which the set-based formula could not', () => {
-        expect(sportsDayRowTotal(row({ shirt_qty: 35, shirt_price: 200 }))).toBe(7000);
+        expect(
+            sportsDayRowTotal(row({ shirt_qty: 35, shirt_price: 200 })),
+        ).toBe(7000);
     });
 
     it('handles a pants-only row', () => {
-        expect(sportsDayRowTotal(row({ pants_qty: 10, pants_price: 150 }))).toBe(1500);
+        expect(
+            sportsDayRowTotal(row({ pants_qty: 10, pants_price: 150 })),
+        ).toBe(1500);
     });
 
     it('ignores negative input rather than subtracting from the total', () => {
-        expect(sportsDayRowTotal(row({ shirt_qty: -5, shirt_price: 200, pants_qty: 2, pants_price: 100 }))).toBe(200);
+        expect(
+            sportsDayRowTotal(
+                row({
+                    shirt_qty: -5,
+                    shirt_price: 200,
+                    pants_qty: 2,
+                    pants_price: 100,
+                }),
+            ),
+        ).toBe(200);
     });
 
     it('sums a whole colour house', () => {
         const g = group([
             row({ id: 'a', shirt_qty: 35, shirt_price: 200 }),
-            row({ id: 'b', size_group: 'kids', size_label: 'JS', shirt_qty: 20, shirt_price: 180, pants_qty: 20, pants_price: 150 }),
+            row({
+                id: 'b',
+                size_group: 'kids',
+                size_label: 'JS',
+                shirt_qty: 20,
+                shirt_price: 180,
+                pants_qty: 20,
+                pants_price: 150,
+            }),
         ]);
 
         expect(sportsDayGroupTotal(g)).toBe(7000 + 3600 + 3000);
@@ -60,21 +90,52 @@ describe('sports day pricing', () => {
 describe('sports day → order_items', () => {
     it('emits one line per garment, carrying its own size group and price', () => {
         const items = buildRequestItemsFromSportsDay([
-            group([row({ shirt_qty: 35, shirt_price: 200, pants_qty: 10, pants_price: 150 })]),
+            group([
+                row({
+                    shirt_qty: 35,
+                    shirt_price: 200,
+                    pants_qty: 10,
+                    pants_price: 150,
+                }),
+            ]),
         ]);
 
         // The garment is named so production costing does not have to guess it.
         expect(items).toEqual([
-            { item_type: 'shirt', size_group: 'adults', size_label: 'M', quantity: 35, unit_price: 200 },
-            { item_type: 'pants', size_group: 'adults', size_label: 'M', quantity: 10, unit_price: 150 },
+            {
+                item_type: 'shirt',
+                size_group: 'adults',
+                size_label: 'M',
+                quantity: 35,
+                unit_price: 200,
+            },
+            {
+                item_type: 'pants',
+                size_group: 'adults',
+                size_label: 'M',
+                quantity: 10,
+                unit_price: 150,
+            },
         ]);
     });
 
     it('keeps each colour house’s kids and adults rows in the right size group', () => {
         const items = buildRequestItemsFromSportsDay([
             group([
-                row({ id: 'a', size_group: 'kids', size_label: 'JS', shirt_qty: 5, shirt_price: 180 }),
-                row({ id: 'b', size_group: 'adults', size_label: 'L', shirt_qty: 7, shirt_price: 200 }),
+                row({
+                    id: 'a',
+                    size_group: 'kids',
+                    size_label: 'JS',
+                    shirt_qty: 5,
+                    shirt_price: 180,
+                }),
+                row({
+                    id: 'b',
+                    size_group: 'adults',
+                    size_label: 'L',
+                    shirt_qty: 7,
+                    shirt_price: 200,
+                }),
             ]),
         ]);
 
@@ -95,12 +156,32 @@ describe('sports day → order_items', () => {
 
     it('totals across colour houses match the sum of the line items', () => {
         const groups = [
-            group([row({ shirt_qty: 35, shirt_price: 200 })], { id: 'g1', team_name: 'แดง' }),
-            group([row({ id: 'r2', shirt_qty: 40, shirt_price: 200, pants_qty: 40, pants_price: 150 })], { id: 'g2', team_name: 'น้ำเงิน' }),
+            group([row({ shirt_qty: 35, shirt_price: 200 })], {
+                id: 'g1',
+                team_name: 'แดง',
+            }),
+            group(
+                [
+                    row({
+                        id: 'r2',
+                        shirt_qty: 40,
+                        shirt_price: 200,
+                        pants_qty: 40,
+                        pants_price: 150,
+                    }),
+                ],
+                { id: 'g2', team_name: 'น้ำเงิน' },
+            ),
         ];
 
-        const lineTotal = buildRequestItemsFromSportsDay(groups).reduce((sum, i) => sum + i.quantity * i.unit_price, 0);
-        const formTotal = groups.reduce((sum, g) => sum + sportsDayGroupTotal(g), 0);
+        const lineTotal = buildRequestItemsFromSportsDay(groups).reduce(
+            (sum, i) => sum + i.quantity * i.unit_price,
+            0,
+        );
+        const formTotal = groups.reduce(
+            (sum, g) => sum + sportsDayGroupTotal(g),
+            0,
+        );
 
         expect(lineTotal).toBe(formTotal);
         expect(formTotal).toBe(7000 + 14000);
@@ -109,7 +190,9 @@ describe('sports day → order_items', () => {
 
 describe('sports day round-trip', () => {
     const args = {
-        resolvedBranches: [{ id: 1, name: 'Branch 01', code: '01', phone: null }],
+        resolvedBranches: [
+            { id: 1, name: 'Branch 01', code: '01', phone: null },
+        ],
         defaultBranchId: 1,
         resolvedJobTypes: [{ id: 1, name: 'uniform' }],
         resolvedShirtTypes: [{ id: 1, name: 'Shirt' }],
@@ -118,11 +201,16 @@ describe('sports day round-trip', () => {
         resolvedAdultSizes: ['M'],
     };
 
-    it('starts a new order with one empty colour house', () => {
+    it('starts a new order with one colour house of three blank size rows', () => {
         const result = buildEditInitialFormData(null, args);
 
         expect(result.sports_day_groups).toHaveLength(1);
-        expect(result.sports_day_groups[0].rows).toHaveLength(1);
+        expect(result.sports_day_groups[0].rows).toHaveLength(3);
+        expect(
+            result.sports_day_groups[0].rows.every(
+                (row) => row.size_label === '' && row.shirt_qty === 0,
+            ),
+        ).toBe(true);
     });
 
     it('reads saved colour houses back from the spec, since order_items has no colour column', () => {
@@ -136,7 +224,16 @@ describe('sports day round-trip', () => {
                             {
                                 team_name: 'คณะสีแดง',
                                 fabric_color_id: '12',
-                                rows: [{ size_group: 'adults', size_label: 'M', shirt_qty: 35, shirt_price: 200, pants_qty: 0, pants_price: 0 }],
+                                rows: [
+                                    {
+                                        size_group: 'adults',
+                                        size_label: 'M',
+                                        shirt_qty: 35,
+                                        shirt_price: 200,
+                                        pants_qty: 0,
+                                        pants_price: 0,
+                                    },
+                                ],
                             },
                         ],
                     },

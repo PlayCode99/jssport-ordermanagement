@@ -43,7 +43,7 @@ class CounterPaginationTest extends TestCase
             'branch_id' => $branch->id,
         ]);
 
-        $action = new CreateOrderAction();
+        $action = new CreateOrderAction;
 
         for ($index = 0; $index < $count; $index += 1) {
             $action->execute([
@@ -171,7 +171,7 @@ class CounterPaginationTest extends TestCase
 
         // A search that matches nothing must zero out the cards as well as the table.
         $this->actingAs($creator)
-            ->get('/counter?search=' . urlencode('ไม่มีออเดอร์นี้แน่นอน'))
+            ->get('/counter?search='.urlencode('ไม่มีออเดอร์นี้แน่นอน'))
             ->assertOk()
             ->assertInertia(function (Assert $page): void {
                 $props = $page->toArray()['props'];

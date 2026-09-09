@@ -55,7 +55,7 @@ class CreateOrderActionTest extends TestCase
         ];
 
         foreach ($cases as $jobType => $expectedStations) {
-            $order = (new CreateOrderAction())->execute(
+            $order = (new CreateOrderAction)->execute(
                 $this->basePayload($customer->id, $branch->id, $jobType),
                 $creator->id,
             );
@@ -102,7 +102,7 @@ class CreateOrderActionTest extends TestCase
         ];
 
         foreach ($cases as $jobType => $expectedStations) {
-            $order = (new CreateOrderAction())->execute(
+            $order = (new CreateOrderAction)->execute(
                 $this->basePayload($customer->id, $branch->id, $jobType),
                 $creator->id,
             );
@@ -128,7 +128,7 @@ class CreateOrderActionTest extends TestCase
             ]);
 
             $firstStation = RoutingStationName::from($expectedStations[0]);
-            $routing = (new AdvanceRoutingStationAction())->execute(
+            $routing = (new AdvanceRoutingStationAction)->execute(
                 $order,
                 $firstStation,
                 RoutingStatus::InProgress,
@@ -198,7 +198,7 @@ class CreateOrderActionTest extends TestCase
             'routings' => ['design', 'print', 'sewing', 'qc'],
         ];
 
-        $order = (new CreateOrderAction())->execute($payload, $creator->id);
+        $order = (new CreateOrderAction)->execute($payload, $creator->id);
 
         $this->assertSame(750.0, (float) $order->total_amount);
         $this->assertSame(75.0, (float) $order->discount_amount);
@@ -258,7 +258,7 @@ class CreateOrderActionTest extends TestCase
             $this->expectException(RuntimeException::class);
             $this->expectExceptionMessage('Failed to create order.');
 
-            (new CreateOrderAction())->execute([
+            (new CreateOrderAction)->execute([
                 'customer_id' => $customer->id,
                 'branch_id' => $branch->id,
                 'job_name' => 'Rollback Case',
@@ -313,7 +313,7 @@ class CreateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $action = new CreateOrderAction();
+        $action = new CreateOrderAction;
 
         $firstOrder = $action->execute([
             ...$this->basePayload($customer->id, $branch->id, 'งานปัก'),
@@ -358,7 +358,7 @@ class CreateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             ...$this->basePayload($customer->id, $branch->id, 'งานปัก'),
             'shirt_artwork' => UploadedFile::fake()->image('shirt-source.jpg', 120, 120),
         ], $creator->id);
@@ -389,7 +389,7 @@ class CreateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             ...$this->basePayload($customer->id, $branch->id, 'งานปัก'),
             'pants_artwork' => UploadedFile::fake()->image('pants-source.jpg', 120, 120),
         ], $creator->id);
@@ -420,7 +420,7 @@ class CreateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             ...$this->basePayload($customer->id, $branch->id, 'งานปัก'),
             'design_artwork' => UploadedFile::fake()->image('general-source.jpg', 120, 120),
             'shirt_artwork' => UploadedFile::fake()->image('shirt-source.jpg', 120, 120),
@@ -480,7 +480,7 @@ class CreateOrderActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             ...$this->basePayload($customer->id, $branch->id, 'งานปัก'),
             'shirt_artwork' => [
                 UploadedFile::fake()->image('shirt-1.jpg', 120, 120),
@@ -532,7 +532,7 @@ class CreateOrderActionTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-07-11 07:37:42', 'UTC'));
 
         try {
-            $order = (new CreateOrderAction())->execute($payload, $creator->id);
+            $order = (new CreateOrderAction)->execute($payload, $creator->id);
 
             $this->assertSame('2026-07-11 14:37:42', $order->order_date->format('Y-m-d H:i:s'));
             $this->assertNotSame($payload['order_date'], $order->order_date->format('Y-m-d H:i:s'));

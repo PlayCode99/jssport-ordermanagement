@@ -32,7 +32,7 @@ class AdvanceRoutingStationActionTest extends TestCase
 
         $this->markStationCompleted($order, 'cutting');
 
-        $action = new AdvanceRoutingStationAction();
+        $action = new AdvanceRoutingStationAction;
 
         $this->expectException(ValidationException::class);
         $this->expectExceptionMessage('prerequisite station [print] is completed or skipped');
@@ -58,7 +58,7 @@ class AdvanceRoutingStationActionTest extends TestCase
         $this->markStationCompleted($order, 'screen');
         $this->markStationCompleted($order, 'flex');
 
-        $routing = (new AdvanceRoutingStationAction())->execute(
+        $routing = (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Embroidery,
             RoutingStatus::InProgress,
@@ -78,9 +78,9 @@ class AdvanceRoutingStationActionTest extends TestCase
         ]);
 
         $this->markStationCompleted($order, 'cutting');
-    $this->markStationStarted($order, 'embroidery');
+        $this->markStationStarted($order, 'embroidery');
 
-        $routing = (new AdvanceRoutingStationAction())->execute(
+        $routing = (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Embroidery,
             RoutingStatus::Completed,
@@ -101,7 +101,7 @@ class AdvanceRoutingStationActionTest extends TestCase
 
         $this->markStationCompleted($order, 'cutting');
 
-        $action = new AdvanceRoutingStationAction();
+        $action = new AdvanceRoutingStationAction;
 
         $this->expectException(ValidationException::class);
         $this->expectExceptionMessage('prerequisite station [print] is completed or skipped');
@@ -126,7 +126,7 @@ class AdvanceRoutingStationActionTest extends TestCase
         $this->markStationCompleted($order, 'print');
         $this->markStationCompleted($order, 'screen');
 
-        $action = new AdvanceRoutingStationAction();
+        $action = new AdvanceRoutingStationAction;
 
         $skippedRouting = $action->execute(
             $order,
@@ -160,14 +160,14 @@ class AdvanceRoutingStationActionTest extends TestCase
         $this->markStationCompleted($order, 'print');
         $this->markStationSkipped($order, 'screen');
 
-        (new AdvanceRoutingStationAction())->execute(
+        (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Screen,
             RoutingStatus::InProgress,
             $worker->id,
         );
 
-        $routing = (new AdvanceRoutingStationAction())->execute(
+        $routing = (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Screen,
             RoutingStatus::Completed,
@@ -190,7 +190,7 @@ class AdvanceRoutingStationActionTest extends TestCase
         $this->markStationSkipped($order, 'screen');
         $this->markStationSkipped($order, 'flex');
 
-        $routing = (new AdvanceRoutingStationAction())->execute(
+        $routing = (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Embroidery,
             RoutingStatus::InProgress,
@@ -220,7 +220,7 @@ class AdvanceRoutingStationActionTest extends TestCase
         $this->assertTrue($order->order_status->canBeEdited());
         $this->assertTrue($order->order_status->canEnterProduction());
 
-        (new AdvanceRoutingStationAction())->execute(
+        (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Cutting,
             RoutingStatus::InProgress,
@@ -234,7 +234,7 @@ class AdvanceRoutingStationActionTest extends TestCase
 
         // Completing that same station (or advancing later ones) must not
         // regress order_status or flip canBeEdited() back to true.
-        (new AdvanceRoutingStationAction())->execute(
+        (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Cutting,
             RoutingStatus::Completed,
@@ -255,7 +255,7 @@ class AdvanceRoutingStationActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        (new AdvanceRoutingStationAction())->execute(
+        (new AdvanceRoutingStationAction)->execute(
             $order,
             RoutingStationName::Cutting,
             RoutingStatus::Completed,
@@ -286,7 +286,7 @@ class AdvanceRoutingStationActionTest extends TestCase
             'station_department' => StationDepartment::None,
         ]);
 
-        return (new CreateOrderAction())->execute([
+        return (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'Production Flow Test',

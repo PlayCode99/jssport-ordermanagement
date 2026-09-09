@@ -6,10 +6,12 @@ use App\Domain\OrderManagement\Actions\CreateOrderAction;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
 use App\Models\Branch;
+use App\Models\CatalogItem;
 use App\Models\Customer;
 use App\Models\OrderRouting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -31,7 +33,7 @@ class JobTypeRoutingTest extends TestCase
         $branch = Branch::firstOrCreate(['branch_code' => 'BR-RT'], ['branch_name' => 'Routing']);
         $creator = User::factory()->create(['role' => UserRole::Sales, 'station_department' => StationDepartment::None]);
 
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => $customer->id,
             'branch_id' => $branch->id,
             'job_name' => 'routing probe',
@@ -70,7 +72,7 @@ class JobTypeRoutingTest extends TestCase
         ];
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('jobTypeFlows')]
+    #[DataProvider('jobTypeFlows')]
     public function test_each_job_type_routes_through_its_agreed_rooms(string $jobType, string $expected): void
     {
         $this->assertSame($expected, $this->stationsFor($jobType));
@@ -121,7 +123,7 @@ class JobTypeRoutingTest extends TestCase
         ];
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('flexSpellings')]
+    #[DataProvider('flexSpellings')]
     public function test_every_flex_spelling_reaches_the_screen_flex_room(string $jobType): void
     {
         $this->assertSame(
@@ -134,7 +136,7 @@ class JobTypeRoutingTest extends TestCase
     {
         $this->artisan('migrate', ['--force' => true]);
 
-        $names = \App\Models\CatalogItem::query()
+        $names = CatalogItem::query()
             ->where('storage_key', 'jssport.job-types')
             ->where('active', true)
             ->orderBy('item_id')

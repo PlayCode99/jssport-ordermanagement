@@ -26,6 +26,10 @@ use Illuminate\Support\Str;
  * @property-read User $inviter
  */
 #[Fillable(['team_id', 'email', 'role', 'invited_by', 'expires_at', 'accepted_at'])]
+/**
+ * @property-read Team|null $team
+ * @property-read User|null $inviter
+ */
 class TeamInvitation extends Model
 {
     /** @use HasFactory<TeamInvitationFactory> */

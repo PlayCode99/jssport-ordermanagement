@@ -1,4 +1,5 @@
-import { ProductionBoardPage, type ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
+import { ProductionBoardPage } from '@/components/domain/production/ProductionBoardPage';
+import type { ProductionDepartmentFilter } from '@/components/domain/production/ProductionBoardPage';
 import type { CuttingTeam, Order } from '@/types/models';
 
 type ProductionKanbanPageProps = {
@@ -14,7 +15,13 @@ type ProductionKanbanPageProps = {
     branches?: Array<{ value: string; label: string }>;
     cuttingTeams?: CuttingTeam[];
     fabricLookup?: Record<string, string>;
-    specSectionsMap?: Record<string, { shirt: Array<{ label: string; value: string }>; pants: Array<{ label: string; value: string }> }>;
+    specSectionsMap?: Record<
+        string,
+        {
+            shirt: Array<{ label: string; value: string }>;
+            pants: Array<{ label: string; value: string }>;
+        }
+    >;
     initialDepartmentFilter?: ProductionDepartmentFilter;
     showDepartmentFilter?: boolean;
     pageTitle?: string;
@@ -47,7 +54,10 @@ export default function ProductionKanbanPage({
     );
 }
 
-ProductionKanbanPage.layout = (props: { pageTitle?: string; pageHref?: string }) => ({
+ProductionKanbanPage.layout = (props: {
+    pageTitle?: string;
+    pageHref?: string;
+}) => ({
     breadcrumbs: [
         {
             title: props.pageTitle ?? 'Production Kanban',

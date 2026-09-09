@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Domain\OrderManagement\Actions;
@@ -11,6 +12,7 @@ use App\Enums\RoutingStatus;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Receipt;
+use App\Support\Production\ProductionRateSnapshotBuilder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +54,8 @@ class CreateOrderAction
                         'item_type' => (string) $item['item_type'],
                         'size_group' => (string) $item['size_group'],
                         'size_label' => (string) $item['size_label'],
+                        'shirt_style' => $this->garmentStyle($item['shirt_style'] ?? null),
+                        'pants_style' => $this->garmentStyle($item['pants_style'] ?? null),
                         'quantity' => $quantity,
                         'unit_price' => $unitPrice,
                         'total_price' => $itemTotalPrice,
@@ -162,15 +166,37 @@ class CreateOrderAction
                     }
                 }
 
+                // ชุดพละ: files arrive keyed by size table, and the table is stored on
+                // the media so each table gets its own gallery back on the form.
+                foreach (Arr::wrap($data['pe_uniform_artwork'] ?? []) as $tableType => $tableFiles) {
+                    if ($tableType !== 'kids' && $tableType !== 'adults') {
+                        continue;
+                    }
+
+                    foreach (Arr::wrap($tableFiles) as $tableFile) {
+                        if (! $tableFile instanceof UploadedFile) {
+                            continue;
+                        }
+
+                        $order->addMedia($tableFile)
+                            ->withCustomProperties(['pe_table' => $tableType])
+                            ->toMediaCollection('pe_uniform_artwork');
+                    }
+                }
+
                 // "เปิดบิลอีกครั้ง": the browser can only re-send files the user
                 // picked just now, so the source order's already-saved artwork is
                 // copied here instead. Copies are added on top of any new upload.
-                $this->copyArtworkFromSourceOrder($order, $data['duplicate_from_id'] ?? null);
+                $this->copyArtworkFromSourceOrder(
+                    $order,
+                    $data['duplicate_from_id'] ?? null,
+                    $data['removed_media_ids'] ?? [],
+                );
 
                 // Lock in what the shop pays for this work today. Editing the
                 // garment operation prices later must not re-price this order.
                 $order->forceFill([
-                    'production_rate_snapshot' => app(\App\Support\Production\ProductionRateSnapshotBuilder::class)
+                    'production_rate_snapshot' => app(ProductionRateSnapshotBuilder::class)
                         ->forOrder($order->fresh(['items', 'specification'])),
                 ])->save();
 
@@ -242,9 +268,10 @@ class CreateOrderAction
     /**
      * Copies every artwork collection from the order being duplicated onto the
      * newly created order. Media are copied, never moved, so the original bill
-     * keeps its own images intact.
+     * keeps its own images intact -- including images the user removed from the
+     * duplicate, which are skipped here rather than deleted from the source.
      */
-    private function copyArtworkFromSourceOrder(Order $order, mixed $sourceOrderId): void
+    private function copyArtworkFromSourceOrder(Order $order, mixed $sourceOrderId, mixed $removedMediaIds = []): void
     {
         if (! is_numeric($sourceOrderId)) {
             return;
@@ -256,8 +283,17 @@ class CreateOrderAction
             return;
         }
 
-        foreach (['artwork', 'shirt_artwork', 'pants_artwork', 'sports_day_artwork', 'reference_designs'] as $collection) {
+        $skip = array_map(
+            static fn ($id): int => is_numeric($id) ? (int) $id : 0,
+            Arr::wrap($removedMediaIds),
+        );
+
+        foreach (Order::artworkCollections() as $collection) {
             foreach ($source->getMedia($collection) as $media) {
+                if (in_array((int) $media->id, $skip, true)) {
+                    continue;
+                }
+
                 $media->copy($order, $collection);
             }
         }
@@ -330,6 +366,15 @@ class CreateOrderAction
      * @param  array<string, mixed>  $data
      * @param  array<string, mixed>  $context
      */
+    /**
+     * Only 'short' and 'long' are meaningful; anything else means the row was
+     * recorded without a stated style and is stored as null.
+     */
+    private function garmentStyle(mixed $value): ?string
+    {
+        return in_array($value, ['short', 'long'], true) ? (string) $value : null;
+    }
+
     private function logCreateStage(string $stage, int $creatorUserId, array $data, array $context = []): void
     {
         Log::debug('order.create.stage', array_merge([
@@ -482,6 +527,7 @@ class CreateOrderAction
     private function normalizeRoutingStations(array $stations): array
     {
         $allowedStations = array_column(RoutingStationName::cases(), 'value');
+
         return array_values(array_filter(
             array_values(array_unique($stations)),
             static fn (string $station): bool => in_array($station, $allowedStations, true),

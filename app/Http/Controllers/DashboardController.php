@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Http\Controllers;
@@ -11,6 +12,7 @@ use App\Models\CatalogItem;
 use App\Models\Order;
 use App\Models\OrderRouting;
 use App\Models\TeamInvitation;
+use App\Support\Orders\DeliveryCalendarBuilder;
 use App\Support\Orders\OrderCompletion;
 use App\Support\UserAccessControl;
 use Carbon\CarbonImmutable;
@@ -25,7 +27,7 @@ class DashboardController extends Controller
     private const COUNTER_ORDERS_PER_PAGE = 10;
 
     /**
-     * @var array<string, array<string, string>>|null
+     * @var array<string, array<array-key, string>>|null
      */
     private ?array $catalogLookupCache = null;
 
@@ -52,7 +54,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * @return array<string, array<string, string>>
+     * @return array<string, array<array-key, string>>
      */
     private function catalogLookups(): array
     {
@@ -249,6 +251,7 @@ class DashboardController extends Controller
             ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
             ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
             ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
+            ['key' => 'seat_style_text', 'label' => 'กุ้นกางเกง', 'type' => 'text'],
             ['key' => 'panel_style_text', 'label' => 'แบบต่อ', 'type' => 'text'],
             ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
@@ -266,6 +269,12 @@ class DashboardController extends Controller
      * @param  array<string, mixed>  $specification
      * @return array<int, array{name: string, size: string, number: string, quantity: int, unit_price: float, total_price: float}>
      */
+    /** Sleeve or leg length as saved on a person row, '' when the bill has none. */
+    private function personalizationStyle(mixed $style): string
+    {
+        return in_array($style, ['short', 'long'], true) ? (string) $style : '';
+    }
+
     private function mapPersonalizationRows(array $specification): array
     {
         $decoded = $this->decodeSpecificationPayload($specification);
@@ -287,6 +296,8 @@ class DashboardController extends Controller
                 $name = trim((string) ($row['name'] ?? ''));
                 $size = trim((string) ($row['size'] ?? ''));
                 $number = trim((string) ($row['number'] ?? ''));
+                $pantsSize = trim((string) ($row['pants_size'] ?? ''));
+                $pantsNumber = trim((string) ($row['pants_number'] ?? ''));
                 $quantity = max(1, (int) ($row['quantity'] ?? 0));
                 $unitPrice = max(0, (float) ($row['unit_price'] ?? 0));
                 $totalPrice = isset($row['total_price']) ? max(0, (float) $row['total_price']) : $quantity * $unitPrice;
@@ -296,12 +307,98 @@ class DashboardController extends Controller
                 }
 
                 return [
+                    // Rows written before roles existed are players, which is
+                    // what they were.
+                    'role' => ($row['role'] ?? '') === 'keeper' ? 'keeper' : 'player',
                     'name' => $name !== '' ? $name : '-',
+                    'size_group' => ($row['size_group'] ?? '') === 'kids' ? 'kids' : 'adults',
                     'size' => $size !== '' ? $size : '-',
                     'number' => $number !== '' ? $number : '-',
+                    'pants_size' => $pantsSize,
+                    'pants_number' => $pantsNumber,
+                    // Bills written before lengths existed carry none, and stay
+                    // that way: the sheets read '' as "this bill never said" and
+                    // print exactly as they always did.
+                    'shirt_style' => $this->personalizationStyle($row['shirt_style'] ?? null),
+                    'pants_style' => $this->personalizationStyle($row['pants_style'] ?? null),
                     'quantity' => $quantity,
                     'unit_price' => $unitPrice,
                     'total_price' => $totalPrice,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Form 3 (กีฬาสี): one entry per colour house, with the fabric colour resolved
+     * to its name so the work sheet can head a column with it instead of an id.
+     * Houses with nothing ordered are dropped rather than printed empty.
+     *
+     * @param  array<string, mixed>  $specification
+     * @return array<int, array<string, mixed>>
+     */
+    private function mapSportsDayGroups(array $specification): array
+    {
+        $decoded = $this->decodeSpecificationPayload($specification);
+
+        if (! is_array($decoded) || ($decoded['mode'] ?? null) !== 'sports_day') {
+            return [];
+        }
+
+        $groups = $decoded['sports_day_groups'] ?? [];
+
+        if (! is_array($groups)) {
+            return [];
+        }
+
+        $colors = $this->catalogLookups()['jssport.shirt-fabric-colors'] ?? [];
+
+        return collect($groups)
+            ->map(function ($group) use ($colors): ?array {
+                if (! is_array($group)) {
+                    return null;
+                }
+
+                $rows = collect(is_array($group['rows'] ?? null) ? $group['rows'] : [])
+                    ->map(function ($row): ?array {
+                        if (! is_array($row)) {
+                            return null;
+                        }
+
+                        $shirtQty = max(0, (int) ($row['shirt_qty'] ?? 0));
+                        $pantsQty = max(0, (int) ($row['pants_qty'] ?? 0));
+
+                        if ($shirtQty === 0 && $pantsQty === 0) {
+                            return null;
+                        }
+
+                        return [
+                            'size_group' => ($row['size_group'] ?? '') === 'kids' ? 'kids' : 'adults',
+                            'size_label' => trim((string) ($row['size_label'] ?? '')),
+                            'shirt_qty' => $shirtQty,
+                            'shirt_price' => max(0.0, (float) ($row['shirt_price'] ?? 0)),
+                            'pants_qty' => $pantsQty,
+                            'pants_price' => max(0.0, (float) ($row['pants_price'] ?? 0)),
+                        ];
+                    })
+                    ->filter()
+                    ->values()
+                    ->all();
+
+                if ($rows === []) {
+                    return null;
+                }
+
+                $colorId = trim((string) ($group['fabric_color_id'] ?? ''));
+
+                return [
+                    'team_name' => trim((string) ($group['team_name'] ?? '')),
+                    // The stored value is a catalog id when the colour came from
+                    // the dropdown, and free text when the counter typed one.
+                    'color_name' => $colors[$colorId] ?? ($colorId !== '' ? $colorId : ''),
+                    'rows' => $rows,
                 ];
             })
             ->filter()
@@ -462,31 +559,6 @@ class DashboardController extends Controller
         $normalizedJobType = mb_strtolower($jobType);
 
         return str_contains($normalizedJobType, 'ซับ') || str_contains($normalizedJobType, 'sublimation');
-    }
-
-    private function resolveFirstMatchingRouting(Collection $requiredRoutings, array $stations): ?OrderRouting
-    {
-        $routing = $requiredRoutings
-            ->first(fn (OrderRouting $item): bool => in_array($item->station_name->value, $stations, true));
-
-        return $routing instanceof OrderRouting ? $routing : null;
-    }
-
-    private function resolveHeatPressLikeRouting(Collection $requiredRoutings): ?OrderRouting
-    {
-        $stations = [RoutingStationName::Screen->value, RoutingStationName::Flex->value];
-
-        foreach ([RoutingStatus::Rejected, RoutingStatus::Pending, RoutingStatus::InProgress, RoutingStatus::Completed, RoutingStatus::Skipped] as $status) {
-            $routing = $requiredRoutings
-                ->first(fn (OrderRouting $item): bool => in_array($item->station_name->value, $stations, true)
-                    && $item->status === $status);
-
-            if ($routing instanceof OrderRouting) {
-                return $routing;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -918,15 +990,15 @@ class DashboardController extends Controller
                 'order_code' => $order->order_code,
                 'order_item_count' => (int) $order->items->sum(fn ($item): int => (int) $item->quantity),
                 'has_order_pdf' => false,
-                'branch_name' => $order->branch?->branch_name ?? '-',
-                'customer_name' => $order->customer?->customer_name ?? '-',
+                'branch_name' => $order->branch->branch_name ?? '-',
+                'customer_name' => $order->customer->customer_name ?? '-',
                 'job_type' => $order->job_type,
                 'order_status' => $order->order_status->value,
                 'status' => $this->mapOrderToCounterStatus($order),
                 'receipt_code' => $latestReceipt?->receipt_code,
                 'payment_status' => $paymentStatus,
                 'has_payment_pdf' => $latestReceipt ? $latestReceipt->getFirstMediaUrl('payment_slips') !== '' : false,
-                'receiver_name' => $order->creatorUser?->name ?? '-',
+                'receiver_name' => $order->creatorUser->name ?? '-',
                 'details' => [
                     'order_code' => $order->order_code,
                     'job_name' => $order->job_name,
@@ -954,11 +1026,17 @@ class DashboardController extends Controller
                     'specification_display' => $this->mapSpecificationDisplay($specification ?? [], $order->job_type),
                     'spec_sections' => $this->mapSpecificationSections($specification ?? []),
                     'personalization_rows' => $this->mapPersonalizationRows($specification ?? []),
+                    'sports_day_groups' => $this->mapSportsDayGroups($specification ?? []),
+                    'individual_keeper_color' => trim((string) (
+                        $this->decodeSpecificationPayload($specification ?? [])['individual_keeper_color'] ?? ''
+                    )),
                     'items' => $order->items
                         ->map(fn ($item): array => [
                             'item_type' => $item->item_type,
                             'size_group' => $item->size_group,
                             'size_label' => $item->size_label,
+                            'shirt_style' => $item->shirt_style,
+                            'pants_style' => $item->pants_style,
                             'quantity' => (int) $item->quantity,
                             'unit_price' => (float) $item->unit_price,
                             'total_price' => (float) $item->total_price,
@@ -996,6 +1074,17 @@ class DashboardController extends Controller
                     'artwork_url' => $order->artwork_url,
                     'shirt_artwork_urls' => $order->shirt_artwork_urls,
                     'pants_artwork_urls' => $order->pants_artwork_urls,
+                    // Flattened: the printed sheet shows one gallery for the whole
+                    // bill, and a sports day order keeps its artwork per colour
+                    // house, so those files would otherwise never be printed.
+                    'sports_day_artwork_urls' => collect($order->sports_day_artwork_urls)
+                        ->flatten()
+                        ->values()
+                        ->all(),
+                    'pe_uniform_artwork_urls' => collect($order->pe_uniform_artwork_urls)
+                        ->flatten()
+                        ->values()
+                        ->all(),
                     'reference_designs' => $order->reference_designs,
                 ],
             ];
@@ -1038,6 +1127,16 @@ class DashboardController extends Controller
             'branches' => $branches,
             'floorStats' => $floorStats,
             'orders' => $orders->values(),
+            // Delivery-due calendar for the counter dialog. Same branch rule as
+            // the order list above: own branch, except head office which sees all.
+            'deliveryCalendar' => DeliveryCalendarBuilder::build(
+                is_string($request->query('calendar_month')) ? $request->query('calendar_month') : null,
+                $actor,
+            ),
+            'deliveryDueToday' => DeliveryCalendarBuilder::dueTodayCount($actor),
+            // Set by the redirect after saving an order, so the counter can offer
+            // to print the work sheet straight away.
+            'savedOrderCode' => $request->session()->get('order_code'),
             'pagination' => [
                 'current_page' => $ordersPaginator->currentPage(),
                 'last_page' => $ordersPaginator->lastPage(),

@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Media\YearMonthPathGenerator;
 use Spatie\ImageOptimizer\Optimizers\Avifenc;
 use Spatie\ImageOptimizer\Optimizers\Cwebp;
 use Spatie\ImageOptimizer\Optimizers\Gifsicle;
@@ -24,8 +25,6 @@ use Spatie\MediaLibrary\ResponsiveImages\WidthCalculator\FileSizeOptimizedWidthC
 use Spatie\MediaLibrary\Support\FileNamer\DefaultFileNamer;
 use Spatie\MediaLibrary\Support\FileRemover\DefaultFileRemover;
 use Spatie\MediaLibrary\Support\UrlGenerator\DefaultUrlGenerator;
-use Spatie\MediaLibraryPro\Models\TemporaryUpload;
-use App\Support\Media\YearMonthPathGenerator;
 
 return [
 
@@ -119,7 +118,9 @@ return [
      *
      * This model is only used in Media Library Pro (https://medialibrary.pro)
      */
-    'temporary_upload_model' => TemporaryUpload::class,
+    // Media Library Pro is not installed here, so the class is named as a
+    // string: ::class would be a reference to a class that does not exist.
+    'temporary_upload_model' => 'Spatie\\MediaLibraryPro\\Models\\TemporaryUpload',
 
     /*
      * When enabled, Media Library Pro will only process temporary uploads that were uploaded

@@ -26,25 +26,131 @@ type OrderSummary = {
 };
 
 export type FloorStats = {
-    print_room: { new_job: number; new_job_qty: number; printer_1: number; printer_2: number; printer_3: number; completed: number; completed_qty: number };
-    cutting: { new_job: number; new_job_qty: number; assigned: number; completed: number; completed_qty: number };
-    heat_press: { new_job: number; new_job_qty: number; assigned: number; revising: number; completed: number; completed_qty: number };
-    sewing: { new_job: number; new_job_qty: number; assigned: number; completed: number; completed_qty: number };
-    embroidery: { new_job: number; new_job_qty: number; assigned: number; completed: number; completed_qty: number };
-    screen_flex: { new_job: number; new_job_qty: number; assigned: number; revising: number; completed: number; completed_qty: number };
-    qc: { new_job: number; new_job_qty: number; pending_inspect: number; completed: number; completed_qty: number };
-    shipping: { pending_ship: number; pending_ship_qty: number; store_pickup: number; courier: number; onsite_delivery: number; completed_qty: number };
+    print_room: {
+        new_job: number;
+        new_job_qty: number;
+        printer_1: number;
+        printer_2: number;
+        printer_3: number;
+        completed: number;
+        completed_qty: number;
+    };
+    cutting: {
+        new_job: number;
+        new_job_qty: number;
+        assigned: number;
+        completed: number;
+        completed_qty: number;
+    };
+    heat_press: {
+        new_job: number;
+        new_job_qty: number;
+        assigned: number;
+        revising: number;
+        completed: number;
+        completed_qty: number;
+    };
+    sewing: {
+        new_job: number;
+        new_job_qty: number;
+        assigned: number;
+        completed: number;
+        completed_qty: number;
+    };
+    embroidery: {
+        new_job: number;
+        new_job_qty: number;
+        assigned: number;
+        completed: number;
+        completed_qty: number;
+    };
+    screen_flex: {
+        new_job: number;
+        new_job_qty: number;
+        assigned: number;
+        revising: number;
+        completed: number;
+        completed_qty: number;
+    };
+    qc: {
+        new_job: number;
+        new_job_qty: number;
+        pending_inspect: number;
+        completed: number;
+        completed_qty: number;
+    };
+    shipping: {
+        pending_ship: number;
+        pending_ship_qty: number;
+        store_pickup: number;
+        courier: number;
+        onsite_delivery: number;
+        completed_qty: number;
+    };
 };
 
 const emptyFloorStats = (): FloorStats => ({
-    print_room: { new_job: 0, new_job_qty: 0, printer_1: 0, printer_2: 0, printer_3: 0, completed: 0, completed_qty: 0 },
-    cutting: { new_job: 0, new_job_qty: 0, assigned: 0, completed: 0, completed_qty: 0 },
-    heat_press: { new_job: 0, new_job_qty: 0, assigned: 0, revising: 0, completed: 0, completed_qty: 0 },
-    sewing: { new_job: 0, new_job_qty: 0, assigned: 0, completed: 0, completed_qty: 0 },
-    embroidery: { new_job: 0, new_job_qty: 0, assigned: 0, completed: 0, completed_qty: 0 },
-    screen_flex: { new_job: 0, new_job_qty: 0, assigned: 0, revising: 0, completed: 0, completed_qty: 0 },
-    qc: { new_job: 0, new_job_qty: 0, pending_inspect: 0, completed: 0, completed_qty: 0 },
-    shipping: { pending_ship: 0, pending_ship_qty: 0, store_pickup: 0, courier: 0, onsite_delivery: 0, completed_qty: 0 },
+    print_room: {
+        new_job: 0,
+        new_job_qty: 0,
+        printer_1: 0,
+        printer_2: 0,
+        printer_3: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    cutting: {
+        new_job: 0,
+        new_job_qty: 0,
+        assigned: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    heat_press: {
+        new_job: 0,
+        new_job_qty: 0,
+        assigned: 0,
+        revising: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    sewing: {
+        new_job: 0,
+        new_job_qty: 0,
+        assigned: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    embroidery: {
+        new_job: 0,
+        new_job_qty: 0,
+        assigned: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    screen_flex: {
+        new_job: 0,
+        new_job_qty: 0,
+        assigned: 0,
+        revising: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    qc: {
+        new_job: 0,
+        new_job_qty: 0,
+        pending_inspect: 0,
+        completed: 0,
+        completed_qty: 0,
+    },
+    shipping: {
+        pending_ship: 0,
+        pending_ship_qty: 0,
+        store_pickup: 0,
+        courier: 0,
+        onsite_delivery: 0,
+        completed_qty: 0,
+    },
 });
 
 function isSublimationJobType(jobType?: string | null): boolean {
@@ -59,7 +165,13 @@ function isSublimationJobType(jobType?: string | null): boolean {
 
 function incrementStageStats(
     stats: FloorStats,
-    key: 'cutting' | 'sewing' | 'embroidery' | 'qc' | 'heat_press' | 'screen_flex',
+    key:
+        | 'cutting'
+        | 'sewing'
+        | 'embroidery'
+        | 'qc'
+        | 'heat_press'
+        | 'screen_flex',
     routing: RoutingSummary | undefined,
     requiredRoutings: RoutingSummary[],
     quantity: number,
@@ -74,6 +186,7 @@ function incrementStageStats(
     if (routing.status === 'pending') {
         stats[key].new_job += 1;
         stats[key].new_job_qty += quantity;
+
         return;
     }
 
@@ -83,11 +196,13 @@ function incrementStageStats(
         } else {
             stats[key].assigned += 1;
         }
+
         return;
     }
 
     if (includeRevising && routing.status === 'rejected') {
         stats[key].revising += 1;
+
         return;
     }
 
@@ -106,7 +221,9 @@ export function deriveFloorStats(orders: OrderSummary[]): FloorStats {
             .filter((routing) => routing.is_required)
             .sort((a, b) => a.id - b.id);
 
-        const printRouting = requiredRoutings.find((routing) => routing.station_name === 'print');
+        const printRouting = requiredRoutings.find(
+            (routing) => routing.station_name === 'print',
+        );
 
         if (printRouting) {
             if (printRouting.status === 'pending') {
@@ -120,26 +237,68 @@ export function deriveFloorStats(orders: OrderSummary[]): FloorStats {
                 } else {
                     stats.print_room.printer_1 += 1;
                 }
-            } else if (printRouting.status === 'completed' || printRouting.status === 'skipped') {
+            } else if (
+                printRouting.status === 'completed' ||
+                printRouting.status === 'skipped'
+            ) {
                 stats.print_room.completed += 1;
                 stats.print_room.completed_qty += quantity;
             }
         }
 
-        const cuttingRouting = requiredRoutings.find((routing) => routing.station_name === 'cutting');
-        const sewingRouting = requiredRoutings.find((routing) => routing.station_name === 'sewing');
-        const embroideryRouting = requiredRoutings.find((routing) => routing.station_name === 'embroidery');
-        const qcRouting = requiredRoutings.find((routing) => routing.station_name === 'qc');
-        const heatPressLikeRouting = requiredRoutings.find((routing) => routing.station_name === 'screen' || routing.station_name === 'flex');
+        const cuttingRouting = requiredRoutings.find(
+            (routing) => routing.station_name === 'cutting',
+        );
+        const sewingRouting = requiredRoutings.find(
+            (routing) => routing.station_name === 'sewing',
+        );
+        const embroideryRouting = requiredRoutings.find(
+            (routing) => routing.station_name === 'embroidery',
+        );
+        const qcRouting = requiredRoutings.find(
+            (routing) => routing.station_name === 'qc',
+        );
+        const heatPressLikeRouting = requiredRoutings.find(
+            (routing) =>
+                routing.station_name === 'screen' ||
+                routing.station_name === 'flex',
+        );
 
-        incrementStageStats(stats, 'cutting', cuttingRouting, requiredRoutings, quantity);
-        incrementStageStats(stats, 'sewing', sewingRouting, requiredRoutings, quantity);
-        incrementStageStats(stats, 'embroidery', embroideryRouting, requiredRoutings, quantity);
+        incrementStageStats(
+            stats,
+            'cutting',
+            cuttingRouting,
+            requiredRoutings,
+            quantity,
+        );
+        incrementStageStats(
+            stats,
+            'sewing',
+            sewingRouting,
+            requiredRoutings,
+            quantity,
+        );
+        incrementStageStats(
+            stats,
+            'embroidery',
+            embroideryRouting,
+            requiredRoutings,
+            quantity,
+        );
         incrementStageStats(stats, 'qc', qcRouting, requiredRoutings, quantity);
 
         if (heatPressLikeRouting) {
-            const targetRoom = isSublimationJobType(order.job_type) ? 'heat_press' : 'screen_flex';
-            incrementStageStats(stats, targetRoom, heatPressLikeRouting, requiredRoutings, quantity, true);
+            const targetRoom = isSublimationJobType(order.job_type)
+                ? 'heat_press'
+                : 'screen_flex';
+            incrementStageStats(
+                stats,
+                targetRoom,
+                heatPressLikeRouting,
+                requiredRoutings,
+                quantity,
+                true,
+            );
         }
 
         if (order.status === 'shipping') {

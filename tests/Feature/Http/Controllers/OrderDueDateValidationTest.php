@@ -122,7 +122,7 @@ class OrderDueDateValidationTest extends TestCase
 
     public function test_an_existing_order_with_a_past_billing_date_stays_editable(): void
     {
-        $order = (new CreateOrderAction())->execute([
+        $order = (new CreateOrderAction)->execute([
             'customer_id' => Customer::firstOrCreate(['customer_code' => 'CUS-DUE-1'], ['customer_name' => 'Due Date Customer'])->id,
             'branch_id' => Branch::firstOrCreate(['branch_code' => 'BR-DUE-1'], ['branch_name' => 'Due Date Branch'])->id,
             'job_name' => 'Old Order',

@@ -29,14 +29,18 @@ describe('order item garment types', () => {
     });
 
     it('marks a shirt-only line as a shirt so no pants cost is charged', () => {
-        const items = buildRequestItemsFromSportsDay([group([row({ shirt_qty: 30, shirt_price: 200 })])]);
+        const items = buildRequestItemsFromSportsDay([
+            group([row({ shirt_qty: 30, shirt_price: 200 })]),
+        ]);
 
         expect(items).toHaveLength(1);
         expect(items[0].item_type).toBe('shirt');
     });
 
     it('marks a pants-only line as pants', () => {
-        const items = buildRequestItemsFromSportsDay([group([row({ pants_qty: 12, pants_price: 150 })])]);
+        const items = buildRequestItemsFromSportsDay([
+            group([row({ pants_qty: 12, pants_price: 150 })]),
+        ]);
 
         expect(items).toHaveLength(1);
         expect(items[0].item_type).toBe('pants');
@@ -44,7 +48,14 @@ describe('order item garment types', () => {
 
     it('keeps shirt and pants on separate lines with their own type', () => {
         const items = buildRequestItemsFromSportsDay([
-            group([row({ shirt_qty: 30, shirt_price: 200, pants_qty: 10, pants_price: 150 })]),
+            group([
+                row({
+                    shirt_qty: 30,
+                    shirt_price: 200,
+                    pants_qty: 10,
+                    pants_price: 150,
+                }),
+            ]),
         ]);
 
         expect(items.map((item) => item.item_type)).toEqual(['shirt', 'pants']);
@@ -53,7 +64,14 @@ describe('order item garment types', () => {
 
     it('never emits the ambiguous generic type from the sports day form', () => {
         const items = buildRequestItemsFromSportsDay([
-            group([row({ shirt_qty: 5, shirt_price: 100, pants_qty: 5, pants_price: 100 })]),
+            group([
+                row({
+                    shirt_qty: 5,
+                    shirt_price: 100,
+                    pants_qty: 5,
+                    pants_price: 100,
+                }),
+            ]),
         ]);
 
         expect(items.every((item) => item.item_type !== 'garment')).toBe(true);

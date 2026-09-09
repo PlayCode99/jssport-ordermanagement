@@ -23,6 +23,15 @@ type MasterDataComboBoxProps = {
     onValueChange: (value: string) => void;
     /** Called after a new master-data row is created, so the parent can add it to shared catalog state. */
     onOptionAdded?: (option: MasterDataOption) => void;
+    /**
+     * Whether `value` carries the picked option's id (the default, used by the
+     * colour catalogs) or its display name. Name mode exists for fields whose
+     * database column stores the text itself and is searched with LIKE, so an
+     * id would corrupt existing rows.
+     */
+    valueMode?: 'id' | 'name';
+    /** Extra classes for the text input, e.g. invalid-state styling. */
+    className?: string;
     placeholder?: string;
     disabled?: boolean;
     id?: string;
@@ -43,6 +52,8 @@ export function MasterDataComboBox({
     value,
     onValueChange,
     onOptionAdded,
+    valueMode = 'id',
+    className,
     placeholder,
     disabled,
     id,
@@ -56,10 +67,20 @@ export function MasterDataComboBox({
             return '';
         }
 
-        const matched = options.find((option) => String(option.id) === currentValue);
+        if (valueMode === 'name') {
+            return currentValue;
+        }
+
+        const matched = options.find(
+            (option) => String(option.id) === currentValue,
+        );
 
         return matched ? matched.name : currentValue;
     };
+
+    /** The form value an option stands for, in whichever mode is active. */
+    const valueForOption = (option: MasterDataOption): string =>
+        valueMode === 'name' ? option.name : String(option.id);
 
     const [query, setQuery] = useState<string>(() => resolveDisplayText(value));
     const [isOpen, setIsOpen] = useState(false);
@@ -78,11 +99,14 @@ export function MasterDataComboBox({
 
     const filteredOptions = useMemo(() => {
         const needle = query.trim().toLowerCase();
+
         if (needle === '') {
             return options;
         }
 
-        return options.filter((option) => option.name.toLowerCase().includes(needle));
+        return options.filter((option) =>
+            option.name.toLowerCase().includes(needle),
+        );
     }, [options, query]);
 
     useEffect(() => {
@@ -91,18 +115,23 @@ export function MasterDataComboBox({
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+            if (
+                containerRef.current &&
+                !containerRef.current.contains(event.target as Node)
+            ) {
                 setIsOpen(false);
             }
         };
 
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+
+        return () =>
+            document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     const selectOption = (option: MasterDataOption) => {
         setQuery(option.name);
-        onValueChange(String(option.id));
+        onValueChange(valueForOption(option));
         setIsOpen(false);
         setError(null);
     };
@@ -118,6 +147,7 @@ export function MasterDataComboBox({
 
     const handleAdd = async () => {
         const name = query.trim();
+
         if (name === '' || isSaving) {
             return;
         }
@@ -126,28 +156,39 @@ export function MasterDataComboBox({
         setError(null);
 
         try {
-            const response = await fetch('/settings/data/catalog-items/quick-add', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '',
-                    Accept: 'application/json',
+            const response = await fetch(
+                '/settings/data/catalog-items/quick-add',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN':
+                            document
+                                .querySelector('meta[name="csrf-token"]')
+                                ?.getAttribute('content') ?? '',
+                        Accept: 'application/json',
+                    },
+                    body: JSON.stringify({ storage_key: storageKey, name }),
                 },
-                body: JSON.stringify({ storage_key: storageKey, name }),
-            });
+            );
 
             if (!response.ok) {
-                const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+                const payload = (await response.json().catch(() => null)) as {
+                    message?: string;
+                } | null;
                 setError(payload?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่');
+
                 return;
             }
 
-            const payload = (await response.json()) as { item: MasterDataOption };
+            const payload = (await response.json()) as {
+                item: MasterDataOption;
+            };
             const savedOption = payload.item;
 
             onOptionAdded?.(savedOption);
             setQuery(savedOption.name);
-            onValueChange(String(savedOption.id));
+            onValueChange(valueForOption(savedOption));
             setJustAdded(true);
             setIsOpen(false);
             window.setTimeout(() => setJustAdded(false), 1600);
@@ -162,13 +203,17 @@ export function MasterDataComboBox({
         if (event.key === 'ArrowDown') {
             event.preventDefault();
             setIsOpen(true);
-            setHighlightedIndex((prev) => Math.min(prev + 1, filteredOptions.length - 1));
+            setHighlightedIndex((prev) =>
+                Math.min(prev + 1, filteredOptions.length - 1),
+            );
+
             return;
         }
 
         if (event.key === 'ArrowUp') {
             event.preventDefault();
             setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+
             return;
         }
 
@@ -177,6 +222,7 @@ export function MasterDataComboBox({
                 event.preventDefault();
                 selectOption(filteredOptions[highlightedIndex]);
             }
+
             return;
         }
 
@@ -193,6 +239,7 @@ export function MasterDataComboBox({
                         id={id}
                         aria-label={ariaLabel}
                         value={query}
+                        className={className}
                         placeholder={placeholder}
                         disabled={disabled}
                         autoComplete="off"
@@ -201,24 +248,30 @@ export function MasterDataComboBox({
                         onKeyDown={handleKeyDown}
                     />
                     {isOpen && filteredOptions.length > 0 && (
-                        <div className="bg-popover text-popover-foreground absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border shadow-md">
+                        <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md">
                             {filteredOptions.map((option, index) => (
                                 <button
                                     key={option.id}
                                     type="button"
                                     className={cn(
                                         'flex w-full items-center justify-between px-3 py-1.5 text-left text-sm',
-                                        index === highlightedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent hover:text-accent-foreground',
+                                        index === highlightedIndex
+                                            ? 'bg-accent text-accent-foreground'
+                                            : 'hover:bg-accent hover:text-accent-foreground',
                                     )}
                                     onMouseDown={(event) => {
                                         // prevent the input's blur from firing before the click registers
                                         event.preventDefault();
                                         selectOption(option);
                                     }}
-                                    onMouseEnter={() => setHighlightedIndex(index)}
+                                    onMouseEnter={() =>
+                                        setHighlightedIndex(index)
+                                    }
                                 >
                                     <span>{option.name}</span>
-                                    {String(option.id) === value && <Check className="size-3.5 shrink-0" />}
+                                    {valueForOption(option) === value && (
+                                        <Check className="size-3.5 shrink-0" />
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -235,7 +288,8 @@ export function MasterDataComboBox({
                         justAdded
                             ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-950'
                             : 'border-input bg-background hover:bg-accent hover:text-accent-foreground',
-                        (disabled || query.trim() === '') && 'pointer-events-none opacity-50',
+                        (disabled || query.trim() === '') &&
+                            'pointer-events-none opacity-50',
                     )}
                 >
                     {isSaving ? (

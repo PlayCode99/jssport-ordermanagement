@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Domain\OrderManagement\Actions;
@@ -8,6 +9,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\PaymentType;
 use App\Models\Order;
 use App\Models\Receipt;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -43,6 +45,12 @@ class UpdateOrderAction
                         'item_type' => (string) ($item['item_type'] ?? 'garment'),
                         'size_group' => (string) ($item['size_group'] ?? 'adults'),
                         'size_label' => (string) ($item['size_label'] ?? 'M'),
+                        'shirt_style' => in_array($item['shirt_style'] ?? null, ['short', 'long'], true)
+                            ? (string) $item['shirt_style']
+                            : null,
+                        'pants_style' => in_array($item['pants_style'] ?? null, ['short', 'long'], true)
+                            ? (string) $item['pants_style']
+                            : null,
                         'quantity' => (int) ($item['quantity'] ?? 0),
                         'unit_price' => (float) ($item['unit_price'] ?? 0),
                         'total_price' => (float) (($item['quantity'] ?? 0) * ($item['unit_price'] ?? 0)),
@@ -116,22 +124,24 @@ class UpdateOrderAction
                     'order_status' => $order->order_status ?? OrderStatus::Draft,
                 ]);
 
-                if (($data['design_artwork'] ?? null) instanceof \Illuminate\Http\UploadedFile) {
+                $this->removeArtworkMedia($order, $data['removed_media_ids'] ?? []);
+
+                if (($data['design_artwork'] ?? null) instanceof UploadedFile) {
                     $order->clearMediaCollection('artwork');
                     $order->addMedia($data['design_artwork'])->toMediaCollection('artwork');
                 }
 
-                // Shirt/pants artwork now support multiple images per order.
-                // Like reference_designs below, saving only ever appends newly
-                // selected files here — it never removes previously saved ones.
+                // Shirt/pants artwork support multiple images per order. Saving
+                // appends the newly selected files; images the user removed are
+                // deleted above, by media id.
                 foreach (Arr::wrap($data['shirt_artwork'] ?? []) as $shirtArtworkFile) {
-                    if ($shirtArtworkFile instanceof \Illuminate\Http\UploadedFile) {
+                    if ($shirtArtworkFile instanceof UploadedFile) {
                         $order->addMedia($shirtArtworkFile)->toMediaCollection('shirt_artwork');
                     }
                 }
 
                 foreach (Arr::wrap($data['pants_artwork'] ?? []) as $pantsArtworkFile) {
-                    if ($pantsArtworkFile instanceof \Illuminate\Http\UploadedFile) {
+                    if ($pantsArtworkFile instanceof UploadedFile) {
                         $order->addMedia($pantsArtworkFile)->toMediaCollection('pants_artwork');
                     }
                 }
@@ -145,7 +155,7 @@ class UpdateOrderAction
                     }
 
                     foreach (Arr::wrap($groupFiles) as $groupFile) {
-                        if (! $groupFile instanceof \Illuminate\Http\UploadedFile) {
+                        if (! $groupFile instanceof UploadedFile) {
                             continue;
                         }
 
@@ -155,8 +165,26 @@ class UpdateOrderAction
                     }
                 }
 
+                // ชุดพละ: files arrive keyed by size table, and the table is stored on
+                // the media so each table gets its own gallery back on the form.
+                foreach (Arr::wrap($data['pe_uniform_artwork'] ?? []) as $tableType => $tableFiles) {
+                    if ($tableType !== 'kids' && $tableType !== 'adults') {
+                        continue;
+                    }
+
+                    foreach (Arr::wrap($tableFiles) as $tableFile) {
+                        if (! $tableFile instanceof UploadedFile) {
+                            continue;
+                        }
+
+                        $order->addMedia($tableFile)
+                            ->withCustomProperties(['pe_table' => $tableType])
+                            ->toMediaCollection('pe_uniform_artwork');
+                    }
+                }
+
                 foreach (Arr::wrap($data['reference_designs'] ?? []) as $referenceDesign) {
-                    if ($referenceDesign instanceof \Illuminate\Http\UploadedFile) {
+                    if ($referenceDesign instanceof UploadedFile) {
                         $order->addMedia($referenceDesign)->toMediaCollection('reference_designs');
                     }
                 }
@@ -166,5 +194,32 @@ class UpdateOrderAction
         } catch (Throwable $exception) {
             throw new RuntimeException('Failed to update order.', previous: $exception);
         }
+    }
+
+    /**
+     * Deletes artwork the user removed while editing. Every id is checked to
+     * belong to this order and to an artwork collection before anything is
+     * touched, so a stray or hand-crafted id can never delete another order's
+     * images -- or any non-artwork media.
+     */
+    private function removeArtworkMedia(Order $order, mixed $removedMediaIds): void
+    {
+        $ids = array_values(array_filter(
+            array_map(
+                static fn ($id): int => is_numeric($id) ? (int) $id : 0,
+                Arr::wrap($removedMediaIds),
+            ),
+            static fn (int $id): bool => $id > 0,
+        ));
+
+        if ($ids === []) {
+            return;
+        }
+
+        $order->media()
+            ->whereIn('id', $ids)
+            ->whereIn('collection_name', Order::artworkCollections())
+            ->get()
+            ->each(static fn ($media) => $media->delete());
     }
 }

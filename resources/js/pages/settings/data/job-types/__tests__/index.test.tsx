@@ -5,18 +5,34 @@ import JobTypesPage from '@/pages/settings/data/job-types/index';
 
 vi.mock('@inertiajs/react', () => ({
     Head: () => null,
-    Link: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+    Link: ({ children }: { children?: React.ReactNode }) => (
+        <span>{children}</span>
+    ),
     router: { get: vi.fn(), reload: vi.fn() },
     usePage: () => ({ props: {}, url: '/settings/data/job-types' }),
 }));
 
 const serverRows = [
-    { id: '1', createdAt: '2026-09-01T09:00:00.000Z', name: 'ปัก', createdBy: 'system', active: true },
-    { id: '2', createdAt: '2026-09-01T09:00:00.000Z', name: 'ซับลิเมชั่น', createdBy: 'system', active: true },
+    {
+        id: '1',
+        createdAt: '2026-09-01T09:00:00.000Z',
+        name: 'ปัก',
+        createdBy: 'system',
+        active: true,
+    },
+    {
+        id: '2',
+        createdAt: '2026-09-01T09:00:00.000Z',
+        name: 'ซับลิเมชั่น',
+        createdBy: 'system',
+        active: true,
+    },
 ];
 
 const lastSyncBody = () => {
-    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(
+        -1,
+    );
 
     return JSON.parse((call?.[1] as RequestInit).body as string);
 };
@@ -63,7 +79,9 @@ describe('job types settings page', () => {
         const body = lastSyncBody();
         expect(body.storage_key).toBe('jssport.job-types');
 
-        const added = body.rows.find((row: { name: string }) => row.name === 'สกรีน เฟล๊กซ์');
+        const added = body.rows.find(
+            (row: { name: string }) => row.name === 'สกรีน เฟล๊กซ์',
+        );
         expect(added).toBeDefined();
         // The old code produced ids like "1756...-สกรีน", which the server rejected.
         expect(Number.isInteger(added.id)).toBe(true);
@@ -80,8 +98,18 @@ describe('job types settings page', () => {
             value: {
                 getItem: () =>
                     JSON.stringify([
-                        { id: '1', createdAt: '2026-01-01T00:00:00.000Z', name: 'ปัก', active: true },
-                        { id: '2', createdAt: '2026-01-01T00:00:00.000Z', name: 'เฉพาะเครื่องนี้', active: true },
+                        {
+                            id: '1',
+                            createdAt: '2026-01-01T00:00:00.000Z',
+                            name: 'ปัก',
+                            active: true,
+                        },
+                        {
+                            id: '2',
+                            createdAt: '2026-01-01T00:00:00.000Z',
+                            name: 'เฉพาะเครื่องนี้',
+                            active: true,
+                        },
                     ]),
                 setItem: () => undefined,
                 removeItem: () => undefined,
@@ -94,14 +122,22 @@ describe('job types settings page', () => {
         render(<JobTypesPage rows={serverRows} />);
 
         // "ปัก" is already on the server, so only the one genuinely missing counts.
-        expect(await screen.findByText(/พบประเภทงาน 1 รายการ/)).toBeInTheDocument();
+        expect(
+            await screen.findByText(/พบประเภทงาน 1 รายการ/),
+        ).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: /นำเข้าขึ้นเซิร์ฟเวอร์/ }));
+        fireEvent.click(
+            screen.getByRole('button', { name: /นำเข้าขึ้นเซิร์ฟเวอร์/ }),
+        );
 
         await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
 
         const body = lastSyncBody();
-        expect(body.rows.map((row: { name: string }) => row.name)).toContain('เฉพาะเครื่องนี้');
-        expect(body.rows.every((row: { id: number }) => Number.isInteger(row.id))).toBe(true);
+        expect(body.rows.map((row: { name: string }) => row.name)).toContain(
+            'เฉพาะเครื่องนี้',
+        );
+        expect(
+            body.rows.every((row: { id: number }) => Number.isInteger(row.id)),
+        ).toBe(true);
     });
 });

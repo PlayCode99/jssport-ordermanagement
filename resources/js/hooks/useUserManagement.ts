@@ -26,6 +26,9 @@ export function createBlankUserForm(): UserFormData {
 
 export function useUserManagement() {
     const [editingUser, setEditingUser] = useState<UserListItem | null>(null);
+    const [resettingUser, setResettingUser] = useState<UserListItem | null>(
+        null,
+    );
 
     const createForm = useForm<UserFormData>(createBlankUserForm());
     const editForm = useForm<UserFormData>(createBlankUserForm());
@@ -36,12 +39,16 @@ export function useUserManagement() {
         createForm.clearErrors();
     };
 
-    const submitCreate = () => {
+    // The dialog's open state lives in the page, so saving has to tell it to
+    // close. Without this the form emptied itself and the dialog stayed up,
+    // looking as though nothing had happened.
+    const submitCreate = (onSaved?: () => void) => {
         createForm.post('/settings/users', {
             preserveScroll: true,
             onSuccess: () => {
                 createForm.reset();
                 createForm.clearErrors();
+                onSaved?.();
             },
         });
     };
@@ -67,7 +74,7 @@ export function useUserManagement() {
         editForm.clearErrors();
     };
 
-    const submitEdit = () => {
+    const submitEdit = (onSaved?: () => void) => {
         if (editingUser === null) {
             return;
         }
@@ -76,8 +83,43 @@ export function useUserManagement() {
             preserveScroll: true,
             onSuccess: () => {
                 closeEdit();
+                onSaved?.();
             },
         });
+    };
+
+    const resetPasswordForm = useForm({
+        password: '',
+        password_confirmation: '',
+    });
+
+    const openResetPassword = (user: UserListItem) => {
+        setResettingUser(user);
+        resetPasswordForm.setData({ password: '', password_confirmation: '' });
+        resetPasswordForm.clearErrors();
+    };
+
+    const closeResetPassword = () => {
+        setResettingUser(null);
+        resetPasswordForm.setData({ password: '', password_confirmation: '' });
+        resetPasswordForm.clearErrors();
+    };
+
+    const submitResetPassword = (onSaved?: () => void) => {
+        if (resettingUser === null) {
+            return;
+        }
+
+        resetPasswordForm.post(
+            `/settings/users/${resettingUser.id}/reset-password`,
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    closeResetPassword();
+                    onSaved?.();
+                },
+            },
+        );
     };
 
     const toggleActive = (user: UserListItem) => {
@@ -106,6 +148,11 @@ export function useUserManagement() {
 
     return {
         editingUser,
+        resettingUser,
+        resetPasswordForm,
+        openResetPassword,
+        closeResetPassword,
+        submitResetPassword,
         createForm,
         editForm,
         openCreate,

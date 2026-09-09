@@ -10,7 +10,11 @@ type Props = {
 };
 
 function csrfToken(): string {
-    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+    return (
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
 }
 
 export default function ProductionCapacityPage({ dailyCapacity }: Props) {
@@ -23,6 +27,7 @@ export default function ProductionCapacityPage({ dailyCapacity }: Props) {
 
         if (!Number.isInteger(value) || value < 1) {
             setMessage('กรุณากรอกจำนวนชิ้นที่ผลิตได้ต่อวันให้ถูกต้อง');
+
             return;
         }
 
@@ -39,11 +44,15 @@ export default function ProductionCapacityPage({ dailyCapacity }: Props) {
             body: JSON.stringify({ daily_capacity: value }),
         });
 
-        const payload = (await response.json().catch(() => null)) as { daily_capacity?: number; message?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+            daily_capacity?: number;
+            message?: string;
+        } | null;
         setIsSaving(false);
 
         if (!response.ok) {
             setMessage(payload?.message ?? 'บันทึกกำลังผลิตต่อวันไม่สำเร็จ');
+
             return;
         }
 
@@ -55,7 +64,9 @@ export default function ProductionCapacityPage({ dailyCapacity }: Props) {
         <>
             <Head title="กำลังผลิตต่อวัน" />
             <main className="mx-auto w-full max-w-2xl px-4 py-6 lg:px-6">
-                <h1 className="text-xl font-bold text-slate-900">กำลังผลิตต่อวัน</h1>
+                <h1 className="text-xl font-bold text-slate-900">
+                    กำลังผลิตต่อวัน
+                </h1>
                 <section className="mt-4 border border-slate-200 bg-white p-5 shadow-sm">
                     <label className="grid max-w-sm gap-2 text-sm font-semibold text-slate-700">
                         จำนวนชิ้นที่ผลิตได้ต่อวัน
@@ -64,12 +75,24 @@ export default function ProductionCapacityPage({ dailyCapacity }: Props) {
                             min="1"
                             max="100000"
                             value={capacity}
-                            onChange={(event) => setCapacity(event.target.value)}
+                            onChange={(event) =>
+                                setCapacity(event.target.value)
+                            }
                         />
                     </label>
-                    <p className="mt-2 text-xs text-slate-500">วันที่มียอดจำนวนชิ้นงานถึงหรือเกินค่านี้ จะปรากฏเป็นสีแดงในช่องเลือกวันที่รับสินค้า</p>
-                    {message ? <p className="mt-3 text-sm text-slate-700">{message}</p> : null}
-                    <Button type="button" className="mt-5" disabled={isSaving} onClick={() => void save()}>
+                    <p className="mt-2 text-xs text-slate-500">
+                        วันที่มียอดจำนวนชิ้นงานถึงหรือเกินค่านี้
+                        จะปรากฏเป็นสีแดงในช่องเลือกวันที่รับสินค้า
+                    </p>
+                    {message ? (
+                        <p className="mt-3 text-sm text-slate-700">{message}</p>
+                    ) : null}
+                    <Button
+                        type="button"
+                        className="mt-5"
+                        disabled={isSaving}
+                        onClick={() => void save()}
+                    >
                         <Save className="size-4" />
                         บันทึก
                     </Button>

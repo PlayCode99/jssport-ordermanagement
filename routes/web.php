@@ -1,13 +1,13 @@
 <?php
 
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\GarmentPricingController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\OwnerDashboardController;
-use App\Http\Controllers\GarmentPricingController;
-use App\Http\Controllers\ShirtCatalogController;
-use App\Http\Controllers\ShirtDataManagementController;
 use App\Http\Controllers\Production\CuttingTaskController;
 use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Http\Controllers\Production\ProductionRoutingController;
+use App\Http\Controllers\QcInspectionController;
 use App\Http\Controllers\Settings\BranchManagementController;
 use App\Http\Controllers\Settings\CuttingTeamController;
 use App\Http\Controllers\Settings\EmbroideryTeamController;
@@ -15,8 +15,8 @@ use App\Http\Controllers\Settings\HeatPressMachineController;
 use App\Http\Controllers\Settings\ProductionDailySettingController;
 use App\Http\Controllers\Settings\ScreenTeamController;
 use App\Http\Controllers\Settings\SewingTeamController;
-use App\Http\Controllers\QcInspectionController;
-use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ShirtCatalogController;
+use App\Http\Controllers\ShirtDataManagementController;
 use App\Http\Controllers\Teams\TeamInvitationController;
 use App\Http\Middleware\EnsureTeamMembership;
 use Illuminate\Support\Facades\Route;
@@ -61,6 +61,7 @@ Route::middleware(['auth'])->group(function () {
     Route::put('settings/data/branches/{branch}', [BranchManagementController::class, 'update'])->name('settings.data.branches.update');
     Route::delete('settings/data/branches/{branch}', [BranchManagementController::class, 'destroy'])->name('settings.data.branches.destroy');
     Route::get('settings/data/job-types', [ShirtCatalogController::class, 'jobTypes'])->name('settings.data.job-types.index');
+    Route::get('settings/data/job-names', [ShirtCatalogController::class, 'jobNames'])->name('settings.data.job-names.index');
     Route::get('settings/data/cutting-teams', [CuttingTeamController::class, 'index'])->name('settings.data.cutting-teams.index');
     Route::post('settings/data/cutting-teams', [CuttingTeamController::class, 'store'])->name('settings.data.cutting-teams.store');
     Route::put('settings/data/cutting-teams/{cuttingTeam}', [CuttingTeamController::class, 'update'])->name('settings.data.cutting-teams.update');

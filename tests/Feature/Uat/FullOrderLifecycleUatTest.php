@@ -5,6 +5,7 @@ namespace Tests\Feature\Uat;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\Branch;
 use App\Models\CatalogItem;
 use App\Models\Customer;
@@ -18,6 +19,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -183,7 +185,7 @@ class FullOrderLifecycleUatTest extends TestCase
         ];
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('jobTypes')]
+    #[DataProvider('jobTypes')]
     public function test_a_job_type_runs_from_opening_the_bill_to_delivery(string $jobType, array $expectedStations): void
     {
         $order = $this->openBill($jobType, [
@@ -347,7 +349,7 @@ class FullOrderLifecycleUatTest extends TestCase
                 $this->assertSame(1000.0, (float) $page->toArray()['props']['revenue']['net']);
             });
 
-        $controller = app(\App\Http\Controllers\Production\ProductionKanbanController::class);
+        $controller = app(ProductionKanbanController::class);
         $method = (new \ReflectionClass($controller))->getMethod('mapSpecificationSections');
         $method->setAccessible(true);
         $sections = $method->invoke($controller, $order->fresh('specification')->specification->toArray());
@@ -426,5 +428,263 @@ class FullOrderLifecycleUatTest extends TestCase
                 ->where('orderCounts.in_progress', 1)
                 ->where('revenue.order_count', 1)
                 ->etc());
+    }
+
+    /**
+     * Form 1 with every length in one bill: kids and adults, short and long
+     * sleeves, short and long legs. The floor prints one sheet per batch, so
+     * this pins down exactly how many sheets that bill produces and what each
+     * of them says.
+     */
+    public function test_a_form_one_bill_with_every_length_prints_eight_production_sheets(): void
+    {
+        $order = $this->openBill('งานสกรีน', [
+            // Kids, sold as sets: one short-sleeve/short-leg size and one long/long.
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JM', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 12, 'unit_price' => 300],
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JL', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 8, 'unit_price' => 320],
+            // Adults, same shape.
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'M', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 20, 'unit_price' => 350],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'L', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 10, 'unit_price' => 380],
+        ]);
+
+        // 1. What the counter actually stored.
+        $this->assertCount(4, $order->items);
+        $this->assertSame(50, (int) $order->items->sum('quantity'));
+
+        // 2. What the production room's own page hands the board.
+        $summary = $this->actingAs($this->owner)
+            ->get('/production/kanban')
+            ->assertOk()
+            ->viewData('page')['props']['productionPricingMap'][(string) $order->id];
+
+        $groups = collect($summary['groups']);
+
+        // 3. One sheet per batch. Eight lengths in, eight sheets out.
+        $this->assertCount(8, $groups, 'a bill carrying every length must print eight sheets');
+        $this->assertSame(8, (int) $summary['group_count']);
+
+        $this->assertSame([
+            'shirt_kids_short',
+            'shirt_kids_long',
+            'shirt_adults_short',
+            'shirt_adults_long',
+            'pants_kids_short',
+            'pants_kids_long',
+            'pants_adults_short',
+            'pants_adults_long',
+        ], $groups->pluck('key')->all());
+
+        // 4. Each sheet says what it is, in the words the floor reads.
+        $this->assertSame([
+            'เสื้อไซต์เด็ก แขนสั้น',
+            'เสื้อไซต์เด็ก แขนยาว',
+            'เสื้อไซต์ผู้ใหญ่ แขนสั้น',
+            'เสื้อไซต์ผู้ใหญ่ แขนยาว',
+            'กางเกงเด็ก ขาสั้น',
+            'กางเกงเด็ก ขายาว',
+            'กางเกงผู้ใหญ่ ขาสั้น',
+            'กางเกงผู้ใหญ่ ขายาว',
+        ], $groups->pluck('label')->all());
+
+        // 5. Each sheet carries its own count. A set is one shirt and one pair
+        //    of pants, so the same row feeds a shirt sheet and a pants sheet.
+        $quantities = $groups->pluck('quantity', 'key')->all();
+        $this->assertSame([
+            'shirt_kids_short' => 12,
+            'shirt_kids_long' => 8,
+            'shirt_adults_short' => 20,
+            'shirt_adults_long' => 10,
+            'pants_kids_short' => 12,
+            'pants_kids_long' => 8,
+            'pants_adults_short' => 20,
+            'pants_adults_long' => 10,
+        ], $quantities);
+
+        // 6. Nothing is counted twice: 50 shirts and 50 pairs of pants out of
+        //    50 sets, not 100 garments of one kind.
+        $this->assertSame(50, $groups->where('garment', 'shirt')->sum('quantity'));
+        $this->assertSame(50, $groups->where('garment', 'pants')->sum('quantity'));
+
+        // 7. Labour, sheet by sheet. Kid shirts cost 12฿ and adult shirts 20฿;
+        //    kid pants 9฿ and adult pants 15฿. No long-length rate has been
+        //    entered for these garments, so the long sheets fall back to the
+        //    short rate -- which is the documented behaviour, not an accident.
+        $this->assertSame([
+            'shirt_kids_short' => 144.0,
+            'shirt_kids_long' => 96.0,
+            'shirt_adults_short' => 400.0,
+            'shirt_adults_long' => 200.0,
+            'pants_kids_short' => 108.0,
+            'pants_kids_long' => 72.0,
+            'pants_adults_short' => 300.0,
+            'pants_adults_long' => 150.0,
+        ], $groups->pluck('subtotal', 'key')->map(fn ($value): float => (float) $value)->all());
+
+        $this->assertSame(
+            1470.0,
+            (float) $summary['grand_total'],
+            'the sheets have to add up to the bill'
+        );
+        $this->assertSame(
+            (float) $groups->sum('subtotal'),
+            (float) $summary['grand_total']
+        );
+
+        // 8. Splitting by length must not change what the bill costs: the same
+        //    50 sets priced without any length recorded come to the same money.
+        $flat = $this->openBill('งานสกรีน', [
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JM', 'quantity' => 20, 'unit_price' => 300],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'M', 'quantity' => 30, 'unit_price' => 350],
+        ]);
+
+        $flatSummary = $this->actingAs($this->owner)
+            ->get('/production/kanban')
+            ->assertOk()
+            ->viewData('page')['props']['productionPricingMap'][(string) $flat->id];
+
+        $this->assertSame(1470.0, (float) $flatSummary['grand_total']);
+        $this->assertCount(4, $flatSummary['groups']);
+    }
+
+    /**
+     * The same bill with one length only: the split must not invent sheets that
+     * have nothing on them.
+     */
+    public function test_a_short_sleeve_only_bill_still_prints_four_sheets(): void
+    {
+        $order = $this->openBill('งานสกรีน', [
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JM', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 12, 'unit_price' => 300],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'M', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 20, 'unit_price' => 350],
+        ]);
+
+        $summary = $this->actingAs($this->owner)
+            ->get('/production/kanban')
+            ->assertOk()
+            ->viewData('page')['props']['productionPricingMap'][(string) $order->id];
+
+        $this->assertSame([
+            'shirt_kids_short',
+            'shirt_adults_short',
+            'pants_kids_short',
+            'pants_adults_short',
+        ], collect($summary['groups'])->pluck('key')->all());
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, mixed>  $specExtra
+     */
+    private function openBillWithMode(string $mode, array $items, array $specExtra = []): Order
+    {
+        $response = $this->actingAs($this->owner)->post('/orders', [
+            'customer_id' => $this->customer->id,
+            'customer_name' => $this->customer->customer_name,
+            'branch_id' => $this->branch->id,
+            'job_name' => 'UAT '.$mode,
+            'job_type' => 'งานสกรีน',
+            'delivery_method' => 'pickup',
+            'order_date' => now()->toDateTimeString(),
+            'due_date' => now()->addDays(7)->toDateTimeString(),
+            'discount_percent' => 0,
+            'items' => $items,
+            'specification' => [
+                'pattern_id' => '1',
+                'fabric_id' => '1',
+                'screen_print_detail' => json_encode(array_merge([
+                    'schema' => 'spec-v2',
+                    'mode' => $mode,
+                    'shirt_specs' => ['shirt_type_id' => (string) $this->shirtType->id, 'fabric_color_id' => '1'],
+                    'pants_specs' => ['pants_type_id' => (string) $this->pantsType->id],
+                ], $specExtra), JSON_THROW_ON_ERROR),
+            ],
+        ]);
+
+        $response->assertSessionHasNoErrors();
+
+        return Order::query()->latest('id')->firstOrFail();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function productionSheetKeys(Order $order): array
+    {
+        $summary = $this->actingAs($this->owner)
+            ->get('/production/kanban')
+            ->assertOk()
+            ->viewData('page')['props']['productionPricingMap'][(string) $order->id];
+
+        return array_column($summary['groups'], 'key');
+    }
+
+    /**
+     * The same bill -- kids and adults, short and long sleeves, short and long
+     * legs -- written on each of the four forms, as the forms stood when a
+     * length was a size-table field only. Form 2 has since gained one, so its
+     * case here stands for a bill written before that.
+     */
+    public function test_how_many_production_sheets_each_form_produces(): void
+    {
+        $eight = [
+            'shirt_kids_short', 'shirt_kids_long',
+            'shirt_adults_short', 'shirt_adults_long',
+            'pants_kids_short', 'pants_kids_long',
+            'pants_adults_short', 'pants_adults_long',
+        ];
+
+        // Form 1 (ตาราง) -- lengths recorded per size row.
+        $form1 = $this->openBillWithMode('matrix', [
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JM', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 12, 'unit_price' => 300],
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JL', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 8, 'unit_price' => 320],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'M', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 20, 'unit_price' => 350],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'L', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 10, 'unit_price' => 380],
+        ]);
+        $this->assertSame($eight, $this->productionSheetKeys($form1));
+
+        // Form 4 (ชุดพละ) -- the same size tables, so the same eight sheets.
+        $form4 = $this->openBillWithMode('pe_uniform', [
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JM', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 12, 'unit_price' => 300],
+            ['item_type' => 'set', 'size_group' => 'kids', 'size_label' => 'JL', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 8, 'unit_price' => 320],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'M', 'shirt_style' => 'short', 'pants_style' => 'short', 'quantity' => 20, 'unit_price' => 350],
+            ['item_type' => 'set', 'size_group' => 'adults', 'size_label' => 'L', 'shirt_style' => 'long', 'pants_style' => 'long', 'quantity' => 10, 'unit_price' => 380],
+        ]);
+        $this->assertSame($eight, $this->productionSheetKeys($form4));
+
+        // Form 2 (รายตัว) -- written without a length per person, which is what a
+        // bill saved before that column existed looks like. The form records one
+        // now; ProductionSheetMatrixUatTest covers the bill that carries it.
+        $form2 = $this->openBillWithMode('individual', [
+            ['item_type' => 'shirt', 'size_group' => 'kids', 'size_label' => 'JM', 'quantity' => 12, 'unit_price' => 250],
+            ['item_type' => 'pants', 'size_group' => 'kids', 'size_label' => 'JM', 'quantity' => 12, 'unit_price' => 180],
+            ['item_type' => 'shirt', 'size_group' => 'adults', 'size_label' => 'L', 'quantity' => 20, 'unit_price' => 250],
+            ['item_type' => 'pants', 'size_group' => 'adults', 'size_label' => 'L', 'quantity' => 20, 'unit_price' => 180],
+        ], ['personalization_rows' => [['name' => 'สมชาย', 'size' => 'L', 'number' => '9', 'quantity' => 1, 'unit_price' => 250]]]);
+
+        $this->assertSame([
+            'shirt_kids_unspecified',
+            'shirt_adults_unspecified',
+            'pants_kids_unspecified',
+            'pants_adults_unspecified',
+        ], $this->productionSheetKeys($form2));
+
+        // Form 3 (กีฬาสี) -- same story: the colour house rows carry a size and a
+        // count, never a length.
+        $form3 = $this->openBillWithMode('sports_day', [
+            ['item_type' => 'shirt', 'size_group' => 'kids', 'size_label' => 'JM', 'quantity' => 12, 'unit_price' => 250],
+            ['item_type' => 'pants', 'size_group' => 'kids', 'size_label' => 'JM', 'quantity' => 12, 'unit_price' => 180],
+            ['item_type' => 'shirt', 'size_group' => 'adults', 'size_label' => 'L', 'quantity' => 20, 'unit_price' => 250],
+            ['item_type' => 'pants', 'size_group' => 'adults', 'size_label' => 'L', 'quantity' => 20, 'unit_price' => 180],
+        ], ['sports_day_groups' => [[
+            'team_name' => 'คณะสีแดง',
+            'fabric_color_id' => '1',
+            'rows' => [['size_group' => 'adults', 'size_label' => 'L', 'shirt_qty' => 20, 'shirt_price' => 250, 'pants_qty' => 20, 'pants_price' => 180]],
+        ]]]);
+
+        $this->assertSame([
+            'shirt_kids_unspecified',
+            'shirt_adults_unspecified',
+            'pants_kids_unspecified',
+            'pants_adults_unspecified',
+        ], $this->productionSheetKeys($form3));
     }
 }

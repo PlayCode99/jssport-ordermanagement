@@ -10,15 +10,26 @@ describe('canEditOrderStatus', () => {
     });
 
     it('blocks editing for confirmed orders once production has progressed', () => {
-        expect(canEditOrderStatus({ orderStatus: 'confirmed', hasProductionProgress: true })).toBe(false);
+        expect(
+            canEditOrderStatus({
+                orderStatus: 'confirmed',
+                hasProductionProgress: true,
+            }),
+        ).toBe(false);
     });
 
     it('blocks editing for every status other than "confirmed"', () => {
         expect(canEditOrderStatus({ orderStatus: 'draft' })).toBe(false);
         expect(canEditOrderStatus({ orderStatus: 'designing' })).toBe(false);
-        expect(canEditOrderStatus({ orderStatus: 'waiting_customer_confirm' })).toBe(false);
-        expect(canEditOrderStatus({ orderStatus: 'in_production' })).toBe(false);
-        expect(canEditOrderStatus({ orderStatus: ' IN_PRODUCTION ' })).toBe(false);
+        expect(
+            canEditOrderStatus({ orderStatus: 'waiting_customer_confirm' }),
+        ).toBe(false);
+        expect(canEditOrderStatus({ orderStatus: 'in_production' })).toBe(
+            false,
+        );
+        expect(canEditOrderStatus({ orderStatus: ' IN_PRODUCTION ' })).toBe(
+            false,
+        );
         expect(canEditOrderStatus({ orderStatus: 'qc_checking' })).toBe(false);
         expect(canEditOrderStatus({ orderStatus: 'qc_rejected' })).toBe(false);
         expect(canEditOrderStatus({ orderStatus: 'shipping' })).toBe(false);

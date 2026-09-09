@@ -11,7 +11,7 @@ class ShirtType extends Model
     use HasFactory;
 
     /**
-     * @var array<int, string>
+     * @var list<string>
      */
     protected $fillable = [
         'code',
@@ -30,6 +30,9 @@ class ShirtType extends Model
         ];
     }
 
+    /**
+     * @return HasMany<SewingOperation, $this>
+     */
     public function sewingOperations(): HasMany
     {
         return $this->hasMany(SewingOperation::class);

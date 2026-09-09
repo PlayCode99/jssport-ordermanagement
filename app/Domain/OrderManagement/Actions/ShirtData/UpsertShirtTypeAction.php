@@ -11,7 +11,7 @@ class UpsertShirtTypeAction
      */
     public function execute(array $data, ?ShirtType $shirtType = null): ShirtType
     {
-        $model = $shirtType ?? new ShirtType();
+        $model = $shirtType ?? new ShirtType;
 
         $model->fill([
             'code' => strtoupper(trim((string) $data['code'])),

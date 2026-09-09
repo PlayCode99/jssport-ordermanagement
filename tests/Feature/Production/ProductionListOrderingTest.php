@@ -52,7 +52,7 @@ class ProductionListOrderingTest extends TestCase
     {
         $customer = Customer::create(['customer_code' => 'CUS-ORD', 'customer_name' => 'Ordering']);
         $branch = Branch::create(['branch_code' => 'BR-ORD', 'branch_name' => 'Ordering']);
-        $action = new CreateOrderAction();
+        $action = new CreateOrderAction;
 
         for ($index = 1; $index <= $count; $index++) {
             $action->execute([

@@ -12,7 +12,13 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type HeatPressMachineRow = {
     id: number;
@@ -37,7 +43,11 @@ const INITIAL_FORM: FormState = {
 };
 
 function csrfToken(): string {
-    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+    return (
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
 }
 
 function formatDate(value: string): string {
@@ -56,10 +66,14 @@ function formatDate(value: string): string {
     });
 }
 
-export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) {
+export default function HeatPressMachinesPage({
+    rows: initialRows,
+}: PageProps) {
     const [rows, setRows] = useState<HeatPressMachineRow[]>(initialRows);
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+    const [statusFilter, setStatusFilter] = useState<
+        'all' | 'active' | 'inactive'
+    >('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editId, setEditId] = useState<number | null>(null);
     const [form, setForm] = useState<FormState>(INITIAL_FORM);
@@ -70,11 +84,13 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
 
         return rows
             .filter((row) => {
-                const matchesSearch = keyword.length === 0 || row.machine_name.toLowerCase().includes(keyword);
+                const matchesSearch =
+                    keyword.length === 0 ||
+                    row.machine_name.toLowerCase().includes(keyword);
                 const matchesStatus =
-                    statusFilter === 'all'
-                    || (statusFilter === 'active' && row.is_active)
-                    || (statusFilter === 'inactive' && !row.is_active);
+                    statusFilter === 'all' ||
+                    (statusFilter === 'active' && row.is_active) ||
+                    (statusFilter === 'inactive' && !row.is_active);
 
                 return matchesSearch && matchesStatus;
             })
@@ -106,10 +122,14 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
 
         if (!payload.machine_name) {
             setError('กรุณากรอกชื่อเครื่องอัด');
+
             return;
         }
 
-        const endpoint = editId === null ? '/settings/data/heat-press-machines' : `/settings/data/heat-press-machines/${editId}`;
+        const endpoint =
+            editId === null
+                ? '/settings/data/heat-press-machines'
+                : `/settings/data/heat-press-machines/${editId}`;
         const method = editId === null ? 'POST' : 'PUT';
 
         const response = await fetch(endpoint, {
@@ -122,10 +142,14 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
             body: JSON.stringify(payload),
         });
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: HeatPressMachineRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: HeatPressMachineRow[];
+        } | null;
 
         if (!response.ok) {
             setError(body?.message ?? 'บันทึกข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -139,20 +163,25 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
     };
 
     const toggleActive = async (row: HeatPressMachineRow) => {
-        const response = await fetch(`/settings/data/heat-press-machines/${row.id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrfToken(),
-                Accept: 'application/json',
+        const response = await fetch(
+            `/settings/data/heat-press-machines/${row.id}`,
+            {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify({
+                    machine_name: row.machine_name,
+                    is_active: !row.is_active,
+                }),
             },
-            body: JSON.stringify({
-                machine_name: row.machine_name,
-                is_active: !row.is_active,
-            }),
-        });
+        );
 
-        const body = (await response.json().catch(() => null)) as { rows?: HeatPressMachineRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            rows?: HeatPressMachineRow[];
+        } | null;
 
         if (response.ok && Array.isArray(body?.rows)) {
             setRows(body.rows);
@@ -160,24 +189,33 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
     };
 
     const deleteRow = async (row: HeatPressMachineRow) => {
-        const ok = window.confirm(`ยืนยันการลบเครื่องอัด ${row.machine_name} ใช่หรือไม่`);
+        const ok = window.confirm(
+            `ยืนยันการลบเครื่องอัด ${row.machine_name} ใช่หรือไม่`,
+        );
 
         if (!ok) {
             return;
         }
 
-        const response = await fetch(`/settings/data/heat-press-machines/${row.id}`, {
-            method: 'DELETE',
-            headers: {
-                'X-CSRF-TOKEN': csrfToken(),
-                Accept: 'application/json',
+        const response = await fetch(
+            `/settings/data/heat-press-machines/${row.id}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': csrfToken(),
+                    Accept: 'application/json',
+                },
             },
-        });
+        );
 
-        const body = (await response.json().catch(() => null)) as { message?: string; rows?: HeatPressMachineRow[] } | null;
+        const body = (await response.json().catch(() => null)) as {
+            message?: string;
+            rows?: HeatPressMachineRow[];
+        } | null;
 
         if (!response.ok) {
             window.alert(body?.message ?? 'ลบข้อมูลไม่สำเร็จ');
+
             return;
         }
 
@@ -194,9 +232,15 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">Heat Press Machine Master</p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">จัดการเครื่องอัด</h1>
-                            <p className="mt-2 text-sm text-slate-600">กำหนดรายชื่อเครื่องอัดสำหรับแจกงานห้องอัด</p>
+                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                Heat Press Machine Master
+                            </p>
+                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                จัดการเครื่องอัด
+                            </h1>
+                            <p className="mt-2 text-sm text-slate-600">
+                                กำหนดรายชื่อเครื่องอัดสำหรับแจกงานห้องอัด
+                            </p>
                         </div>
 
                         <Button onClick={openCreateModal} className="gap-2">
@@ -209,8 +253,12 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
                 <section className="flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
                         <div>
-                            <h2 className="text-base font-semibold text-slate-900">รายการเครื่องอัด</h2>
-                            <p className="text-sm text-slate-500">ทั้งหมด {filteredRows.length} รายการ</p>
+                            <h2 className="text-base font-semibold text-slate-900">
+                                รายการเครื่องอัด
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                ทั้งหมด {filteredRows.length} รายการ
+                            </p>
                         </div>
 
                         <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
@@ -218,20 +266,33 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    onChange={(event) =>
+                                        setSearchTerm(event.target.value)
+                                    }
                                     placeholder="ค้นหาชื่อเครื่องอัด"
                                     className="bg-white pl-9"
                                 />
                             </div>
 
-                            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
+                            <Select
+                                value={statusFilter}
+                                onValueChange={(
+                                    value: 'all' | 'active' | 'inactive',
+                                ) => setStatusFilter(value)}
+                            >
                                 <SelectTrigger className="w-full bg-white md:w-[180px]">
                                     <SelectValue placeholder="สถานะ" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">ทุกสถานะ</SelectItem>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="all">
+                                        ทุกสถานะ
+                                    </SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -241,42 +302,82 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">วันที่สร้าง</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">ชื่อเครื่องอัด</th>
-                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">สถานะ</th>
-                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">จัดการ</th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        วันที่สร้าง
+                                    </th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                                        ชื่อเครื่องอัด
+                                    </th>
+                                    <th className="w-[170px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        สถานะ
+                                    </th>
+                                    <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
+                                        จัดการ
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRows.length === 0 ? (
                                     <tr>
-                                        <td className="px-4 py-5 text-center text-slate-500" colSpan={4}>
+                                        <td
+                                            className="px-4 py-5 text-center text-slate-500"
+                                            colSpan={4}
+                                        >
                                             ไม่พบข้อมูลเครื่องอัดตามเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRows.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-3 text-slate-700">{formatDate(row.created_at)}</td>
-                                            <td className="px-4 py-3 text-slate-800">{row.machine_name}</td>
+                                        <tr
+                                            key={row.id}
+                                            className="hover:bg-slate-50/60"
+                                        >
+                                            <td className="px-4 py-3 text-slate-700">
+                                                {formatDate(row.created_at)}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-800">
+                                                {row.machine_name}
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <Button
-                                                    variant={row.is_active ? 'default' : 'outline'}
+                                                    variant={
+                                                        row.is_active
+                                                            ? 'default'
+                                                            : 'outline'
+                                                    }
                                                     size="sm"
-                                                    onClick={() => toggleActive(row)}
+                                                    onClick={() =>
+                                                        toggleActive(row)
+                                                    }
                                                     className="gap-1"
                                                 >
                                                     <Power className="size-4" />
-                                                    {row.is_active ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                                                    {row.is_active
+                                                        ? 'เปิดใช้งาน'
+                                                        : 'ปิดใช้งาน'}
                                                 </Button>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2">
-                                                    <Button variant="outline" size="sm" onClick={() => openEditModal(row)} className="gap-1">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            openEditModal(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Pencil className="size-4" />
                                                         แก้ไข
                                                     </Button>
-                                                    <Button variant="destructive" size="sm" onClick={() => deleteRow(row)} className="gap-1">
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            deleteRow(row)
+                                                        }
+                                                        className="gap-1"
+                                                    >
                                                         <Trash2 className="size-4" />
                                                         ลบ
                                                     </Button>
@@ -294,42 +395,76 @@ export default function HeatPressMachinesPage({ rows: initialRows }: PageProps) 
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{editId === null ? 'เพิ่มเครื่องอัด' : 'แก้ไขเครื่องอัด'}</DialogTitle>
-                        <DialogDescription>กำหนดชื่อเครื่องอัดและสถานะการใช้งาน</DialogDescription>
+                        <DialogTitle>
+                            {editId === null
+                                ? 'เพิ่มเครื่องอัด'
+                                : 'แก้ไขเครื่องอัด'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            กำหนดชื่อเครื่องอัดและสถานะการใช้งาน
+                        </DialogDescription>
                     </DialogHeader>
 
                     <div className="grid gap-3">
                         <div className="space-y-1">
-                            <label htmlFor="machine_name" className="text-sm font-medium text-slate-700">ชื่อเครื่องอัด</label>
+                            <label
+                                htmlFor="machine_name"
+                                className="text-sm font-medium text-slate-700"
+                            >
+                                ชื่อเครื่องอัด
+                            </label>
                             <Input
                                 id="machine_name"
                                 value={form.machine_name}
-                                onChange={(event) => setForm((prev) => ({ ...prev, machine_name: event.target.value }))}
+                                onChange={(event) =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        machine_name: event.target.value,
+                                    }))
+                                }
                                 placeholder="เช่น เครื่องอัด 1"
                             />
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-sm font-medium text-slate-700">สถานะ</label>
+                            <label className="text-sm font-medium text-slate-700">
+                                สถานะ
+                            </label>
                             <Select
                                 value={form.is_active ? 'active' : 'inactive'}
-                                onValueChange={(value: 'active' | 'inactive') => setForm((prev) => ({ ...prev, is_active: value === 'active' }))}
+                                onValueChange={(value: 'active' | 'inactive') =>
+                                    setForm((prev) => ({
+                                        ...prev,
+                                        is_active: value === 'active',
+                                    }))
+                                }
                             >
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="active">เปิดใช้งาน</SelectItem>
-                                    <SelectItem value="inactive">ปิดใช้งาน</SelectItem>
+                                    <SelectItem value="active">
+                                        เปิดใช้งาน
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                        ปิดใช้งาน
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
-                        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+                        {error ? (
+                            <p className="text-sm text-rose-600">{error}</p>
+                        ) : null}
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsModalOpen(false)}>ยกเลิก</Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsModalOpen(false)}
+                        >
+                            ยกเลิก
+                        </Button>
                         <Button onClick={saveForm}>บันทึก</Button>
                     </DialogFooter>
                 </DialogContent>

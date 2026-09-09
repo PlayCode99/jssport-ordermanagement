@@ -22,6 +22,9 @@ class PieceworkPrice extends Model
         ];
     }
 
+    /**
+     * @return HasMany<CuttingWorkerTask, $this>
+     */
     public function cuttingWorkerTasks(): HasMany
     {
         return $this->hasMany(CuttingWorkerTask::class, 'price_master_id');
