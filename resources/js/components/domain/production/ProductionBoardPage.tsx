@@ -1,4 +1,4 @@
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import JsBarcode from 'jsbarcode';
 import { ChevronDown, Printer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -53,6 +53,8 @@ type ProductionPricingComponent = {
 };
 
 type ProductionPricingSummary = {
+    shirt_type_id?: number | null;
+    pants_type_id?: number | null;
     shirt_type_name?: string | null;
     pants_type_name?: string | null;
     child_quantity: number;
@@ -484,14 +486,14 @@ const shirtSpecFields: SpecField[] = [
         storageKeys: ['jssport.shirt-plackets'],
     },
     {
-        key: 'placket_outer_color_id',
-        label: 'สีสาบ (นอก)',
+        key: 'placket_inner_color_id',
+        label: 'สีสาบ (ใน)',
         type: 'catalog',
         storageKeys: ['jssport.shirt-colors'],
     },
     {
-        key: 'placket_inner_color_id',
-        label: 'สีสาบ (ใน)',
+        key: 'placket_outer_color_id',
+        label: 'สีสาบ (นอก)',
         type: 'catalog',
         storageKeys: ['jssport.shirt-colors'],
     },
@@ -503,7 +505,7 @@ const shirtSpecFields: SpecField[] = [
     },
     {
         key: 'panel_style_id',
-        label: 'แบบต่อ',
+        label: 'สาบนอก',
         type: 'catalog',
         storageKeys: ['jssport.shirt-panels'],
     },
@@ -596,6 +598,26 @@ const PROCESS_TABLE_COLUMN_WIDTHS = {
     workerOne: '26%',
     workerTwo: '26%',
 } as const;
+
+/**
+ * How many labour rows the costing column holds at its standard row height.
+ * A shorter list is padded with blank rows so a worker still has lines to
+ * write on; a longer one is never cut — it drops to the dense row height,
+ * which fits PROCESS_TABLE_DENSE_ROW_LIMIT rows, and past that the sheet
+ * grows instead of hiding the tail of the list.
+ */
+const PROCESS_TABLE_STANDARD_ROW_COUNT = 12;
+const PROCESS_TABLE_DENSE_ROW_LIMIT = 20;
+
+type ProcessTableDensity = 'standard' | 'dense' | 'overflow';
+
+function resolveProcessTableDensity(rowCount: number): ProcessTableDensity {
+    if (rowCount <= PROCESS_TABLE_STANDARD_ROW_COUNT) {
+        return 'standard';
+    }
+
+    return rowCount <= PROCESS_TABLE_DENSE_ROW_LIMIT ? 'dense' : 'overflow';
+}
 
 export function ProductionBoardPage({
     orders,
@@ -3622,6 +3644,60 @@ export function ProductionBoardPage({
                                 const printSheetCount =
                                     productionGroups.length +
                                     (isIndividualOrder ? 1 : 0);
+                                /**
+                                 * Garment types this bill was booked against that
+                                 * had no rate card at the time. Their sheets print
+                                 * a notice instead of labour rows, and the dialog
+                                 * says so up front so nobody has to open each
+                                 * sheet to find out. One entry per garment, however
+                                 * many size or sleeve batches it splits into.
+                                 */
+                                const unpricedGarmentNotices = productionGroups
+                                    .filter(
+                                        (group) =>
+                                            group.components.length === 0,
+                                    )
+                                    .reduce<
+                                        {
+                                            garment: ProductionGroupGarment;
+                                            title: string;
+                                            sheetCount: number;
+                                            typeId: number | null;
+                                        }[]
+                                    >((notices, group) => {
+                                        const existing = notices.find(
+                                            (notice) =>
+                                                notice.garment ===
+                                                group.garment,
+                                        );
+
+                                        if (existing) {
+                                            existing.sheetCount += 1;
+
+                                            return notices;
+                                        }
+
+                                        const isPants =
+                                            group.garment === 'pants';
+
+                                        notices.push({
+                                            garment: group.garment,
+                                            title:
+                                                (isPants
+                                                    ? productionPricing?.pants_type_name
+                                                    : productionPricing?.shirt_type_name) ||
+                                                detailOrder.job_type ||
+                                                (isPants ? 'กางเกง' : 'เสื้อ'),
+                                            sheetCount: 1,
+                                            typeId:
+                                                (isPants
+                                                    ? productionPricing?.pants_type_id
+                                                    : productionPricing?.shirt_type_id) ??
+                                                null,
+                                        });
+
+                                        return notices;
+                                    }, []);
                                 const customerGroupLabel =
                                     productionGroups.length === 1
                                         ? productionGroups[0].label
@@ -4385,6 +4461,42 @@ export function ProductionBoardPage({
                                                 text-align: right;
                                                 font-variant-numeric: tabular-nums;
                                             }
+                                            /* A garment type with no rate card prints a notice where
+                                               its rows would be, so 0.00 never passes for "free". */
+                                            .p-process-table .p-process-notice td {
+                                                background: #fef3c7;
+                                                color: #92400e;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                line-height: 1.35;
+                                                text-align: center;
+                                                padding: 2mm;
+                                                overflow-wrap: anywhere;
+                                            }
+                                            /* Past twelve operations the rows give up their writing
+                                               room to stay on the one sheet: still 11.5px, never a
+                                               row dropped, twenty to a column before the page grows. */
+                                            .p-process-table-dense th,
+                                            .p-process-table-dense td {
+                                                padding: 0.6mm 2mm;
+                                                font-size: 11.5px;
+                                                line-height: 1.2;
+                                            }
+                                            .p-process-table-dense thead th {
+                                                padding: 1.2mm 2mm;
+                                                font-size: 11px;
+                                            }
+                                            .p-process-table-dense tbody td {
+                                                height: auto;
+                                            }
+                                            .p-process-table-dense .p-process-sum td {
+                                                font-size: 13px;
+                                                padding: 1.2mm 2mm;
+                                            }
+                                            .p-process-table-dense .p-process-formula td {
+                                                font-size: 11px;
+                                                padding: 0.8mm 2mm;
+                                            }
 
                                             /* --- signing off ---------------------------------------------- */
                                             .p-signature-row {
@@ -4717,6 +4829,53 @@ export function ProductionBoardPage({
                                                     </div>
                                                 </div>
 
+                                                {unpricedGarmentNotices.length >
+                                                0 ? (
+                                                    <div
+                                                        role="alert"
+                                                        className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900"
+                                                    >
+                                                        <p className="font-bold">
+                                                            ยังไม่ได้ตั้งค่าแรง
+                                                        </p>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {unpricedGarmentNotices.map(
+                                                                (notice) => (
+                                                                    <li
+                                                                        key={
+                                                                            notice.garment
+                                                                        }
+                                                                    >
+                                                                        <span className="font-semibold">
+                                                                            {
+                                                                                notice.title
+                                                                            }
+                                                                        </span>
+                                                                        :
+                                                                        ไม่มีรายการค่าแรง
+                                                                        — ใบงาน{' '}
+                                                                        {
+                                                                            notice.sheetCount
+                                                                        }{' '}
+                                                                        ใบจะพิมพ์โดยไม่มีรายการและไม่คิดยอด
+                                                                        ·{' '}
+                                                                        <Link
+                                                                            href={`/settings/data/garments/prices?category=${notice.garment === 'pants' ? 'PANTS' : 'SHIRT'}${notice.typeId ? `&garment_type_id=${notice.typeId}` : ''}`}
+                                                                            className="font-semibold underline underline-offset-2 hover:text-amber-700"
+                                                                        >
+                                                                            ตั้งค่าแรงที่
+                                                                            จัดการข้อมูล
+                                                                            ›
+                                                                            เซ็ทราคาเด็กและผู้ใหญ่
+                                                                        </Link>{' '}
+                                                                        (มีผลกับบิลที่เปิดหลังจากตั้ง)
+                                                                    </li>
+                                                                ),
+                                                            )}
+                                                        </ul>
+                                                    </div>
+                                                ) : null}
+
                                                 {productionGroups.length > 0 ? (
                                                     <div className="mt-3 border-t border-slate-200 pt-3">
                                                         <p className="mb-2 text-xs font-semibold text-slate-500">
@@ -4896,21 +5055,30 @@ export function ProductionBoardPage({
                                                                   );
                                                               const resolvedArtwork =
                                                                   group.artworkUrl;
-                                                              // Twelve rows fill the column at a
-                                                              // height a person can actually write
-                                                              // in; fifteen squeezed them until the
-                                                              // total row fell off the page.
+                                                              // Every operation the order was
+                                                              // priced at is printed: the total
+                                                              // below adds them all up, so a row
+                                                              // left off the sheet would be money
+                                                              // a worker cannot account for.
                                                               const visibleProcessRows =
-                                                                  group.components.slice(
-                                                                      0,
-                                                                      12,
-                                                                  );
+                                                                  group.components;
                                                               const blankProcessRows =
                                                                   Math.max(
                                                                       0,
-                                                                      12 -
+                                                                      PROCESS_TABLE_STANDARD_ROW_COUNT -
                                                                           visibleProcessRows.length,
                                                                   );
+                                                              const processDensity =
+                                                                  resolveProcessTableDensity(
+                                                                      visibleProcessRows.length,
+                                                                  );
+                                                              // No operations at all means the
+                                                              // garment type has no rate card, not
+                                                              // that the work is free — say so
+                                                              // instead of printing 0.00.
+                                                              const isUnpricedGroup =
+                                                                  visibleProcessRows.length ===
+                                                                  0;
                                                               const dozenCount =
                                                                   group.quantity >=
                                                                   12
@@ -4924,7 +5092,10 @@ export function ProductionBoardPage({
                                                                   'kids'
                                                                       ? 'เด็ก'
                                                                       : 'ผู้ใหญ่';
-                                                              const pricingFormulaText = `${group.quantity.toLocaleString('th-TH')} x ${formatMoney(group.unitTotal)} = ${formatMoney(group.subtotal)}`;
+                                                              const pricingFormulaText =
+                                                                  isUnpricedGroup
+                                                                      ? `${group.quantity.toLocaleString('th-TH')} x — = —`
+                                                                      : `${group.quantity.toLocaleString('th-TH')} x ${formatMoney(group.unitTotal)} = ${formatMoney(group.subtotal)}`;
                                                               const isKidsDocument =
                                                                   group.sizeGroup ===
                                                                   'kids';
@@ -4967,7 +5138,12 @@ export function ProductionBoardPage({
                                                                           group.key
                                                                       }
                                                                       id={`production-sheet-${group.key}`}
-                                                                      className="p-print-page scroll-mt-20 space-y-2"
+                                                                      className={
+                                                                          processDensity ===
+                                                                          'overflow'
+                                                                              ? 'p-print-page p-print-page-flow scroll-mt-20 space-y-2'
+                                                                              : 'p-print-page scroll-mt-20 space-y-2'
+                                                                      }
                                                                   >
                                                                       <header
                                                                           className="p-page-header"
@@ -5315,7 +5491,17 @@ export function ProductionBoardPage({
                                                                               </div>
                                                                               <div className="p-form-body">
                                                                                   <div className="p-process-wrap">
-                                                                                      <table className="p-process-table">
+                                                                                      <table
+                                                                                          className={
+                                                                                              processDensity ===
+                                                                                              'standard'
+                                                                                                  ? 'p-process-table'
+                                                                                                  : 'p-process-table p-process-table-dense'
+                                                                                          }
+                                                                                          data-process-density={
+                                                                                              processDensity
+                                                                                          }
+                                                                                      >
                                                                                           <colgroup>
                                                                                               <col
                                                                                                   style={{
@@ -5357,6 +5543,25 @@ export function ProductionBoardPage({
                                                                                               </tr>
                                                                                           </thead>
                                                                                           <tbody>
+                                                                                              {isUnpricedGroup ? (
+                                                                                                  <tr className="p-process-notice">
+                                                                                                      <td
+                                                                                                          colSpan={
+                                                                                                              4
+                                                                                                          }
+                                                                                                      >
+                                                                                                          ยังไม่ได้ตั้งค่าแรงสำหรับ{' '}
+                                                                                                          {
+                                                                                                              formTitle
+                                                                                                          }{' '}
+                                                                                                          —
+                                                                                                          ตั้งได้ที่
+                                                                                                          จัดการข้อมูล
+                                                                                                          ›
+                                                                                                          เซ็ทราคาเด็กและผู้ใหญ่
+                                                                                                      </td>
+                                                                                                  </tr>
+                                                                                              ) : null}
                                                                                               {visibleProcessRows.map(
                                                                                                   (
                                                                                                       component,
@@ -5424,9 +5629,11 @@ export function ProductionBoardPage({
                                                                                                       }
                                                                                                       className="text-right font-semibold"
                                                                                                   >
-                                                                                                      {formatMoney(
-                                                                                                          group.subtotal,
-                                                                                                      )}
+                                                                                                      {isUnpricedGroup
+                                                                                                          ? 'ยังไม่ได้ตั้งค่าแรง'
+                                                                                                          : formatMoney(
+                                                                                                                group.subtotal,
+                                                                                                            )}
                                                                                                   </td>
                                                                                               </tr>
                                                                                               <tr className="p-process-formula">

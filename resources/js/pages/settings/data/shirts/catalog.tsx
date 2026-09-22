@@ -1,5 +1,13 @@
 import { Head, usePage } from '@inertiajs/react';
-import { Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
+import {
+    ChevronDown,
+    ChevronUp,
+    Pencil,
+    Plus,
+    Power,
+    Search,
+    Trash2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +44,11 @@ type CatalogConfig = {
     parentTitle?: string;
     parentPath?: string;
     pagePrefix?: string;
+    /**
+     * The shop arranges this list by hand and the order form shows it in
+     * that order (the size lists). Other catalogs list newest first.
+     */
+    sortable?: boolean;
 };
 
 type PageProps = {
@@ -69,15 +82,23 @@ export default function ShirtCatalogPage() {
     const [editValue, setEditValue] = useState('');
     const [rows, setRows] = useState<CatalogRow[]>(initialRows);
 
+    const isSortable = catalog.sortable === true;
+    // A hand-arranged list keeps the order it arrived in — that order is the
+    // data. Everything else reads newest first.
     const sortedRows = useMemo(
         () =>
-            [...rows].sort(
-                (a, b) =>
-                    new Date(b.createdAt).getTime() -
-                    new Date(a.createdAt).getTime(),
-            ),
-        [rows],
+            isSortable
+                ? rows
+                : [...rows].sort(
+                      (a, b) =>
+                          new Date(b.createdAt).getTime() -
+                          new Date(a.createdAt).getTime(),
+                  ),
+        [isSortable, rows],
     );
+    // Moving a row only makes sense against its real neighbours, so the
+    // arrows rest while a search or status filter is narrowing the list.
+    const isFiltering = searchTerm.trim() !== '' || statusFilter !== 'all';
 
     const filteredRows = useMemo(() => {
         const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -145,9 +166,28 @@ export default function ShirtCatalogPage() {
             active: true,
         };
 
-        await saveRows([nextRow, ...rows]);
+        // A new size joins the end of the arranged list; other catalogs show
+        // the newest entry first.
+        await saveRows(isSortable ? [...rows, nextRow] : [nextRow, ...rows]);
         setNewName('');
         setIsCreateModalOpen(false);
+    };
+
+    const moveRow = async (id: number, direction: -1 | 1) => {
+        const index = rows.findIndex((row) => row.id === id);
+        const target = index + direction;
+
+        if (index === -1 || target < 0 || target >= rows.length) {
+            return;
+        }
+
+        const nextRows = [...rows];
+        [nextRows[index], nextRows[target]] = [
+            nextRows[target],
+            nextRows[index],
+        ];
+
+        await saveRows(nextRows);
     };
 
     const toggleActive = async (id: number) => {
@@ -204,6 +244,9 @@ export default function ShirtCatalogPage() {
                             <p className="mt-2 text-sm text-slate-600">
                                 เพิ่มและจัดการ{catalog.title}{' '}
                                 พร้อมบันทึกผู้สร้างจากบัญชีที่กำลังใช้งาน
+                                {isSortable
+                                    ? ' — ใช้ลูกศรจัดลำดับ ฟอร์มเปิดบิลจะเรียงตามลำดับนี้'
+                                    : ''}
                             </p>
                         </div>
 
@@ -271,6 +314,11 @@ export default function ShirtCatalogPage() {
                         <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
+                                    {isSortable ? (
+                                        <th className="w-[130px] px-4 py-3 text-left font-semibold text-slate-700">
+                                            ลำดับ
+                                        </th>
+                                    ) : null}
                                     <th className="w-[220px] px-4 py-3 text-left font-semibold text-slate-700">
                                         วันที่สร้าง
                                     </th>
@@ -293,18 +341,75 @@ export default function ShirtCatalogPage() {
                                     <tr>
                                         <td
                                             className="px-4 py-5 text-center text-slate-500"
-                                            colSpan={5}
+                                            colSpan={isSortable ? 6 : 5}
                                         >
                                             ไม่พบข้อมูล{catalog.title}
                                             ที่ตรงกับเงื่อนไข
                                         </td>
                                     </tr>
                                 ) : (
-                                    filteredRows.map((row) => (
+                                    filteredRows.map((row, index) => (
                                         <tr
                                             key={row.id}
                                             className="hover:bg-slate-50/60"
                                         >
+                                            {isSortable ? (
+                                                <td className="px-4 py-3 align-top">
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="w-6 text-center font-mono text-sm font-semibold text-slate-700">
+                                                            {index + 1}
+                                                        </span>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="icon"
+                                                            className="size-8"
+                                                            aria-label={`เลื่อน ${row.name} ขึ้น`}
+                                                            title={
+                                                                isFiltering
+                                                                    ? 'ล้างการค้นหา/ตัวกรองก่อนจัดลำดับ'
+                                                                    : 'เลื่อนขึ้น'
+                                                            }
+                                                            disabled={
+                                                                isFiltering ||
+                                                                index === 0
+                                                            }
+                                                            onClick={() =>
+                                                                moveRow(
+                                                                    row.id,
+                                                                    -1,
+                                                                )
+                                                            }
+                                                        >
+                                                            <ChevronUp className="size-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="icon"
+                                                            className="size-8"
+                                                            aria-label={`เลื่อน ${row.name} ลง`}
+                                                            title={
+                                                                isFiltering
+                                                                    ? 'ล้างการค้นหา/ตัวกรองก่อนจัดลำดับ'
+                                                                    : 'เลื่อนลง'
+                                                            }
+                                                            disabled={
+                                                                isFiltering ||
+                                                                index ===
+                                                                    filteredRows.length -
+                                                                        1
+                                                            }
+                                                            onClick={() =>
+                                                                moveRow(
+                                                                    row.id,
+                                                                    1,
+                                                                )
+                                                            }
+                                                        >
+                                                            <ChevronDown className="size-4" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            ) : null}
                                             <td className="px-4 py-3 align-top text-slate-700">
                                                 {formatDate(row.createdAt)}
                                             </td>

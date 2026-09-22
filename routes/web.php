@@ -16,7 +16,6 @@ use App\Http\Controllers\Settings\ProductionDailySettingController;
 use App\Http\Controllers\Settings\ScreenTeamController;
 use App\Http\Controllers\Settings\SewingTeamController;
 use App\Http\Controllers\ShirtCatalogController;
-use App\Http\Controllers\ShirtDataManagementController;
 use App\Http\Controllers\Teams\TeamInvitationController;
 use App\Http\Middleware\EnsureTeamMembership;
 use Illuminate\Support\Facades\Route;
@@ -100,25 +99,18 @@ Route::middleware(['auth'])->group(function () {
         ->name('settings.data.garments.prices.update');
     Route::delete('settings/data/garments/prices/{garmentOperation}', [GarmentPricingController::class, 'destroyPrice'])
         ->name('settings.data.garments.prices.destroy');
-    Route::get('settings/data/shirts', [ShirtCatalogController::class, 'index'])->name('settings.data.shirts.index');
-    Route::get('settings/data/shirts/types', [ShirtDataManagementController::class, 'types'])
-        ->name('settings.data.shirts.types');
-    Route::post('settings/data/shirts/types', [ShirtDataManagementController::class, 'storeType'])
-        ->name('settings.data.shirts.types.store');
-    Route::put('settings/data/shirts/types/{shirtType}', [ShirtDataManagementController::class, 'updateType'])
-        ->name('settings.data.shirts.types.update');
-    Route::delete('settings/data/shirts/types/{shirtType}', [ShirtDataManagementController::class, 'destroyType'])
-        ->name('settings.data.shirts.types.destroy');
-    Route::get('settings/data/shirts/patterns', [ShirtCatalogController::class, 'patterns'])->name('settings.data.shirts.patterns');
-    Route::get('settings/data/shirts/catalog/{catalog}', [ShirtCatalogController::class, 'show'])
-        ->name('settings.data.shirts.catalog');
+    // The sewing-spec catalogs (patterns, fabrics, colours, collars, plackets,
+    // cuffs, panels, sublimation, leg styles, leg hems) are managed from the
+    // order form itself; the settings pages that used to edit them are gone.
+    // sync stays for the size and job-name lists, which still have pages.
     Route::post('settings/data/catalog-items/sync', [ShirtCatalogController::class, 'syncCatalogItems'])
         ->name('settings.data.catalog-items.sync');
     Route::post('settings/data/catalog-items/quick-add', [ShirtCatalogController::class, 'quickAddCatalogItem'])
         ->name('settings.data.catalog-items.quick-add');
-    Route::get('settings/data/pants', [ShirtCatalogController::class, 'pantsIndex'])->name('settings.data.pants.index');
-    Route::get('settings/data/pants/catalog/{catalog}', [ShirtCatalogController::class, 'showPantsCatalog'])
-        ->name('settings.data.pants.catalog');
+    Route::post('settings/data/catalog-items/rename', [ShirtCatalogController::class, 'renameCatalogItem'])
+        ->name('settings.data.catalog-items.rename');
+    Route::post('settings/data/catalog-items/hide', [ShirtCatalogController::class, 'hideCatalogItem'])
+        ->name('settings.data.catalog-items.hide');
     Route::get('settings/data/size-kids', [ShirtCatalogController::class, 'sizeKids'])->name('settings.data.size-kids');
     Route::get('settings/data/size-adults', [ShirtCatalogController::class, 'sizeAdults'])->name('settings.data.size-adults');
 });

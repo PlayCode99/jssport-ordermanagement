@@ -63,9 +63,11 @@ class ProductionKanbanController extends Controller
             'jssport.pants-leg-hem',
         ];
 
+        // Hidden rows stay in here on purpose: this only turns an id into a
+        // name for display, and a sheet for a bill that used an entry before
+        // it was hidden still has to read as that name, not as a number.
         $grouped = CatalogItem::query()
             ->whereIn('storage_key', $keys)
-            ->where('active', true)
             ->get(['storage_key', 'item_id', 'name'])
             ->groupBy('storage_key');
 
@@ -200,10 +202,10 @@ class ProductionKanbanController extends Controller
             ['key' => 'neck_color_id', 'label' => 'สีแบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-neck-colors', 'jssport.shirt-colors']],
             ['key' => 'collar_id', 'label' => 'ปก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
             ['key' => 'placket_style_id', 'label' => 'แบบสาบ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-plackets']],
-            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'placket_inner_color_id', 'label' => 'สีสาบ (ใน)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-inner-colors', 'jssport.shirt-colors']],
+            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'sleeve_cuff_id', 'label' => 'ปลายแขน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-cuffs']],
-            ['key' => 'panel_style_id', 'label' => 'แบบต่อ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-panels']],
+            ['key' => 'panel_style_id', 'label' => 'สาบนอก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-panels']],
             ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
             ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
             ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
@@ -361,9 +363,9 @@ class ProductionKanbanController extends Controller
 
         $priceMasters = PieceworkPrice::select('id', 'code', 'name', 'price_per_unit')->get();
 
+        // Display only, so hidden fabrics resolve too.
         $fabricLookup = CatalogItem::query()
             ->where('storage_key', 'jssport.shirt-fabrics')
-            ->where('active', true)
             ->get(['item_id', 'name'])
             ->mapWithKeys(fn (CatalogItem $item): array => [
                 (string) $item->item_id => $item->name,

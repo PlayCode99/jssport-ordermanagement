@@ -290,4 +290,52 @@ class Order extends Model implements HasMedia
             ->values()
             ->all();
     }
+
+    /**
+     * The ชุดพละ artwork with its media ids, keyed 'kids' or 'adults' the same
+     * way pe_uniform_artwork_urls is, so a size table's image can be removed
+     * by identity like any other artwork.
+     *
+     * @return array<string, list<array{id: int, url: string}>>
+     */
+    public function peUniformArtworkMedia(): array
+    {
+        $grouped = [];
+
+        foreach ($this->getMedia('pe_uniform_artwork') as $media) {
+            $table = $media->getCustomProperty('pe_table');
+
+            if ($table !== 'kids' && $table !== 'adults') {
+                continue;
+            }
+
+            $grouped[$table][] = ['id' => (int) $media->id, 'url' => $media->getUrl()];
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * The colour-house artwork with its media ids, keyed by house index the
+     * same way sports_day_artwork_urls is, so the form can ask for a house's
+     * image to be removed by identity like any other artwork.
+     *
+     * @return array<int, list<array{id: int, url: string}>>
+     */
+    public function sportsDayArtworkMedia(): array
+    {
+        $grouped = [];
+
+        foreach ($this->getMedia('sports_day_artwork') as $media) {
+            $groupIndex = $media->getCustomProperty('sports_day_group');
+
+            if (! is_numeric($groupIndex)) {
+                continue;
+            }
+
+            $grouped[(string) (int) $groupIndex][] = ['id' => (int) $media->id, 'url' => $media->getUrl()];
+        }
+
+        return $grouped;
+    }
 }

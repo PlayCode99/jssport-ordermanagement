@@ -26,6 +26,8 @@ use Inertia\Response;
 class OrderController extends Controller
 {
     /**
+     * The active rows of a catalog, or the built-in list when there are none.
+     *
      * @param  array<int, array{id: int, name: string}>  $fallback
      * @return array<int, array{id: int, name: string}>
      */
@@ -47,14 +49,51 @@ class OrderController extends Controller
     }
 
     /**
+     * A sewing-spec catalog for the form: every row, hidden ones flagged.
+     *
+     * The form offers only the active rows as choices, but a bill being edited
+     * may still point at one that was hidden since, and it has to show that
+     * row's name rather than a bare number until the counter picks another.
+     *
+     * @param  array<int, array{id: int, name: string}>  $fallback
+     * @return array<int, array{id: int, name: string, active: bool}>
+     */
+    private function specOptionsFromStorageKey(string $storageKey, array $fallback): array
+    {
+        $rows = CatalogItem::query()
+            ->where('storage_key', $storageKey)
+            ->orderBy('name')
+            ->get(['item_id', 'name', 'active'])
+            ->map(fn (CatalogItem $item): array => [
+                'id' => (int) $item->item_id,
+                'name' => $item->name,
+                'active' => (bool) $item->active,
+            ])
+            ->values()
+            ->all();
+
+        if (collect($rows)->contains(fn (array $row): bool => $row['active'])) {
+            return $rows;
+        }
+
+        // Nothing usable on file: the built-in list stands in, as it always has.
+        return array_map(
+            static fn (array $row): array => [...$row, 'active' => true],
+            $fallback,
+        );
+    }
+
+    /**
      * @return array<int, string>
      */
     private function sizeOptionsFromStorageKey(string $storageKey): array
     {
+        // In the order the shop arranged them on the settings page.
         return CatalogItem::query()
             ->where('storage_key', $storageKey)
             ->where('active', true)
-            ->orderByDesc('created_at')
+            ->orderBy('sort_order')
+            ->orderBy('item_id')
             ->pluck('name')
             ->map(fn (string $name): string => trim($name))
             ->filter(fn (string $name): bool => $name !== '')
@@ -87,7 +126,51 @@ class OrderController extends Controller
     }
 
     /**
-     * @return array<string, array<int, array{id: int, name: string}>>
+     * Which catalog each shirt spec dropdown reads and, from the form, writes.
+     * Shared with the form as shirtCatalogKeys so both sides agree on it.
+     *
+     * แบบคอ and ปก deliberately share one catalog: bills on file reference
+     * neck styles by ids from the collar list, and splitting them would need a
+     * migration of those bills.
+     *
+     * @var array<string, string>
+     */
+    public const SHIRT_CATALOG_KEYS = [
+        'patterns' => 'jssport.shirt-patterns',
+        'fabrics' => 'jssport.shirt-fabrics',
+        'fabric_colors' => 'jssport.shirt-fabric-colors',
+        'neck_styles' => 'jssport.shirt-collars',
+        'neck_colors' => 'jssport.shirt-neck-colors',
+        'collars' => 'jssport.shirt-collars',
+        'placket_styles' => 'jssport.shirt-plackets',
+        'placket_outer_colors' => 'jssport.shirt-placket-outer-colors',
+        'placket_inner_colors' => 'jssport.shirt-placket-inner-colors',
+        'sleeve_cuffs' => 'jssport.shirt-cuffs',
+        'panel_styles' => 'jssport.shirt-panels',
+        'screen_colors' => 'jssport.shirt-screen-colors',
+        'embroidery_colors' => 'jssport.shirt-embroidery-colors',
+        'sublimations' => 'jssport.shirt-sublimation',
+    ];
+
+    /**
+     * The pants dropdowns; fabrics, colours and sublimation are the shirt
+     * catalogs, so a colour added on either tab is offered on both.
+     *
+     * @var array<string, string>
+     */
+    public const PANTS_CATALOG_KEYS = [
+        'patterns' => 'jssport.pants-patterns',
+        'fabrics' => 'jssport.shirt-fabrics',
+        'fabric_colors' => 'jssport.shirt-fabric-colors',
+        'leg_styles' => 'jssport.pants-leg-style',
+        'leg_cuffs' => 'jssport.pants-leg-hem',
+        'screen_colors' => 'jssport.shirt-screen-colors',
+        'embroidery_colors' => 'jssport.shirt-embroidery-colors',
+        'sublimations' => 'jssport.shirt-sublimation',
+    ];
+
+    /**
+     * @return array<string, array<int, array{id: int, name: string, active: bool}>>
      */
     private function shirtCatalogOptions(): array
     {
@@ -108,22 +191,9 @@ class OrderController extends Controller
             'sublimations' => [['id' => 1, 'name' => 'เต็มตัว'], ['id' => 2, 'name' => 'เฉพาะจุด']],
         ];
 
-        return [
-            'patterns' => $this->optionsFromStorageKey('jssport.shirt-patterns', $fallback['patterns']),
-            'fabrics' => $this->optionsFromStorageKey('jssport.shirt-fabrics', $fallback['fabrics']),
-            'fabric_colors' => $this->optionsFromStorageKey('jssport.shirt-fabric-colors', $fallback['fabric_colors']),
-            'neck_styles' => $this->optionsFromStorageKey('jssport.shirt-collars', $fallback['neck_styles']),
-            'neck_colors' => $this->optionsFromStorageKey('jssport.shirt-neck-colors', $fallback['neck_colors']),
-            'collars' => $this->optionsFromStorageKey('jssport.shirt-collars', $fallback['collars']),
-            'placket_styles' => $this->optionsFromStorageKey('jssport.shirt-plackets', $fallback['placket_styles']),
-            'placket_outer_colors' => $this->optionsFromStorageKey('jssport.shirt-placket-outer-colors', $fallback['placket_outer_colors']),
-            'placket_inner_colors' => $this->optionsFromStorageKey('jssport.shirt-placket-inner-colors', $fallback['placket_inner_colors']),
-            'sleeve_cuffs' => $this->optionsFromStorageKey('jssport.shirt-cuffs', $fallback['sleeve_cuffs']),
-            'panel_styles' => $this->optionsFromStorageKey('jssport.shirt-panels', $fallback['panel_styles']),
-            'screen_colors' => $this->optionsFromStorageKey('jssport.shirt-screen-colors', $fallback['screen_colors']),
-            'embroidery_colors' => $this->optionsFromStorageKey('jssport.shirt-embroidery-colors', $fallback['embroidery_colors']),
-            'sublimations' => $this->optionsFromStorageKey('jssport.shirt-sublimation', $fallback['sublimations']),
-        ];
+        return collect(self::SHIRT_CATALOG_KEYS)
+            ->map(fn (string $storageKey, string $source): array => $this->specOptionsFromStorageKey($storageKey, $fallback[$source] ?? []))
+            ->all();
     }
 
     /**
@@ -139,16 +209,19 @@ class OrderController extends Controller
             'sublimations' => [['id' => 1, 'name' => 'เต็มตัว'], ['id' => 2, 'name' => 'เฉพาะแถบ']],
         ];
 
-        return [
-            'patterns' => $this->optionsFromStorageKey('jssport.pants-patterns', $fallback['patterns']),
-            'fabrics' => $shirtCatalogs['fabrics'],
-            'fabric_colors' => $shirtCatalogs['fabric_colors'],
-            'leg_styles' => $this->optionsFromStorageKey('jssport.pants-leg-style', $fallback['leg_styles']),
-            'leg_cuffs' => $this->optionsFromStorageKey('jssport.pants-leg-hem', $fallback['leg_cuffs']),
-            'screen_colors' => $shirtCatalogs['screen_colors'],
-            'embroidery_colors' => $shirtCatalogs['embroidery_colors'],
-            'sublimations' => $this->optionsFromStorageKey('jssport.shirt-sublimation', $fallback['sublimations']),
-        ];
+        // A source whose catalog is one of the shirt's reuses the rows already
+        // loaded for it; the pants-only catalogs load on their own.
+        return collect(self::PANTS_CATALOG_KEYS)
+            ->map(function (string $storageKey, string $source) use ($shirtCatalogs, $fallback): array {
+                $shirtSource = array_search($storageKey, self::SHIRT_CATALOG_KEYS, true);
+
+                if ($shirtSource !== false && $source !== 'sublimations' && isset($shirtCatalogs[$shirtSource])) {
+                    return $shirtCatalogs[$shirtSource];
+                }
+
+                return $this->specOptionsFromStorageKey($storageKey, $fallback[$source] ?? []);
+            })
+            ->all();
     }
 
     /**
@@ -341,6 +414,8 @@ class OrderController extends Controller
                 'shirt_artwork_media' => $order->artworkMedia('shirt_artwork'),
                 'pants_artwork_media' => $order->artworkMedia('pants_artwork'),
                 'reference_design_media' => $order->artworkMedia('reference_designs'),
+                'sports_day_artwork_media' => $order->sportsDayArtworkMedia(),
+                'pe_uniform_artwork_media' => $order->peUniformArtworkMedia(),
                 'items' => $order->items
                     ->map(fn ($item): array => [
                         'item_type' => $item->item_type,
@@ -393,11 +468,13 @@ class OrderController extends Controller
             'contactChannels' => $this->contactChannelOptions(),
             'discounts' => $this->discountOptions(),
             'shirtCatalogs' => $this->shirtCatalogOptions(),
+            'shirtCatalogKeys' => self::SHIRT_CATALOG_KEYS,
+            'pantsCatalogKeys' => self::PANTS_CATALOG_KEYS,
             'pantsCatalogs' => $this->pantsCatalogOptions(),
             'shirtTypes' => $this->garmentTypeOptions('SHIRT'),
             'pantsTypes' => $this->garmentTypeOptions('PANTS'),
-            'kidsSizes' => $this->sizeOptionsFromStorageKey('jssport.size-kids'),
-            'adultSizes' => $this->sizeOptionsFromStorageKey('jssport.size-adults'),
+            'kidsSizes' => $this->sizeOptionsFromStorageKey(ShirtCatalogController::SIZE_KIDS_STORAGE_KEY),
+            'adultSizes' => $this->sizeOptionsFromStorageKey(ShirtCatalogController::SIZE_ADULTS_STORAGE_KEY),
             'defaultBranchId' => ($order === null || $isDuplicate) ? $actor->branch_id : null,
             'dailyProductionCapacity' => ProductionDailySetting::query()->first()->daily_capacity ?? 200,
             'deliveryDateLoads' => $deliveryDateLoads,

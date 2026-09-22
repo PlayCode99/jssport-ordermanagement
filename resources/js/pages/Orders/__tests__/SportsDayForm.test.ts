@@ -25,7 +25,7 @@ const group = (rows: ReturnType<typeof row>[], over = {}) => ({
     fabric_color_id: '12',
     rows,
     artwork_files: [] as File[],
-    artwork_urls: [] as string[],
+    saved_artwork: [] as { id: number; url: string }[],
     ...over,
 });
 

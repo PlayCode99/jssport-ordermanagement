@@ -1,12 +1,56 @@
-import { Check, Loader2, Plus } from 'lucide-react';
+import { Check, Loader2, Plus, Settings2, Trash2 } from 'lucide-react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 export type MasterDataOption = {
     id: number;
     name: string;
+    /**
+     * False for a row that was hidden from the choices. It is still passed in
+     * so a bill that picked it before it was hidden shows its name rather than
+     * a bare id; it is never offered in the dropdown.
+     */
+    active?: boolean;
+};
+
+/**
+ * Renaming and hiding are done from the form too, for the people allowed to.
+ * The callbacks let the page patch the option lists it shares between fields.
+ */
+export type MasterDataManageProps = {
+    canEdit: boolean;
+    onRenamed?: (option: MasterDataOption) => void;
+    onHidden?: (option: MasterDataOption) => void;
+};
+
+const CSRF_HEADERS = (): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'X-CSRF-TOKEN':
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? '',
+    Accept: 'application/json',
+});
+
+/** The server's message for a failed call, or a plain fallback. */
+const failureMessage = async (
+    response: Response,
+    fallback: string,
+): Promise<string> => {
+    const payload = (await response.json().catch(() => null)) as {
+        message?: string;
+    } | null;
+
+    return payload?.message ?? fallback;
 };
 
 type MasterDataComboBoxProps = {
@@ -36,6 +80,10 @@ type MasterDataComboBoxProps = {
     disabled?: boolean;
     id?: string;
     'aria-label'?: string;
+    /** What the list is called in the manage dialog, e.g. "แบบคอ". */
+    label?: string;
+    /** Offer rename/hide for this list. Absent means add-only. */
+    manage?: MasterDataManageProps;
 };
 
 /**
@@ -58,7 +106,20 @@ export function MasterDataComboBox({
     disabled,
     id,
     'aria-label': ariaLabel,
+    label,
+    manage,
 }: MasterDataComboBoxProps) {
+    // Only what is still on offer is listed; a hidden row keeps resolving the
+    // name of a value that picked it earlier.
+    const offeredOptions = useMemo(
+        () => options.filter((option) => option.active !== false),
+        [options],
+    );
+    const canManage = manage?.canEdit === true && !disabled;
+    const [isManageOpen, setIsManageOpen] = useState(false);
+    // Bumped on every open so the dialog remounts and starts its drafts from
+    // the names as they are then, without an effect that sets state.
+    const [manageSession, setManageSession] = useState(0);
     // Resolve the display text for the current value: if it matches a known
     // option's id, show that option's name; otherwise show the raw value
     // as-is (free text the user typed).
@@ -101,13 +162,13 @@ export function MasterDataComboBox({
         const needle = query.trim().toLowerCase();
 
         if (needle === '') {
-            return options;
+            return offeredOptions;
         }
 
-        return options.filter((option) =>
+        return offeredOptions.filter((option) =>
             option.name.toLowerCase().includes(needle),
         );
-    }, [options, query]);
+    }, [offeredOptions, query]);
 
     useEffect(() => {
         setHighlightedIndex(0);
@@ -160,23 +221,18 @@ export function MasterDataComboBox({
                 '/settings/data/catalog-items/quick-add',
                 {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN':
-                            document
-                                .querySelector('meta[name="csrf-token"]')
-                                ?.getAttribute('content') ?? '',
-                        Accept: 'application/json',
-                    },
+                    headers: CSRF_HEADERS(),
                     body: JSON.stringify({ storage_key: storageKey, name }),
                 },
             );
 
             if (!response.ok) {
-                const payload = (await response.json().catch(() => null)) as {
-                    message?: string;
-                } | null;
-                setError(payload?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่');
+                setError(
+                    await failureMessage(
+                        response,
+                        'บันทึกไม่สำเร็จ กรุณาลองใหม่',
+                    ),
+                );
 
                 return;
             }
@@ -300,8 +356,255 @@ export function MasterDataComboBox({
                         <Plus className="size-4" />
                     )}
                 </button>
+                {canManage ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setManageSession((session) => session + 1);
+                            setIsManageOpen(true);
+                        }}
+                        title={`จัดการรายการ${label ? ` ${label}` : ''}`}
+                        aria-label={`จัดการรายการ${label ? ` ${label}` : ''}`}
+                        className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-slate-600 transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                        <Settings2 className="size-4" />
+                    </button>
+                ) : null}
             </div>
             {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+            {canManage ? (
+                <MasterDataManageDialog
+                    key={manageSession}
+                    open={isManageOpen}
+                    onOpenChange={setIsManageOpen}
+                    storageKey={storageKey}
+                    label={label ?? placeholder ?? ''}
+                    options={offeredOptions}
+                    onRenamed={manage?.onRenamed}
+                    onHidden={manage?.onHidden}
+                />
+            ) : null}
         </div>
+    );
+}
+
+/**
+ * Rename or hide the rows of one list. Hiding retires a row rather than
+ * deleting it, so bills that used it keep its name; the same name added again
+ * later brings it back.
+ */
+function MasterDataManageDialog({
+    open,
+    onOpenChange,
+    storageKey,
+    label,
+    options,
+    onRenamed,
+    onHidden,
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    storageKey: string;
+    label: string;
+    options: MasterDataOption[];
+    onRenamed?: (option: MasterDataOption) => void;
+    onHidden?: (option: MasterDataOption) => void;
+}) {
+    // Drafts start from the names as they are when the dialog mounts; the
+    // combobox remounts it on every open. A rename updating `options` mid-
+    // session therefore never wipes what is being typed on another row.
+    const [drafts, setDrafts] = useState<Record<number, string>>(() =>
+        Object.fromEntries(options.map((option) => [option.id, option.name])),
+    );
+    const [busyId, setBusyId] = useState<number | null>(null);
+    const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+
+    const rename = async (option: MasterDataOption) => {
+        const name = (drafts[option.id] ?? '').trim();
+
+        if (name === '' || name === option.name || busyId !== null) {
+            return;
+        }
+
+        setBusyId(option.id);
+        setRowErrors((prev) => ({ ...prev, [option.id]: '' }));
+
+        try {
+            const response = await fetch(
+                '/settings/data/catalog-items/rename',
+                {
+                    method: 'POST',
+                    headers: CSRF_HEADERS(),
+                    body: JSON.stringify({
+                        storage_key: storageKey,
+                        item_id: option.id,
+                        name,
+                    }),
+                },
+            );
+
+            if (!response.ok) {
+                setRowErrors((prev) => ({
+                    ...prev,
+                    [option.id]: '',
+                }));
+                const message = await failureMessage(
+                    response,
+                    'แก้ไขไม่สำเร็จ กรุณาลองใหม่',
+                );
+                setRowErrors((prev) => ({ ...prev, [option.id]: message }));
+
+                return;
+            }
+
+            const payload = (await response.json()) as {
+                item: MasterDataOption;
+            };
+
+            onRenamed?.(payload.item);
+        } catch {
+            setRowErrors((prev) => ({
+                ...prev,
+                [option.id]: 'แก้ไขไม่สำเร็จ กรุณาลองใหม่',
+            }));
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    const hide = async (option: MasterDataOption) => {
+        if (busyId !== null) {
+            return;
+        }
+
+        if (
+            !window.confirm(
+                `ซ่อน "${option.name}" ออกจากตัวเลือก${label ? ` ${label}` : ''}?\nบิลเก่าที่ใช้อยู่ยังแสดงชื่อนี้ตามปกติ`,
+            )
+        ) {
+            return;
+        }
+
+        setBusyId(option.id);
+
+        try {
+            const response = await fetch('/settings/data/catalog-items/hide', {
+                method: 'POST',
+                headers: CSRF_HEADERS(),
+                body: JSON.stringify({
+                    storage_key: storageKey,
+                    item_id: option.id,
+                }),
+            });
+
+            if (!response.ok) {
+                const message = await failureMessage(
+                    response,
+                    'ซ่อนไม่สำเร็จ กรุณาลองใหม่',
+                );
+                setRowErrors((prev) => ({ ...prev, [option.id]: message }));
+
+                return;
+            }
+
+            const payload = (await response.json()) as {
+                item: MasterDataOption;
+            };
+
+            onHidden?.(payload.item);
+        } catch {
+            setRowErrors((prev) => ({
+                ...prev,
+                [option.id]: 'ซ่อนไม่สำเร็จ กรุณาลองใหม่',
+            }));
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>จัดการรายการ {label}</DialogTitle>
+                    <DialogDescription>
+                        แก้ชื่อแล้วกดบันทึก หรือซ่อนรายการที่เลิกใช้
+                        บิลเก่าที่ใช้อยู่ยังแสดงชื่อเดิม
+                    </DialogDescription>
+                </DialogHeader>
+                {options.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-slate-500">
+                        ยังไม่มีรายการ
+                    </p>
+                ) : (
+                    <ul className="space-y-2">
+                        {options.map((option) => {
+                            const draft = drafts[option.id] ?? option.name;
+                            const changed = draft.trim() !== option.name;
+                            const busy = busyId === option.id;
+
+                            return (
+                                <li key={option.id} className="space-y-1">
+                                    <div className="flex items-center gap-1.5">
+                                        <Input
+                                            value={draft}
+                                            aria-label={`ชื่อรายการ ${option.name}`}
+                                            className="h-9 text-xs md:text-xs"
+                                            onChange={(event) =>
+                                                setDrafts((prev) => ({
+                                                    ...prev,
+                                                    [option.id]:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    void rename(option);
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            type="button"
+                                            disabled={
+                                                !changed ||
+                                                draft.trim() === '' ||
+                                                busy
+                                            }
+                                            onClick={() => void rename(option)}
+                                            aria-label={`บันทึกชื่อ ${option.name}`}
+                                            title="บันทึกชื่อใหม่"
+                                            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-input bg-background px-2.5 text-xs font-semibold text-slate-700 hover:bg-accent disabled:pointer-events-none disabled:opacity-40"
+                                        >
+                                            {busy ? (
+                                                <Loader2 className="size-3.5 animate-spin" />
+                                            ) : (
+                                                <Check className="size-3.5" />
+                                            )}
+                                            บันทึก
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={busy}
+                                            onClick={() => void hide(option)}
+                                            aria-label={`ซ่อน ${option.name}`}
+                                            title="ซ่อนออกจากตัวเลือก"
+                                            className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:pointer-events-none disabled:opacity-40"
+                                        >
+                                            <Trash2 className="size-4" />
+                                        </button>
+                                    </div>
+                                    {rowErrors[option.id] ? (
+                                        <p className="text-xs text-destructive">
+                                            {rowErrors[option.id]}
+                                        </p>
+                                    ) : null}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }

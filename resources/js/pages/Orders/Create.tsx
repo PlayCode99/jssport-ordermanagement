@@ -12,11 +12,10 @@ import {
     X,
 } from 'lucide-react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DeliveryDatePicker } from '@/components/domain/orders/DeliveryDatePicker';
 import type { DeliveryDateLoad } from '@/components/domain/orders/DeliveryDatePicker';
 import { MasterDataComboBox } from '@/components/domain/orders/MasterDataComboBox';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -39,7 +38,6 @@ import { useWebpCompress } from '@/hooks/useWebpCompress';
 type DeliveryMethod = 'pickup' | 'shipping' | 'onsite';
 type PaymentMethod = 'cash' | 'transfer';
 type PaymentStatus = 'deposit' | 'pending' | 'paid';
-type ArtworkStatus = 'confirmed';
 type SpecTab = 'shirt' | 'pants';
 type SizeTableType = 'kids' | 'adults';
 type SizeFormMode = 'matrix' | 'individual' | 'sports_day' | 'pe_uniform';
@@ -56,6 +54,8 @@ export function usesSizeTables(mode: SizeFormMode): boolean {
 type OptionItem = {
     id: number;
     name: string;
+    /** False for a catalog row hidden from the choices; see MasterDataOption. */
+    active?: boolean;
 };
 
 type CustomerOption = {
@@ -75,19 +75,66 @@ type BranchOption = {
 
 type CatalogMap = Record<string, OptionItem[]>;
 
-// The 9 color fields (6 shirt + 3 pants, sharing storage with their shirt
-// counterparts) that support typing a free-text value or adding it as
-// master data inline, instead of only picking from a fixed dropdown.
-// Keyed by the shirtSelectFields/pantsSelectFields "source" name so the
-// render loop can look up the right catalog to write new master rows into.
-const COLOR_FIELD_STORAGE_KEYS: Partial<Record<keyof CatalogMap, string>> = {
-    fabric_colors: 'jssport.shirt-fabric-colors',
-    neck_colors: 'jssport.shirt-neck-colors',
-    placket_outer_colors: 'jssport.shirt-placket-outer-colors',
-    placket_inner_colors: 'jssport.shirt-placket-inner-colors',
-    screen_colors: 'jssport.shirt-screen-colors',
-    embroidery_colors: 'jssport.shirt-embroidery-colors',
+/**
+ * Which catalog each spec dropdown reads and writes, per garment, keyed by the
+ * field's "source" name. The server owns this table (OrderController) and
+ * sends it with the form so the two sides cannot drift apart.
+ */
+type CatalogKeyMap = Record<string, string>;
+
+/**
+ * What this form has done to a catalog since the page loaded: rows added,
+ * renamed or hidden from the manage dialog. Applied over the options the
+ * server sent so every field backed by the same catalog sees the change at
+ * once, without a reload.
+ */
+type CatalogPatch = {
+    added: OptionItem[];
+    renamed: Record<string, string>;
+    hidden: number[];
 };
+
+const EMPTY_CATALOG_PATCH: CatalogPatch = {
+    added: [],
+    renamed: {},
+    hidden: [],
+};
+
+function applyCatalogPatch(
+    baseOptions: OptionItem[],
+    patch: CatalogPatch | undefined,
+): OptionItem[] {
+    if (!patch) {
+        return baseOptions;
+    }
+
+    const merged = baseOptions.map((option) => {
+        const renamed = patch.renamed[String(option.id)];
+        const hidden = patch.hidden.includes(option.id);
+
+        if (renamed === undefined && !hidden) {
+            return option;
+        }
+
+        return {
+            ...option,
+            name: renamed ?? option.name,
+            active: hidden ? false : option.active,
+        };
+    });
+
+    for (const item of patch.added) {
+        if (!merged.some((existing) => existing.id === item.id)) {
+            merged.push(
+                patch.hidden.includes(item.id)
+                    ? { ...item, active: false }
+                    : item,
+            );
+        }
+    }
+
+    return merged;
+}
 
 type ShirtSpecsForm = {
     shirt_type_id: string;
@@ -158,8 +205,11 @@ type SizeTableForm = {
     rows: SizeRowForm[];
     /** ชุดพละ only: newly picked files, not yet uploaded. */
     artwork_files: File[];
-    /** ชุดพละ only: artwork already saved against this table. */
-    artwork_urls: string[];
+    /**
+     * ชุดพละ only: artwork already saved against this table, with the media id
+     * so an image can be taken off the bill (or left out of a re-opened copy).
+     */
+    saved_artwork: SavedArtwork[];
 };
 
 /** A keeper wears the same shirt as the team in a different colour. */
@@ -217,8 +267,11 @@ type SportsDayGroupForm = {
     rows: SportsDayRowForm[];
     /** Newly picked files, not yet uploaded. */
     artwork_files: File[];
-    /** Artwork already saved on this order, shown so the count is honest. */
-    artwork_urls: string[];
+    /**
+     * Artwork already saved against this house, with the media id so an image
+     * can be taken off the bill (or left out of a re-opened copy) by identity.
+     */
+    saved_artwork: SavedArtwork[];
 };
 
 type OrderLineItemPayload = {
@@ -244,8 +297,6 @@ type OrderCreateFormData = {
     deposit_amount: number;
     payment_method: PaymentMethod;
     payment_status: PaymentStatus;
-    artwork_status: ArtworkStatus;
-    artwork_files: File[];
     shirt_artwork_files: File[];
     pants_artwork_files: File[];
     // Media ids of saved artwork the user removed while editing.
@@ -290,6 +341,8 @@ type EditOrderPayload = {
     artwork_url?: string | null;
     shirt_artwork_urls?: string[] | null;
     sports_day_artwork_urls?: Record<string, string[]> | null;
+    sports_day_artwork_media?: Record<string, SavedArtwork[]> | null;
+    pe_uniform_artwork_media?: Record<string, SavedArtwork[]> | null;
     pe_uniform_artwork_urls?: Record<string, string[]> | null;
     pants_artwork_urls?: string[] | null;
     reference_designs?: string[] | null;
@@ -323,6 +376,8 @@ type OrderCreatePageProps = {
     jobNames?: OptionItem[];
     shirtCatalogs?: CatalogMap;
     pantsCatalogs?: CatalogMap;
+    shirtCatalogKeys?: CatalogKeyMap;
+    pantsCatalogKeys?: CatalogKeyMap;
     shirtTypes?: OptionItem[];
     pantsTypes?: OptionItem[];
     kidsSizes?: string[];
@@ -599,7 +654,7 @@ function createSizeTable(tableType: SizeTableType): SizeTableForm {
             createSizeRow(''),
         ),
         artwork_files: [],
-        artwork_urls: [],
+        saved_artwork: [],
     };
 }
 
@@ -627,7 +682,7 @@ function createSportsDayGroup(teamName = ''): SportsDayGroupForm {
             createSportsDayRow(),
         ),
         artwork_files: [],
-        artwork_urls: [],
+        saved_artwork: [],
     };
 }
 
@@ -912,10 +967,6 @@ export function buildRequestItemsFromIndividual(
     });
 }
 
-function artworkSignature(file: File): string {
-    return `${file.name}::${file.size}::${file.lastModified}`;
-}
-
 function toStringValue(value: string | number | null | undefined): string {
     if (value === null || value === undefined) {
         return '';
@@ -1005,8 +1056,6 @@ export function buildEditInitialFormData(
             deposit_amount: 0,
             payment_method: 'cash',
             payment_status: 'pending',
-            artwork_status: 'confirmed',
-            artwork_files: [],
             shirt_artwork_files: [],
             pants_artwork_files: [],
             removed_media_ids: [],
@@ -1085,12 +1134,12 @@ export function buildEditInitialFormData(
     // Unlike Form 1's size tables — which are rebuilt from order_items — the
     // colour houses cannot be recovered that way: order_items has no colour
     // column. They are persisted in the spec JSON and read straight back.
-    const savedSportsDayArtwork = (order.sports_day_artwork_urls ??
-        {}) as Record<string, string[]>;
+    const savedSportsDayArtwork = (order.sports_day_artwork_media ??
+        {}) as Record<string, SavedArtwork[]>;
     // ชุดพละ artwork is keyed by which size table it belongs to.
-    const savedPeArtwork = (order.pe_uniform_artwork_urls ?? {}) as Record<
+    const savedPeArtwork = (order.pe_uniform_artwork_media ?? {}) as Record<
         string,
-        string[]
+        SavedArtwork[]
     >;
     const savedSportsDayGroups: SportsDayGroupForm[] = (
         Array.isArray(specPayload.sports_day_groups)
@@ -1105,10 +1154,10 @@ export function buildEditInitialFormData(
             team_name: toStringValueFromUnknown(group.team_name),
             fabric_color_id: toStringValueFromUnknown(group.fabric_color_id),
             artwork_files: [],
-            artwork_urls: Array.isArray(
+            saved_artwork: Array.isArray(
                 savedSportsDayArtwork[String(groupIndex)],
             )
-                ? (savedSportsDayArtwork[String(groupIndex)] as string[])
+                ? savedSportsDayArtwork[String(groupIndex)]
                 : [],
             rows: rawRows.map((rawRow, rowIndex) => {
                 const row = (rawRow ?? {}) as Record<string, unknown>;
@@ -1231,7 +1280,7 @@ export function buildEditInitialFormData(
                     tableType === 'kids' ? 'ตารางไซส์เด็ก' : 'ตารางไซส์ผู้ใหญ่',
                 rows: rows.length > 0 ? rows : [],
                 artwork_files: [],
-                artwork_urls: Array.isArray(savedPeArtwork[tableType])
+                saved_artwork: Array.isArray(savedPeArtwork[tableType])
                     ? savedPeArtwork[tableType]
                     : [],
             };
@@ -1299,8 +1348,6 @@ export function buildEditInitialFormData(
         deposit_amount: toNumberValue(order.deposit_amount),
         payment_method: (order.payment_method as PaymentMethod) ?? 'cash',
         payment_status: 'pending',
-        artwork_status: 'confirmed',
-        artwork_files: [],
         shirt_artwork_files: [],
         pants_artwork_files: [],
         removed_media_ids: [],
@@ -1532,93 +1579,6 @@ function SavedArtworkCard({
     );
 }
 
-function UploadGallery({
-    files,
-    previewUrls,
-    savedMedia,
-    primaryArtworkSignature,
-    onRemove,
-    onRemoveSaved,
-}: {
-    files: File[];
-    previewUrls: string[];
-    savedMedia: SavedArtwork[];
-    primaryArtworkSignature: string | null;
-    onRemove: (index: number) => void;
-    onRemoveSaved: (id: number) => void;
-}) {
-    if (
-        files.length === 0 &&
-        savedMedia.length === 0 &&
-        previewUrls.length === 0
-    ) {
-        return null;
-    }
-
-    return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {savedMedia.map((media) => (
-                <SavedArtworkCard
-                    key={`saved-${media.id}`}
-                    media={media}
-                    onRemoveSaved={onRemoveSaved}
-                />
-            ))}
-
-            {files.map((file, index) => {
-                const normalizedPreview = previewUrls[index] ?? '';
-                const displayName = file.name || `Artwork ${index + 1}`;
-                const sizeKb =
-                    file.size > 0
-                        ? Math.round(file.size / 1024).toLocaleString('th-TH')
-                        : 'URL';
-                const isPrimary =
-                    artworkSignature(file) === primaryArtworkSignature;
-
-                return (
-                    <div
-                        key={`${displayName}-${index}`}
-                        className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                    >
-                        <div className="aspect-[16/10] bg-slate-100">
-                            <img
-                                src={normalizedPreview}
-                                alt={displayName}
-                                className="h-full w-full object-contain"
-                            />
-                        </div>
-                        <div className="flex items-center gap-2 p-2.5">
-                            <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-semibold text-slate-800">
-                                    {displayName}
-                                </p>
-                                {isPrimary ? (
-                                    <p className="text-[11px] font-semibold text-emerald-700">
-                                        รูปหลัก
-                                    </p>
-                                ) : null}
-                                <p className="text-[11px] text-slate-500">
-                                    {sizeKb} KB
-                                </p>
-                            </div>
-                            <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                aria-label="ลบรูปที่เลือกไว้"
-                                className="size-8 text-slate-500 hover:text-rose-600"
-                                onClick={() => onRemove(index)}
-                            >
-                                <X className="size-4" />
-                            </Button>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
 function MultiArtworkUpload({
     title,
     inputId,
@@ -1734,6 +1694,8 @@ export default function OrderCreatePage({
     jobNames,
     shirtCatalogs,
     pantsCatalogs,
+    shirtCatalogKeys = {},
+    pantsCatalogKeys = {},
     shirtTypes,
     pantsTypes,
     kidsSizes,
@@ -1744,8 +1706,17 @@ export default function OrderCreatePage({
     order,
 }: OrderCreatePageProps) {
     const { compressImage, isCompressing } = useWebpCompress();
-    const { currentTeam } = usePage<{ currentTeam?: { slug: string } | null }>()
-        .props;
+    const { currentTeam, auth } = usePage<{
+        currentTeam?: { slug: string } | null;
+        auth?: { user?: { access_role?: string; role?: string } | null };
+    }>().props;
+    // Anyone who can open a bill may add master data from it; renaming and
+    // hiding are for the people the settings menu is shown to (the server
+    // enforces the same rule).
+    const canManageMasterData =
+        auth?.user?.access_role === 'OWNER' ||
+        auth?.user?.access_role === 'ADMIN_SYSTEM' ||
+        (auth?.user?.access_role === undefined && auth?.user?.role === 'admin');
 
     const [activeSpecTab, setActiveSpecTab] = useState<SpecTab>('shirt');
     // Price columns start linked to the first row, which is how most bills are
@@ -1835,7 +1806,6 @@ export default function OrderCreatePage({
             };
         });
     };
-    const [isDragOverArtwork, setIsDragOverArtwork] = useState(false);
     // The saved mode decides which form an existing order reopens in. Without
     // this an edit would always land on Form 1 and silently discard whatever
     // the other modes had stored in the spec.
@@ -1844,11 +1814,15 @@ export default function OrderCreatePage({
             order?.specification?.decoded as Record<string, unknown> | undefined
         )?.mode;
 
-        return savedMode === 'individual' || savedMode === 'sports_day'
+        // A saved bill reopens on the form it was written on. ชุดพละ used to
+        // fall through to Form 1 here, which hid its per-table artwork and
+        // would have saved the bill back as a plain size-table order.
+        return savedMode === 'individual' ||
+            savedMode === 'sports_day' ||
+            savedMode === 'pe_uniform'
             ? savedMode
             : 'matrix';
     });
-    const [artworkPreviewUrls, setArtworkPreviewUrls] = useState<string[]>([]);
     const [shirtArtworkPreviewUrls, setShirtArtworkPreviewUrls] = useState<
         string[]
     >([]);
@@ -1861,17 +1835,13 @@ export default function OrderCreatePage({
     const [showCancelConfirmModal, setShowCancelConfirmModal] = useState(false);
     const [validationErrors, setValidationErrors] = useState<string[]>([]);
     const [showFieldErrors, setShowFieldErrors] = useState(false);
-    const artworkUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
-    const [primaryArtworkSignature, setPrimaryArtworkSignature] = useState<
-        string | null
-    >(null);
 
-    // Color values added inline from the order form (via MasterDataComboBox),
-    // keyed by storage_key rather than by field, so a value added from one
-    // field (e.g. pants fabric color) also shows up in every other field
-    // backed by the same shared catalog (e.g. shirt fabric color).
-    const [extraColorOptions, setExtraColorOptions] = useState<
-        Record<string, OptionItem[]>
+    // What this form has done to each catalog since the page loaded, keyed by
+    // storage_key rather than by field, so a change made from one field (e.g.
+    // pants fabric colour) shows in every field backed by the same catalog
+    // (e.g. shirt fabric colour) straight away.
+    const [catalogPatches, setCatalogPatches] = useState<
+        Record<string, CatalogPatch>
     >({});
 
     // Saved artwork still on the order, with anything the user removed in this
@@ -1887,54 +1857,111 @@ export default function OrderCreatePage({
         setData('removed_media_ids', [...data.removed_media_ids, id]);
     };
 
-    const handleColorOptionAdded = (storageKey: string, option: OptionItem) => {
-        setExtraColorOptions((prev) => {
-            const existing = prev[storageKey] ?? [];
-
-            if (existing.some((item) => item.id === option.id)) {
-                return prev;
-            }
-
-            return { ...prev, [storageKey]: [...existing, option] };
-        });
+    const patchCatalog = (
+        storageKey: string,
+        change: (patch: CatalogPatch) => CatalogPatch,
+    ) => {
+        setCatalogPatches((prev) => ({
+            ...prev,
+            [storageKey]: change(prev[storageKey] ?? EMPTY_CATALOG_PATCH),
+        }));
     };
 
-    const withExtraColorOptions = (
-        source: keyof CatalogMap,
+    const handleOptionAdded = (storageKey: string, option: OptionItem) => {
+        patchCatalog(storageKey, (patch) => ({
+            ...patch,
+            added: patch.added.some((item) => item.id === option.id)
+                ? patch.added
+                : [...patch.added, option],
+            // Adding a name that was hidden brings the same row back.
+            hidden: patch.hidden.filter((id) => id !== option.id),
+        }));
+    };
+
+    const handleOptionRenamed = (storageKey: string, option: OptionItem) => {
+        patchCatalog(storageKey, (patch) => ({
+            ...patch,
+            renamed: { ...patch.renamed, [String(option.id)]: option.name },
+        }));
+    };
+
+    /**
+     * A hidden row leaves the choices at once. Any spec field on either tab
+     * still pointing at it is cleared, so the bill cannot be saved with a
+     * value the counter can no longer see or pick.
+     */
+    const handleOptionHidden = (storageKey: string, option: OptionItem) => {
+        patchCatalog(storageKey, (patch) => ({
+            ...patch,
+            hidden: patch.hidden.includes(option.id)
+                ? patch.hidden
+                : [...patch.hidden, option.id],
+        }));
+
+        const hiddenValue = String(option.id);
+        const clearMatching = <T extends Record<string, string>>(
+            specs: T,
+            keys: CatalogKeyMap,
+        ): T => {
+            const next = { ...specs };
+
+            Object.entries(SPEC_FIELD_CATALOG_SOURCE).forEach(
+                ([field, source]) => {
+                    if (
+                        keys[source] === storageKey &&
+                        next[field] === hiddenValue
+                    ) {
+                        (next as Record<string, string>)[field] = '';
+                    }
+                },
+            );
+
+            return next;
+        };
+
+        setData((previous) => ({
+            ...previous,
+            shirt_specs: clearMatching(previous.shirt_specs, shirtCatalogKeys),
+            pants_specs: clearMatching(previous.pants_specs, pantsCatalogKeys),
+        }));
+    };
+
+    /** The options a field shows: what the server sent plus this session's changes. */
+    const catalogOptions = (
+        storageKey: string | undefined,
         baseOptions: OptionItem[],
-    ): OptionItem[] => {
-        const storageKey = COLOR_FIELD_STORAGE_KEYS[source];
-        const extra = storageKey ? (extraColorOptions[storageKey] ?? []) : [];
+    ): OptionItem[] =>
+        storageKey
+            ? applyCatalogPatch(baseOptions, catalogPatches[storageKey])
+            : baseOptions;
 
-        if (extra.length === 0) {
-            return baseOptions;
-        }
-
-        const merged = [...baseOptions];
-
-        for (const item of extra) {
-            if (!merged.some((existing) => existing.id === item.id)) {
-                merged.push(item);
-            }
-        }
-
-        return merged;
-    };
-
-    /** Same catalogs the dropdowns show, including colours added inline just now. */
-    const withAllExtraColorOptions = (catalogs: CatalogMap): CatalogMap => {
+    /** Same catalogs the dropdowns show, for the name snapshot the bill saves. */
+    const withCatalogPatches = (
+        catalogs: CatalogMap,
+        keys: CatalogKeyMap,
+    ): CatalogMap => {
         const merged: CatalogMap = { ...catalogs };
 
         Object.keys(SPEC_FIELD_CATALOG_SOURCE).forEach((field) => {
             const source = SPEC_FIELD_CATALOG_SOURCE[field];
-            merged[source] = withExtraColorOptions(
-                source,
+            merged[source] = catalogOptions(
+                keys[source],
                 catalogs[source] ?? [],
             );
         });
 
         return merged;
     };
+
+    /** The manage-dialog wiring for one catalog, or nothing for add-only use. */
+    const manageFor = (storageKey: string) =>
+        ({
+            canEdit: canManageMasterData,
+            onRenamed: (option: OptionItem) =>
+                handleOptionRenamed(storageKey, option),
+            onHidden: (option: OptionItem) =>
+                handleOptionHidden(storageKey, option),
+        }) as const;
 
     const resolvedBranches = branches ?? [];
     const resolvedJobTypes = jobTypes ?? [];
@@ -2012,24 +2039,6 @@ export default function OrderCreatePage({
     // Previews are the object URLs of files waiting to be uploaded, one per
     // pending file and in the same order. Artwork already saved on the order is
     // rendered from its media list instead, so the two never get mixed up.
-    useEffect(() => {
-        if (data.artwork_files.length === 0) {
-            setArtworkPreviewUrls([]);
-
-            return;
-        }
-
-        const nextUrls = data.artwork_files.map((file) =>
-            URL.createObjectURL(file),
-        );
-
-        setArtworkPreviewUrls(nextUrls);
-
-        return () => {
-            nextUrls.forEach((url) => URL.revokeObjectURL(url));
-        };
-    }, [data.artwork_files, order]);
-
     useEffect(() => {
         if (data.shirt_artwork_files.length === 0) {
             setShirtArtworkPreviewUrls([]);
@@ -2192,7 +2201,8 @@ export default function OrderCreatePage({
     // spec tab is switched away and back, that element remounts before its
     // <option> list does and fires a change with an empty value, which used to
     // wipe the saved choice. A dropdown has no empty option to pick, so an empty
-    // value can only be that echo -- never the user. Free-text fields keep using
+    // value can only be that echo -- never the user. The shirt type is the one
+    // dropdown left on the spec card; the catalog fields are comboboxes and use
     // the plain updaters, where clearing the box is a real edit.
     const selectShirtSpec = <K extends keyof ShirtSpecsForm>(
         key: K,
@@ -2201,61 +2211,6 @@ export default function OrderCreatePage({
         if (value !== '') {
             updateShirtSpecs(key, value as ShirtSpecsForm[K]);
         }
-    };
-
-    const selectPantsSpec = <K extends keyof PantsSpecsForm>(
-        key: K,
-        value: string,
-    ) => {
-        if (value !== '') {
-            updatePantsSpecs(key, value as PantsSpecsForm[K]);
-        }
-    };
-
-    const appendArtworkFiles = (nextFiles: File[]) => {
-        if (nextFiles.length === 0) {
-            return;
-        }
-
-        setData((previous) => ({
-            ...previous,
-            // Keep newly uploaded files in front so the latest upload is the primary artwork.
-            artwork_files: [...nextFiles, ...previous.artwork_files],
-        }));
-        setPrimaryArtworkSignature(artworkSignature(nextFiles[0]));
-    };
-
-    const queueArtworkUpload = (selectedFiles: File[], mode: SizeFormMode) => {
-        if (selectedFiles.length === 0) {
-            return;
-        }
-
-        artworkUploadQueueRef.current = artworkUploadQueueRef.current
-            .catch(() => undefined)
-            .then(async () => {
-                const compressedFiles = await Promise.all(
-                    selectedFiles.map((file) => compressImage(file)),
-                );
-
-                if (mode === 'individual') {
-                    const latestFile =
-                        compressedFiles[compressedFiles.length - 1] ?? null;
-
-                    if (!latestFile) {
-                        return;
-                    }
-
-                    setData((previous) => ({
-                        ...previous,
-                        artwork_files: [latestFile],
-                    }));
-                    setPrimaryArtworkSignature(artworkSignature(latestFile));
-
-                    return;
-                }
-
-                appendArtworkFiles(compressedFiles);
-            });
     };
 
     const updateSizeRow = <K extends keyof SizeRowForm>(
@@ -2667,45 +2622,6 @@ export default function OrderCreatePage({
         );
     };
 
-    const handleArtworkSelect = (event: ChangeEvent<HTMLInputElement>) => {
-        const selectedFiles = Array.from(event.target.files ?? []);
-
-        if (selectedFiles.length === 0) {
-            return;
-        }
-
-        queueArtworkUpload(selectedFiles, sizeFormMode);
-        event.target.value = '';
-    };
-
-    const removeArtworkAt = (index: number) => {
-        setData((previous) => {
-            const updatedArtworkFiles = previous.artwork_files.filter(
-                (_, currentIndex) => currentIndex !== index,
-            );
-
-            if (updatedArtworkFiles.length === 0) {
-                setPrimaryArtworkSignature(null);
-            } else {
-                const stillHasPrimary = updatedArtworkFiles.some(
-                    (file) =>
-                        artworkSignature(file) === primaryArtworkSignature,
-                );
-
-                if (!stillHasPrimary) {
-                    setPrimaryArtworkSignature(
-                        artworkSignature(updatedArtworkFiles[0]),
-                    );
-                }
-            }
-
-            return {
-                ...previous,
-                artwork_files: updatedArtworkFiles,
-            };
-        });
-    };
-
     const handleShirtArtworkSelect = async (
         event: ChangeEvent<HTMLInputElement>,
     ) => {
@@ -3102,11 +3018,11 @@ export default function OrderCreatePage({
             spec_labels: {
                 shirt: snapshotSpecLabels(
                     data.shirt_specs,
-                    withAllExtraColorOptions(resolvedShirtCatalogs),
+                    withCatalogPatches(resolvedShirtCatalogs, shirtCatalogKeys),
                 ),
                 pants: snapshotSpecLabels(
                     data.pants_specs,
-                    withAllExtraColorOptions(resolvedPantsCatalogs),
+                    withCatalogPatches(resolvedPantsCatalogs, pantsCatalogKeys),
                 ),
             },
             sports_day_groups:
@@ -3179,26 +3095,8 @@ export default function OrderCreatePage({
         const routings = resolveRoutingFlowByJobType(selectedJobType);
 
         transform((payload) => ({
-            ...(() => {
-                const primaryIndex = payload.artwork_files.findIndex(
-                    (file) =>
-                        artworkSignature(file) === primaryArtworkSignature,
-                );
-                const resolvedPrimaryIndex =
-                    primaryIndex >= 0 ? primaryIndex : 0;
-                const primaryArtwork =
-                    payload.artwork_files[resolvedPrimaryIndex] ?? null;
-                const referenceDesigns = payload.artwork_files.filter(
-                    (_, index) => index !== resolvedPrimaryIndex,
-                );
-
-                return {
-                    design_artwork: primaryArtwork,
-                    shirt_artwork: payload.shirt_artwork_files,
-                    pants_artwork: payload.pants_artwork_files,
-                    reference_designs: referenceDesigns,
-                };
-            })(),
+            shirt_artwork: payload.shirt_artwork_files,
+            pants_artwork: payload.pants_artwork_files,
             duplicate_from_id: order?.duplicate_from_id ?? null,
             // Saved artwork the user removed. On an edit these media are deleted;
             // on a duplicate they are simply not copied onto the new bill.
@@ -3315,17 +3213,17 @@ export default function OrderCreatePage({
         { label: 'ปก', key: 'collar_id', source: 'collars' },
         { label: 'แบบสาบ', key: 'placket_style_id', source: 'placket_styles' },
         {
-            label: 'สีสาบ (นอก)',
-            key: 'placket_outer_color_id',
-            source: 'placket_outer_colors',
-        },
-        {
             label: 'สีสาบ (ใน)',
             key: 'placket_inner_color_id',
             source: 'placket_inner_colors',
         },
+        {
+            label: 'สีสาบ (นอก)',
+            key: 'placket_outer_color_id',
+            source: 'placket_outer_colors',
+        },
         { label: 'ปลายแขน', key: 'sleeve_cuff_id', source: 'sleeve_cuffs' },
-        { label: 'แบบต่อ', key: 'panel_style_id', source: 'panel_styles' },
+        { label: 'สาบนอก', key: 'panel_style_id', source: 'panel_styles' },
         { label: 'สีสกรีน', key: 'screen_color_id', source: 'screen_colors' },
         {
             label: 'สีงานปัก',
@@ -3366,8 +3264,12 @@ export default function OrderCreatePage({
             ? 'บันทึกการแก้ไข'
             : 'บันทึกใบสั่งผลิต';
     const formErrors = errors as Record<string, string | undefined>;
-    const generalArtworkError =
-        formErrors.design_artwork ?? formErrors['reference_designs.0'];
+    // General artwork already on the bill being edited or duplicated. New bills
+    // never have any; the form stopped taking it.
+    const legacyGeneralArtwork = visibleSavedMedia([
+        ...(order?.artwork_media ?? []),
+        ...(order?.reference_design_media ?? []),
+    ]);
     const shirtArtworkError =
         formErrors.shirt_artwork ?? formErrors['shirt_artwork.0'];
     const pantsArtworkError =
@@ -3529,110 +3431,52 @@ export default function OrderCreatePage({
 
                     <div className="mx-auto mt-4 w-full max-w-[1720px] px-4 md:px-6">
                         <div className="grid gap-4 xl:grid-cols-5">
-                            <div className="space-y-4 xl:col-span-2">
-                                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                                    <h2 className="mb-3 text-sm font-bold text-slate-900">
-                                        Art Work ทั่วไปของออร์เดอร์ และสถานะงาน
-                                    </h2>
-
-                                    <div className="mb-3">
-                                        <UploadGallery
-                                            files={data.artwork_files}
-                                            previewUrls={artworkPreviewUrls}
-                                            savedMedia={visibleSavedMedia([
-                                                ...(order?.artwork_media ?? []),
-                                                ...(order?.reference_design_media ??
-                                                    []),
-                                            ])}
-                                            primaryArtworkSignature={
-                                                primaryArtworkSignature
-                                            }
-                                            onRemove={removeArtworkAt}
-                                            onRemoveSaved={removeSavedMedia}
-                                        />
-                                    </div>
-
-                                    <label
-                                        className={`block rounded-lg border-2 border-dashed p-3 text-center transition-colors ${
-                                            isDragOverArtwork
-                                                ? 'border-blue-400 bg-blue-50'
-                                                : 'border-slate-300 bg-slate-50/60'
-                                        }`}
-                                        onDragOver={(event) => {
-                                            event.preventDefault();
-                                            setIsDragOverArtwork(true);
-                                        }}
-                                        onDragLeave={() =>
-                                            setIsDragOverArtwork(false)
-                                        }
-                                        onDrop={(event) => {
-                                            event.preventDefault();
-                                            setIsDragOverArtwork(false);
-                                            const droppedFiles = Array.from(
-                                                event.dataTransfer.files ?? [],
-                                            );
-
-                                            if (droppedFiles.length === 0) {
-                                                return;
-                                            }
-
-                                            queueArtworkUpload(
-                                                droppedFiles,
-                                                sizeFormMode,
-                                            );
-                                        }}
-                                    >
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            multiple
-                                            className="hidden"
-                                            onChange={(event) => {
-                                                void handleArtworkSelect(event);
-                                            }}
-                                        />
-                                        <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                                            <Upload className="size-3.5" />
-                                            เลือกไฟล์ Art Work ทั่วไป
-                                        </div>
-                                        <p className="mt-1 text-[11px] text-slate-500">
-                                            รองรับหลายรูป
-                                            ลากไฟล์วางหรือคลิกเพื่อเลือกไฟล์
+                            {/* The general-info card and the spec card share one grid
+                                row. The spec card is the taller one, so the left card
+                                grows to meet it: the fields stay at the top, the money
+                                summary holds the bottom edge, and the two columns end on
+                                the same line. Below xl the form is one column and the
+                                card is simply as tall as its content. */}
+                            <div className="flex flex-col gap-4 xl:col-span-2">
+                                {/* General artwork is no longer taken on a bill: artwork
+                                    belongs to a garment, a colour house or a size table.
+                                    A bill that already carries some — there are bills on
+                                    file that do, and a duplicate copies them — still shows
+                                    it here so nothing rides along unseen, and can drop it. */}
+                                {legacyGeneralArtwork.length > 0 ? (
+                                    <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm">
+                                        <h2 className="text-sm font-bold text-slate-900">
+                                            Art Work ทั่วไปที่แนบไว้เดิม
+                                        </h2>
+                                        <p className="mt-1 mb-3 text-[11px] text-slate-600">
+                                            ระบบปิดการแนบ Art Work ทั่วไปแล้ว
+                                            รูปด้านล่างมาจากบิลเดิม
+                                            ยังพิมพ์ออกที่เคาน์เตอร์และห้องผลิต
+                                            กดลบได้ถ้าไม่ต้องการ
                                         </p>
-                                        <p className="mt-1 text-[11px] text-slate-500">
-                                            รูปซ้ายสุด (รูปหลัก)
-                                            จะถูกใช้กับออเดอร์ และใน Form 2
-                                            ระบบจะใช้รูปล่าสุดเพียงรูปเดียว
-                                        </p>
-                                    </label>
-                                    {generalArtworkError ? (
-                                        <p className="mt-2 text-xs text-[#E21E26]">
-                                            {generalArtworkError}
-                                        </p>
-                                    ) : null}
-
-                                    <div className="mt-4 grid gap-1.5 text-xs">
-                                        <span className="font-semibold text-slate-600">
-                                            สถานะแบบ
-                                        </span>
-                                        <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700">
-                                            คอนเฟิร์มแบบ
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            {legacyGeneralArtwork.map(
+                                                (media) => (
+                                                    <SavedArtworkCard
+                                                        key={`legacy-${media.id}`}
+                                                        media={media}
+                                                        onRemoveSaved={
+                                                            removeSavedMedia
+                                                        }
+                                                    />
+                                                ),
+                                            )}
                                         </div>
-                                        <div className="pt-1">
-                                            <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
-                                                คอนเฟิร์มแบบ
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                </section>
+                                    </section>
+                                ) : null}
 
-                                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                                <section className="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                                     <h2 className="mb-3 text-sm font-bold text-slate-900">
                                         ข้อมูลทั่วไป, ลูกค้า, การจัดส่ง
                                         และการเงิน
                                     </h2>
 
-                                    <div className="grid gap-3 md:grid-cols-2">
+                                    <div className="grid gap-5 md:grid-cols-2">
                                         <label className="grid gap-1.5 text-xs">
                                             <span className="font-semibold text-slate-600">
                                                 ประเภทงาน
@@ -3693,8 +3537,74 @@ export default function OrderCreatePage({
                                                                   ],
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('job_name')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('job_name')}`}
                                                 aria-label="ชื่อหน่วยงาน, ชื่องาน"
+                                            />
+                                        </label>
+
+                                        <label className="grid gap-1.5 text-xs">
+                                            <span className="font-semibold text-slate-600">
+                                                ลูกค้า
+                                            </span>
+                                            <Input
+                                                value={data.customer_name}
+                                                onChange={(event) =>
+                                                    setData(
+                                                        'customer_name',
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                placeholder="กรอกชื่อลูกค้า"
+                                                className={`h-9 text-xs md:text-xs${invalidClass('customer_name')}`}
+                                            />
+                                        </label>
+
+                                        <label className="grid gap-1.5 text-xs">
+                                            <span className="font-semibold text-slate-600">
+                                                สาขาที่เปิดบิล
+                                            </span>
+                                            <Input
+                                                value={
+                                                    selectedBranch
+                                                        ? `${selectedBranch.code} - ${selectedBranch.name}`
+                                                        : 'ยังไม่พบข้อมูลสาขาในระบบ'
+                                                }
+                                                readOnly
+                                                className="h-9 bg-slate-50 text-xs md:text-xs"
+                                            />
+                                        </label>
+
+                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                            <span className="font-semibold text-slate-600">
+                                                เบอร์ติดต่อ
+                                            </span>
+                                            <Input
+                                                value={data.customer_phone}
+                                                onChange={(event) =>
+                                                    setData(
+                                                        'customer_phone',
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                placeholder="กรอกเบอร์โทรลูกค้า"
+                                                className="h-9 text-xs md:text-xs"
+                                            />
+                                        </label>
+
+                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                            <span className="font-semibold text-slate-600">
+                                                ข้อมูลการติดต่อ
+                                            </span>
+                                            <Input
+                                                value={data.contact_detail}
+                                                onChange={(event) =>
+                                                    setData(
+                                                        'contact_detail',
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                placeholder="เช่น LINE: @xxx หรือ Facebook: ..."
+                                                className="h-9 text-xs md:text-xs"
                                             />
                                         </label>
 
@@ -3802,174 +3712,119 @@ export default function OrderCreatePage({
                                         </label>
                                     </div>
 
-                                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                                        <label className="grid gap-1.5 text-xs">
-                                            <span className="font-semibold text-slate-600">
-                                                ลูกค้า
-                                            </span>
-                                            <Input
-                                                value={data.customer_name}
-                                                onChange={(event) =>
-                                                    setData(
-                                                        'customer_name',
-                                                        event.target.value,
-                                                    )
-                                                }
-                                                placeholder="กรอกชื่อลูกค้า"
-                                                className={`h-9 text-xs${invalidClass('customer_name')}`}
-                                            />
-                                        </label>
-
-                                        <label className="grid gap-1.5 text-xs">
-                                            <span className="font-semibold text-slate-600">
-                                                สาขาที่เปิดบิล
-                                            </span>
-                                            <Input
-                                                value={
-                                                    selectedBranch
-                                                        ? `${selectedBranch.code} - ${selectedBranch.name}`
-                                                        : 'ยังไม่พบข้อมูลสาขาในระบบ'
-                                                }
-                                                readOnly
-                                                className="h-9 bg-slate-50 text-xs"
-                                            />
-                                        </label>
-
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
-                                            <span className="font-semibold text-slate-600">
-                                                เบอร์ติดต่อ
-                                            </span>
-                                            <Input
-                                                value={data.customer_phone}
-                                                onChange={(event) =>
-                                                    setData(
-                                                        'customer_phone',
-                                                        event.target.value,
-                                                    )
-                                                }
-                                                placeholder="กรอกเบอร์โทรลูกค้า"
-                                                className="h-9 text-xs"
-                                            />
-                                        </label>
-
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
-                                            <span className="font-semibold text-slate-600">
-                                                ข้อมูลการติดต่อ
-                                            </span>
-                                            <Input
-                                                value={data.contact_detail}
-                                                onChange={(event) =>
-                                                    setData(
-                                                        'contact_detail',
-                                                        event.target.value,
-                                                    )
-                                                }
-                                                placeholder="เช่น LINE: @xxx หรือ Facebook: ..."
-                                                className="h-9 text-xs"
-                                            />
-                                        </label>
-                                    </div>
-
-                                    <div className="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
-                                        <h3 className="mb-2 text-xs font-bold text-slate-700">
-                                            สรุปการเงินแบบเรียลไทม์
-                                        </h3>
-                                        <div className="space-y-1.5 text-xs">
-                                            <div className="flex items-center justify-between text-slate-600">
-                                                <span>รวมเป็นเงิน</span>
-                                                <span className="font-semibold text-slate-900">
-                                                    ฿ {formatMoney(grossAmount)}
-                                                </span>
-                                            </div>
-
-                                            <div className="grid grid-cols-[90px_1fr] items-center gap-2">
-                                                <span className="text-slate-600">
-                                                    ส่วนลด
-                                                </span>
-                                                <Select
-                                                    value={
-                                                        data.discount_percent
-                                                    }
-                                                    onValueChange={(value) =>
-                                                        setData(
-                                                            'discount_percent',
-                                                            value,
-                                                        )
-                                                    }
-                                                >
-                                                    <SelectTrigger className="h-8 w-full bg-white text-xs">
-                                                        <SelectValue placeholder="เลือก % ส่วนลด" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {discountPercentOptions.map(
-                                                            (percent) => (
-                                                                <SelectItem
-                                                                    key={
-                                                                        percent
-                                                                    }
-                                                                    value={
-                                                                        percent
-                                                                    }
-                                                                >
-                                                                    {percent}%
-                                                                </SelectItem>
-                                                            ),
-                                                        )}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-
-                                            <div className="flex items-center justify-between text-slate-600">
-                                                <span>มูลค่าส่วนลด</span>
-                                                <span className="font-semibold text-rose-600">
-                                                    - ฿{' '}
-                                                    {formatMoney(
-                                                        discountAmount,
-                                                    )}
-                                                </span>
-                                            </div>
-
-                                            <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-slate-700">
-                                                <span className="font-semibold">
-                                                    ยอดรวมหลังหักส่วนลด
-                                                </span>
-                                                <span className="text-sm font-bold text-slate-900">
-                                                    ฿ {formatMoney(netAmount)}
-                                                </span>
-                                            </div>
-
-                                            <div className="grid grid-cols-[90px_1fr] items-center gap-2">
-                                                <span className="text-slate-600">
-                                                    เงินที่จ่าย
-                                                </span>
-                                                <Input
-                                                    type="number"
-                                                    min={0}
-                                                    value={data.deposit_amount}
-                                                    onChange={(event) =>
-                                                        setData(
-                                                            'deposit_amount',
-                                                            toNumber(
-                                                                event.target
-                                                                    .value,
-                                                            ),
-                                                        )
-                                                    }
-                                                    className="h-8 bg-white text-xs"
-                                                />
-                                            </div>
-
-                                            <div className="grid gap-2 border-t border-slate-200 pt-2">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="font-semibold text-slate-700">
-                                                        ยอดคงเหลือ
-                                                    </span>
-                                                    <span className="text-sm font-bold text-slate-900">
+                                    <div className="mt-auto pt-6">
+                                        <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-5">
+                                            <h3 className="mb-3 text-sm font-bold text-slate-800">
+                                                สรุปการเงินแบบเรียลไทม์
+                                            </h3>
+                                            <div className="space-y-2.5 text-[13px]">
+                                                <div className="flex items-center justify-between text-slate-600">
+                                                    <span>รวมเป็นเงิน</span>
+                                                    <span className="font-semibold text-slate-900">
                                                         ฿{' '}
                                                         {formatMoney(
-                                                            remainingAmount,
+                                                            grossAmount,
                                                         )}
                                                     </span>
+                                                </div>
+
+                                                <div className="grid grid-cols-[90px_1fr] items-center gap-2">
+                                                    <span className="text-slate-600">
+                                                        ส่วนลด
+                                                    </span>
+                                                    <Select
+                                                        value={
+                                                            data.discount_percent
+                                                        }
+                                                        onValueChange={(
+                                                            value,
+                                                        ) =>
+                                                            setData(
+                                                                'discount_percent',
+                                                                value,
+                                                            )
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="h-8 w-full bg-white text-xs">
+                                                            <SelectValue placeholder="เลือก % ส่วนลด" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {discountPercentOptions.map(
+                                                                (percent) => (
+                                                                    <SelectItem
+                                                                        key={
+                                                                            percent
+                                                                        }
+                                                                        value={
+                                                                            percent
+                                                                        }
+                                                                    >
+                                                                        {
+                                                                            percent
+                                                                        }
+                                                                        %
+                                                                    </SelectItem>
+                                                                ),
+                                                            )}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                <div className="flex items-center justify-between text-slate-600">
+                                                    <span>มูลค่าส่วนลด</span>
+                                                    <span className="font-semibold text-rose-600">
+                                                        - ฿{' '}
+                                                        {formatMoney(
+                                                            discountAmount,
+                                                        )}
+                                                    </span>
+                                                </div>
+
+                                                <div className="flex items-center justify-between border-t border-yellow-200 pt-2.5 text-slate-700">
+                                                    <span className="font-semibold">
+                                                        ยอดรวมหลังหักส่วนลด
+                                                    </span>
+                                                    <span className="text-base font-bold text-slate-900">
+                                                        ฿{' '}
+                                                        {formatMoney(netAmount)}
+                                                    </span>
+                                                </div>
+
+                                                <div className="grid grid-cols-[90px_1fr] items-center gap-2">
+                                                    <span className="text-slate-600">
+                                                        เงินที่จ่าย
+                                                    </span>
+                                                    <Input
+                                                        type="number"
+                                                        min={0}
+                                                        value={
+                                                            data.deposit_amount
+                                                        }
+                                                        onChange={(event) =>
+                                                            setData(
+                                                                'deposit_amount',
+                                                                toNumber(
+                                                                    event.target
+                                                                        .value,
+                                                                ),
+                                                            )
+                                                        }
+                                                        className="h-8 bg-white text-xs md:text-xs"
+                                                    />
+                                                </div>
+
+                                                <div className="grid gap-2 border-t border-yellow-200 pt-2.5">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="font-semibold text-slate-700">
+                                                            ยอดคงเหลือ
+                                                        </span>
+                                                        <span className="text-lg font-bold text-[#E21E26]">
+                                                            ฿{' '}
+                                                            {formatMoney(
+                                                                remainingAmount,
+                                                            )}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -4016,8 +3871,8 @@ export default function OrderCreatePage({
                                 </div>
 
                                 {activeSpecTab === 'shirt' ? (
-                                    <div className="grid gap-3 md:grid-cols-2">
-                                        <div className="md:col-span-2">
+                                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                        <div className="md:col-span-2 xl:col-span-3">
                                             <MultiArtworkUpload
                                                 title="Art Work เสื้อ"
                                                 inputId="shirt-artwork-upload"
@@ -4038,7 +3893,7 @@ export default function OrderCreatePage({
                                                 onRemoveSaved={removeSavedMedia}
                                             />
                                         </div>
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                        <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
                                                 แบบเสื้อ
                                             </span>
@@ -4077,17 +3932,14 @@ export default function OrderCreatePage({
                                         </label>
 
                                         {shirtSelectFields.map((field) => {
-                                            const options =
-                                                withExtraColorOptions(
-                                                    field.source,
-                                                    resolvedShirtCatalogs[
-                                                        field.source
-                                                    ] ?? [],
-                                                );
-                                            const colorStorageKey =
-                                                COLOR_FIELD_STORAGE_KEYS[
+                                            const storageKey =
+                                                shirtCatalogKeys[field.source];
+                                            const options = catalogOptions(
+                                                storageKey,
+                                                resolvedShirtCatalogs[
                                                     field.source
-                                                ];
+                                                ] ?? [],
+                                            );
 
                                             return (
                                                 <label
@@ -4097,86 +3949,48 @@ export default function OrderCreatePage({
                                                     <span className="font-semibold text-slate-600">
                                                         {field.label}
                                                     </span>
-                                                    {colorStorageKey ? (
-                                                        <MasterDataComboBox
-                                                            storageKey={
-                                                                colorStorageKey
-                                                            }
-                                                            options={options}
-                                                            value={
-                                                                data
-                                                                    .shirt_specs[
-                                                                    field.key
-                                                                ]
-                                                            }
-                                                            onValueChange={(
+                                                    <MasterDataComboBox
+                                                        storageKey={
+                                                            storageKey ?? ''
+                                                        }
+                                                        label={field.label}
+                                                        options={options}
+                                                        value={
+                                                            data.shirt_specs[
+                                                                field.key
+                                                            ]
+                                                        }
+                                                        onValueChange={(
+                                                            value,
+                                                        ) =>
+                                                            updateShirtSpecs(
+                                                                field.key,
                                                                 value,
-                                                            ) =>
-                                                                selectShirtSpec(
-                                                                    field.key,
-                                                                    value,
-                                                                )
-                                                            }
-                                                            onOptionAdded={(
-                                                                option,
-                                                            ) =>
-                                                                handleColorOptionAdded(
-                                                                    colorStorageKey,
-                                                                    option,
-                                                                )
-                                                            }
-                                                            placeholder={`เลือกหรือพิมพ์${field.label}`}
-                                                            className={invalidClass(
-                                                                `shirt.${field.key}`,
-                                                            )}
-                                                            aria-label={
-                                                                field.label
-                                                            }
-                                                        />
-                                                    ) : (
-                                                        <Select
-                                                            value={
-                                                                data
-                                                                    .shirt_specs[
-                                                                    field.key
-                                                                ]
-                                                            }
-                                                            onValueChange={(
-                                                                value,
-                                                            ) =>
-                                                                updateShirtSpecs(
-                                                                    field.key,
-                                                                    value,
-                                                                )
-                                                            }
-                                                        >
-                                                            <SelectTrigger
-                                                                className={`h-9 w-full bg-white text-xs${invalidClass(`shirt.${field.key}`)}`}
-                                                            >
-                                                                <SelectValue
-                                                                    placeholder={`เลือก${field.label}`}
-                                                                />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {options.map(
-                                                                    (item) => (
-                                                                        <SelectItem
-                                                                            key={
-                                                                                item.id
-                                                                            }
-                                                                            value={String(
-                                                                                item.id,
-                                                                            )}
-                                                                        >
-                                                                            {
-                                                                                item.name
-                                                                            }
-                                                                        </SelectItem>
-                                                                    ),
-                                                                )}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
+                                                            )
+                                                        }
+                                                        onOptionAdded={(
+                                                            option,
+                                                        ) =>
+                                                            storageKey
+                                                                ? handleOptionAdded(
+                                                                      storageKey,
+                                                                      option,
+                                                                  )
+                                                                : undefined
+                                                        }
+                                                        manage={
+                                                            storageKey
+                                                                ? manageFor(
+                                                                      storageKey,
+                                                                  )
+                                                                : undefined
+                                                        }
+                                                        // A field without a catalog on the server has
+                                                        // nowhere to add to, so it stays free text.
+                                                        placeholder={`เลือกหรือพิมพ์${field.label}`}
+                                                        className={`h-9 bg-white text-xs md:text-xs${invalidClass(`shirt.${field.key}`)}`}
+                                                        aria-label={field.label}
+                                                    />
                                                 </label>
                                             );
                                         })}
@@ -4196,7 +4010,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('shirt.sleeve_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('shirt.sleeve_style_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4214,7 +4028,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('shirt.piping_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('shirt.piping_style_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4232,10 +4046,10 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('shirt.stripe_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('shirt.stripe_style_text')}`}
                                             />
                                         </label>
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                        <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
                                                 ข้อความสกรีน
                                             </span>
@@ -4249,7 +4063,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('shirt.screen_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('shirt.screen_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4267,10 +4081,10 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('shirt.embroidery_code_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('shirt.embroidery_code_text')}`}
                                             />
                                         </label>
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                        <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
                                                 รายละเอียดปัก
                                             </span>
@@ -4291,8 +4105,8 @@ export default function OrderCreatePage({
                                         </label>
                                     </div>
                                 ) : (
-                                    <div className="grid gap-3 md:grid-cols-2">
-                                        <div className="md:col-span-2">
+                                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                        <div className="md:col-span-2 xl:col-span-3">
                                             <MultiArtworkUpload
                                                 title="Art Work กางเกง"
                                                 inputId="pants-artwork-upload"
@@ -4322,17 +4136,14 @@ export default function OrderCreatePage({
                                         */}
 
                                         {pantsSelectFields.map((field) => {
-                                            const options =
-                                                withExtraColorOptions(
-                                                    field.source,
-                                                    resolvedPantsCatalogs[
-                                                        field.source
-                                                    ] ?? [],
-                                                );
-                                            const colorStorageKey =
-                                                COLOR_FIELD_STORAGE_KEYS[
+                                            const storageKey =
+                                                pantsCatalogKeys[field.source];
+                                            const options = catalogOptions(
+                                                storageKey,
+                                                resolvedPantsCatalogs[
                                                     field.source
-                                                ];
+                                                ] ?? [],
+                                            );
 
                                             return (
                                                 <label
@@ -4342,86 +4153,48 @@ export default function OrderCreatePage({
                                                     <span className="font-semibold text-slate-600">
                                                         {field.label}
                                                     </span>
-                                                    {colorStorageKey ? (
-                                                        <MasterDataComboBox
-                                                            storageKey={
-                                                                colorStorageKey
-                                                            }
-                                                            options={options}
-                                                            value={
-                                                                data
-                                                                    .pants_specs[
-                                                                    field.key
-                                                                ]
-                                                            }
-                                                            onValueChange={(
+                                                    <MasterDataComboBox
+                                                        storageKey={
+                                                            storageKey ?? ''
+                                                        }
+                                                        label={field.label}
+                                                        options={options}
+                                                        value={
+                                                            data.pants_specs[
+                                                                field.key
+                                                            ]
+                                                        }
+                                                        onValueChange={(
+                                                            value,
+                                                        ) =>
+                                                            updatePantsSpecs(
+                                                                field.key,
                                                                 value,
-                                                            ) =>
-                                                                selectPantsSpec(
-                                                                    field.key,
-                                                                    value,
-                                                                )
-                                                            }
-                                                            onOptionAdded={(
-                                                                option,
-                                                            ) =>
-                                                                handleColorOptionAdded(
-                                                                    colorStorageKey,
-                                                                    option,
-                                                                )
-                                                            }
-                                                            placeholder={`เลือกหรือพิมพ์${field.label}`}
-                                                            className={invalidClass(
-                                                                `pants.${field.key}`,
-                                                            )}
-                                                            aria-label={
-                                                                field.label
-                                                            }
-                                                        />
-                                                    ) : (
-                                                        <Select
-                                                            value={
-                                                                data
-                                                                    .pants_specs[
-                                                                    field.key
-                                                                ]
-                                                            }
-                                                            onValueChange={(
-                                                                value,
-                                                            ) =>
-                                                                updatePantsSpecs(
-                                                                    field.key,
-                                                                    value,
-                                                                )
-                                                            }
-                                                        >
-                                                            <SelectTrigger
-                                                                className={`h-9 w-full bg-white text-xs${invalidClass(`pants.${field.key}`)}`}
-                                                            >
-                                                                <SelectValue
-                                                                    placeholder={`เลือก${field.label}`}
-                                                                />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {options.map(
-                                                                    (item) => (
-                                                                        <SelectItem
-                                                                            key={
-                                                                                item.id
-                                                                            }
-                                                                            value={String(
-                                                                                item.id,
-                                                                            )}
-                                                                        >
-                                                                            {
-                                                                                item.name
-                                                                            }
-                                                                        </SelectItem>
-                                                                    ),
-                                                                )}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
+                                                            )
+                                                        }
+                                                        onOptionAdded={(
+                                                            option,
+                                                        ) =>
+                                                            storageKey
+                                                                ? handleOptionAdded(
+                                                                      storageKey,
+                                                                      option,
+                                                                  )
+                                                                : undefined
+                                                        }
+                                                        manage={
+                                                            storageKey
+                                                                ? manageFor(
+                                                                      storageKey,
+                                                                  )
+                                                                : undefined
+                                                        }
+                                                        // A field without a catalog on the server has
+                                                        // nowhere to add to, so it stays free text.
+                                                        placeholder={`เลือกหรือพิมพ์${field.label}`}
+                                                        className={`h-9 bg-white text-xs md:text-xs${invalidClass(`pants.${field.key}`)}`}
+                                                        aria-label={field.label}
+                                                    />
                                                 </label>
                                             );
                                         })}
@@ -4441,7 +4214,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('pants.seat_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('pants.seat_style_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4459,7 +4232,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('pants.panel_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('pants.panel_style_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4477,10 +4250,10 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('pants.stripe_style_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('pants.stripe_style_text')}`}
                                             />
                                         </label>
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                        <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
                                                 ข้อความสกรีน
                                             </span>
@@ -4494,7 +4267,7 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('pants.screen_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('pants.screen_text')}`}
                                             />
                                         </label>
                                         <label className="grid gap-1.5 text-xs">
@@ -4512,10 +4285,10 @@ export default function OrderCreatePage({
                                                         event.target.value,
                                                     )
                                                 }
-                                                className={`h-9 text-xs${invalidClass('pants.embroidery_code_text')}`}
+                                                className={`h-9 text-xs md:text-xs${invalidClass('pants.embroidery_code_text')}`}
                                             />
                                         </label>
-                                        <label className="grid gap-1.5 text-xs md:col-span-2">
+                                        <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
                                                 รายละเอียดปัก
                                             </span>
@@ -4647,6 +4420,11 @@ export default function OrderCreatePage({
                                                 table.table_type === 'kids'
                                                     ? resolvedKidsSizes
                                                     : resolvedAdultSizes;
+                                            // ชุดพละ: saved images the user has not asked to remove.
+                                            const savedTableArtwork =
+                                                visibleSavedMedia(
+                                                    table.saved_artwork,
+                                                );
                                             const tableTotals =
                                                 table.rows.reduce(
                                                     (acc, row) => ({
@@ -4945,7 +4723,7 @@ export default function OrderCreatePage({
                                                                                                 ),
                                                                                             )
                                                                                         }
-                                                                                        className="h-8 w-full min-w-0 text-xs"
+                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
                                                                                         aria-label={`จำนวนเสื้อชุด แถวที่ ${rowIndex + 1}`}
                                                                                     />
                                                                                 </div>
@@ -5054,7 +4832,7 @@ export default function OrderCreatePage({
                                                                                                 ),
                                                                                             )
                                                                                         }
-                                                                                        className="h-8 w-full min-w-0 text-xs"
+                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
                                                                                         aria-label={`จำนวนกางเกงชุด แถวที่ ${rowIndex + 1}`}
                                                                                     />
                                                                                 </div>
@@ -5083,7 +4861,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-xs"
+                                                                                    className="h-8 text-xs md:text-xs"
                                                                                 />
                                                                             </td>
                                                                             <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
@@ -5126,7 +4904,7 @@ export default function OrderCreatePage({
                                                                                                 ),
                                                                                             )
                                                                                         }
-                                                                                        className="h-8 w-full min-w-0 text-xs"
+                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
                                                                                         aria-label={`จำนวนเสื้อแยก แถวที่ ${rowIndex + 1}`}
                                                                                     />
                                                                                 </div>
@@ -5164,7 +4942,7 @@ export default function OrderCreatePage({
                                                                                                 ),
                                                                                             )
                                                                                         }
-                                                                                        className="h-8 w-full min-w-0 text-xs"
+                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
                                                                                         aria-label={`จำนวนกางเกงแยก แถวที่ ${rowIndex + 1}`}
                                                                                     />
                                                                                 </div>
@@ -5193,7 +4971,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-xs"
+                                                                                    className="h-8 text-xs md:text-xs"
                                                                                 />
                                                                             </td>
                                                                             <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
@@ -5220,7 +4998,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-xs"
+                                                                                    className="h-8 text-xs md:text-xs"
                                                                                 />
                                                                             </td>
                                                                             <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
@@ -5328,38 +5106,46 @@ export default function OrderCreatePage({
                                                                 <span className="text-xs text-slate-500">
                                                                     แนบแล้ว{' '}
                                                                     <span className="font-mono text-sm font-semibold text-slate-900">
-                                                                        {table
-                                                                            .artwork_urls
-                                                                            .length +
+                                                                        {savedTableArtwork.length +
                                                                             table
                                                                                 .artwork_files
                                                                                 .length}
                                                                     </span>{' '}
                                                                     รูป
-                                                                    {table
-                                                                        .artwork_urls
-                                                                        .length >
+                                                                    {savedTableArtwork.length >
                                                                     0
-                                                                        ? ` (บันทึกแล้ว ${table.artwork_urls.length})`
+                                                                        ? ` (บันทึกแล้ว ${savedTableArtwork.length})`
                                                                         : ''}
                                                                 </span>
                                                             </div>
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                {table.artwork_urls.map(
-                                                                    (url) => (
+                                                                {savedTableArtwork.map(
+                                                                    (media) => (
                                                                         <div
                                                                             key={
-                                                                                url
+                                                                                media.id
                                                                             }
-                                                                            className="size-16 overflow-hidden rounded-md border border-slate-300 bg-white"
+                                                                            className="relative size-16 overflow-hidden rounded-md border border-slate-300 bg-white"
                                                                         >
                                                                             <img
                                                                                 src={
-                                                                                    url
+                                                                                    media.url
                                                                                 }
                                                                                 alt={`Art Work ${table.title}`}
                                                                                 className="size-full object-contain"
                                                                             />
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() =>
+                                                                                    removeSavedMedia(
+                                                                                        media.id,
+                                                                                    )
+                                                                                }
+                                                                                aria-label={`ลบรูปที่บันทึกไว้ของ ${table.title}`}
+                                                                                className="absolute top-0 right-0 rounded-bl bg-rose-600 px-1 text-[10px] leading-4 text-white"
+                                                                            >
+                                                                                ลบ
+                                                                            </button>
                                                                         </div>
                                                                     ),
                                                                 )}
@@ -5466,6 +5252,11 @@ export default function OrderCreatePage({
                                                     sportsDayGroupPieces(group);
                                                 const groupTotal =
                                                     sportsDayGroupTotal(group);
+                                                // Saved images the user has not asked to remove.
+                                                const savedGroupArtwork =
+                                                    visibleSavedMedia(
+                                                        group.saved_artwork,
+                                                    );
 
                                                 return (
                                                     <div
@@ -5498,7 +5289,7 @@ export default function OrderCreatePage({
                                                                         )
                                                                     }
                                                                     placeholder="เช่น คณะสีแดง"
-                                                                    className="h-9 bg-white text-xs"
+                                                                    className="h-9 bg-white text-xs md:text-xs"
                                                                     aria-label={`ชื่อคณะสีที่ ${groupIndex + 1}`}
                                                                 />
                                                             </label>
@@ -5506,10 +5297,17 @@ export default function OrderCreatePage({
                                                                 <span className="font-semibold text-slate-600">
                                                                     สีผ้า
                                                                 </span>
+                                                                {/* The same fabric-colour catalog the spec tab
+                                                                    uses, so a colour added here is offered there
+                                                                    and the other way round. */}
                                                                 <MasterDataComboBox
-                                                                    storageKey="jssport.shirt-fabric-colors"
-                                                                    options={withExtraColorOptions(
-                                                                        'fabric_colors',
+                                                                    storageKey={
+                                                                        shirtCatalogKeys.fabric_colors ??
+                                                                        ''
+                                                                    }
+                                                                    label="สีผ้า"
+                                                                    options={catalogOptions(
+                                                                        shirtCatalogKeys.fabric_colors,
                                                                         resolvedShirtCatalogs.fabric_colors ??
                                                                             [],
                                                                     )}
@@ -5530,12 +5328,22 @@ export default function OrderCreatePage({
                                                                     onOptionAdded={(
                                                                         option,
                                                                     ) =>
-                                                                        handleColorOptionAdded(
-                                                                            'jssport.shirt-fabric-colors',
-                                                                            option,
-                                                                        )
+                                                                        shirtCatalogKeys.fabric_colors
+                                                                            ? handleOptionAdded(
+                                                                                  shirtCatalogKeys.fabric_colors,
+                                                                                  option,
+                                                                              )
+                                                                            : undefined
+                                                                    }
+                                                                    manage={
+                                                                        shirtCatalogKeys.fabric_colors
+                                                                            ? manageFor(
+                                                                                  shirtCatalogKeys.fabric_colors,
+                                                                              )
+                                                                            : undefined
                                                                     }
                                                                     placeholder="เลือกหรือพิมพ์สีผ้า"
+                                                                    className="h-9 bg-white text-xs md:text-xs"
                                                                     aria-label={`สีผ้าของคณะที่ ${groupIndex + 1}`}
                                                                 />
                                                             </label>
@@ -5801,7 +5609,7 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className="h-8 bg-white text-center text-xs"
+                                                                                            className="h-8 bg-white text-center text-xs md:text-xs"
                                                                                             aria-label={`จำนวนเสื้อแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
                                                                                         />
                                                                                     </td>
@@ -5836,7 +5644,7 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className={`h-8 text-center text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
+                                                                                            className={`h-8 text-center text-xs md:text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
                                                                                             title={
                                                                                                 shirtPriceLinked
                                                                                                     ? 'ราคาตามแถวแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละแถว'
@@ -5873,7 +5681,7 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className="h-8 bg-white text-center text-xs"
+                                                                                            className="h-8 bg-white text-center text-xs md:text-xs"
                                                                                             aria-label={`จำนวนกางเกงแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
                                                                                         />
                                                                                     </td>
@@ -5908,7 +5716,7 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className={`h-8 text-center text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
+                                                                                            className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
                                                                                             title={
                                                                                                 pantsPriceLinked
                                                                                                     ? 'ราคาตามแถวแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละแถว'
@@ -6001,41 +5809,49 @@ export default function OrderCreatePage({
                                                                     <span className="text-xs text-slate-500">
                                                                         แนบแล้ว{' '}
                                                                         <span className="font-mono text-sm font-semibold text-slate-900">
-                                                                            {group
-                                                                                .artwork_urls
-                                                                                .length +
+                                                                            {savedGroupArtwork.length +
                                                                                 group
                                                                                     .artwork_files
                                                                                     .length}
                                                                         </span>{' '}
                                                                         รูป
-                                                                        {group
-                                                                            .artwork_urls
-                                                                            .length >
+                                                                        {savedGroupArtwork.length >
                                                                         0
-                                                                            ? ` (บันทึกแล้ว ${group.artwork_urls.length})`
+                                                                            ? ` (บันทึกแล้ว ${savedGroupArtwork.length})`
                                                                             : ''}
                                                                     </span>
                                                                 </div>
 
                                                                 <div className="flex flex-wrap gap-2">
-                                                                    {group.artwork_urls.map(
+                                                                    {savedGroupArtwork.map(
                                                                         (
-                                                                            url,
+                                                                            media,
                                                                         ) => (
                                                                             <div
                                                                                 key={
-                                                                                    url
+                                                                                    media.id
                                                                                 }
-                                                                                className="size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50"
+                                                                                className="relative size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50"
                                                                             >
                                                                                 <img
                                                                                     src={
-                                                                                        url
+                                                                                        media.url
                                                                                     }
                                                                                     alt={`Art Work ${group.team_name}`}
                                                                                     className="size-full object-contain"
                                                                                 />
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        removeSavedMedia(
+                                                                                            media.id,
+                                                                                        )
+                                                                                    }
+                                                                                    aria-label={`ลบรูปที่บันทึกไว้ของ ${group.team_name || 'คณะนี้'}`}
+                                                                                    className="absolute top-0 right-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white hover:bg-rose-600"
+                                                                                >
+                                                                                    ✕
+                                                                                </button>
                                                                             </div>
                                                                         ),
                                                                     )}
@@ -6154,7 +5970,7 @@ export default function OrderCreatePage({
                                                             )
                                                         }
                                                         placeholder="เช่น เขียวสะท้อนแสง"
-                                                        className="h-7 w-40 text-xs"
+                                                        className="h-7 w-40 text-xs md:text-xs"
                                                         aria-label="สีเสื้อผู้รักษาประตู"
                                                     />
                                                 </label>
@@ -6416,7 +6232,7 @@ export default function OrderCreatePage({
                                                                                         .value,
                                                                                 )
                                                                             }
-                                                                            className="h-8 text-xs"
+                                                                            className="h-8 text-xs md:text-xs"
                                                                             aria-label={`สกรีนชื่อคนที่ ${rowIndex + 1}`}
                                                                         />
                                                                     </td>
@@ -6595,7 +6411,7 @@ export default function OrderCreatePage({
                                                                                         .value,
                                                                                 )
                                                                             }
-                                                                            className="h-8 text-center text-xs"
+                                                                            className="h-8 text-center text-xs md:text-xs"
                                                                             aria-label={`เบอร์คนที่ ${rowIndex + 1}`}
                                                                         />
                                                                     </td>
@@ -6624,7 +6440,7 @@ export default function OrderCreatePage({
                                                                                     ),
                                                                                 )
                                                                             }
-                                                                            className="h-8 text-center text-xs"
+                                                                            className="h-8 text-center text-xs md:text-xs"
                                                                             aria-label={`จำนวนเสื้อคนที่ ${rowIndex + 1}`}
                                                                         />
                                                                     </td>
@@ -6656,7 +6472,7 @@ export default function OrderCreatePage({
                                                                                     ),
                                                                                 )
                                                                             }
-                                                                            className={`h-8 text-center text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : ''}`}
+                                                                            className={`h-8 text-center text-xs md:text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : ''}`}
                                                                             title={
                                                                                 shirtPriceLinked
                                                                                     ? 'ราคาตามคนแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละคน'
@@ -6796,7 +6612,7 @@ export default function OrderCreatePage({
                                                                                                 .value,
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-center text-xs"
+                                                                                    className="h-8 text-center text-xs md:text-xs"
                                                                                     aria-label={`เบอร์กางเกงคนที่ ${rowIndex + 1}`}
                                                                                 />
                                                                             </td>
@@ -6825,7 +6641,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-center text-xs"
+                                                                                    className="h-8 text-center text-xs md:text-xs"
                                                                                     aria-label={`จำนวนกางเกงคนที่ ${rowIndex + 1}`}
                                                                                 />
                                                                             </td>
@@ -6857,7 +6673,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className={`h-8 text-center text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : ''}`}
+                                                                                    className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : ''}`}
                                                                                     title={
                                                                                         pantsPriceLinked
                                                                                             ? 'ราคาตามคนแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละคน'

@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -30,6 +31,16 @@ class PeUniformArtworkTest extends TestCase
         parent::setUp();
 
         Storage::fake('public');
+        // The bills below are dated 2026-09-09, and a bill may not be opened
+        // on a past date, so the clock is pinned to keep them valid.
+        Carbon::setTestNow(Carbon::parse('2026-09-09 08:00:00'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     private function actor(): User

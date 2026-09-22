@@ -12,7 +12,7 @@ import {
     Stamp,
     Truck,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
 import {
@@ -25,20 +25,10 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import {
-    getActivePantsMenuLinks,
-    pantsMenuUpdatedEventName,
-} from '@/lib/pants-menu-store';
-import type { PantsMenuLink } from '@/lib/pants-menu-store';
-import {
     canAccessMenu,
     resolveLogoHref,
     USER_MENUS,
 } from '@/lib/permissionHelpers';
-import {
-    getActiveShirtMenuLinks,
-    shirtMenuUpdatedEventName,
-} from '@/lib/shirt-style-menu-store';
-import type { ShirtMenuLink } from '@/lib/shirt-style-menu-store';
 import type { NavItem } from '@/types';
 import { USER_ACCESS_ROLES } from '@/types/user-management';
 import type { UserAccessRole } from '@/types/user-management';
@@ -113,31 +103,6 @@ export function AppSidebar() {
     }, [authUser?.access_role, authUser?.role, authUser?.station_department]);
     const shirtTypeMenus = (page.props.garmentSidebarShirtTypes ??
         []) as Array<{ id: number; code: string; name: string }>;
-    const [dynamicShirtMenus, setDynamicShirtMenus] = useState<ShirtMenuLink[]>(
-        [],
-    );
-    const [dynamicPantsMenus, setDynamicPantsMenus] = useState<PantsMenuLink[]>(
-        [],
-    );
-
-    useEffect(() => {
-        const syncMenus = () => {
-            setDynamicShirtMenus(getActiveShirtMenuLinks());
-            setDynamicPantsMenus(getActivePantsMenuLinks());
-        };
-
-        syncMenus();
-        window.addEventListener('storage', syncMenus);
-        window.addEventListener(shirtMenuUpdatedEventName(), syncMenus);
-        window.addEventListener(pantsMenuUpdatedEventName(), syncMenus);
-
-        return () => {
-            window.removeEventListener('storage', syncMenus);
-            window.removeEventListener(shirtMenuUpdatedEventName(), syncMenus);
-            window.removeEventListener(pantsMenuUpdatedEventName(), syncMenus);
-        };
-    }, []);
-
     const mainUrl = page.props.currentTeam
         ? `/${page.props.currentTeam.slug}/counter`
         : '/counter';
@@ -150,24 +115,6 @@ export function AppSidebar() {
         landingPath: (page.props as { landingPath?: string | null })
             .landingPath,
     });
-
-    const dynamicShirtChildren = useMemo<NavItem[]>(
-        () =>
-            dynamicShirtMenus.map((item) => ({
-                title: item.title,
-                href: item.href,
-            })),
-        [dynamicShirtMenus],
-    );
-
-    const dynamicPantsChildren = useMemo<NavItem[]>(
-        () =>
-            dynamicPantsMenus.map((item) => ({
-                title: item.title,
-                href: item.href,
-            })),
-        [dynamicPantsMenus],
-    );
 
     const shirtTypeChildren = useMemo<NavItem[]>(
         () =>
@@ -306,17 +253,6 @@ export function AppSidebar() {
                     href: '/settings/data/garments/types',
                 },
                 {
-                    title: 'แบบเสื้อ',
-                    href: '/settings/data/shirts',
-                    children: [
-                        {
-                            title: 'แบบเสื้อ',
-                            href: '/settings/data/shirts',
-                        },
-                        ...dynamicShirtChildren,
-                    ],
-                },
-                {
                     title: 'ประเภทเสื้อ',
                     href: '/settings/data/garments/prices?category=SHIRT',
                     children:
@@ -328,17 +264,6 @@ export function AppSidebar() {
                                       href: '/settings/data/garments/prices?category=SHIRT',
                                   },
                               ],
-                },
-                {
-                    title: 'แบบกางเกง',
-                    href: '/settings/data/pants',
-                    children: [
-                        {
-                            title: 'แบบกางเกง',
-                            href: '/settings/data/pants',
-                        },
-                        ...dynamicPantsChildren,
-                    ],
                 },
                 {
                     title: 'ไซซ์เด็ก',

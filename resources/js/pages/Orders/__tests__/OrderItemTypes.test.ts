@@ -25,7 +25,7 @@ describe('order item garment types', () => {
         fabric_color_id: '1',
         rows,
         artwork_files: [] as File[],
-        artwork_urls: [] as string[],
+        saved_artwork: [] as { id: number; url: string }[],
     });
 
     it('marks a shirt-only line as a shirt so no pants cost is charged', () => {

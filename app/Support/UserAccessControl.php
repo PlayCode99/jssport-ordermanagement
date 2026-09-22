@@ -50,6 +50,18 @@ final class UserAccessControl
         return $user->is_active && in_array($role, [AccessRole::Owner, AccessRole::AdminSystem], true);
     }
 
+    /**
+     * Who may rename or hide a master-data entry from the order form. Anyone
+     * who can open a bill may add one; changing or retiring what is already
+     * there is kept to the same people who run the settings pages.
+     */
+    public static function canManageMasterData(User $user): bool
+    {
+        $role = self::resolveAccessRole($user);
+
+        return $user->is_active && in_array($role, [AccessRole::Owner, AccessRole::AdminSystem], true);
+    }
+
     public static function canAssignRole(User $actor, AccessRole $targetRole): bool
     {
         $actorRole = self::resolveAccessRole($actor);

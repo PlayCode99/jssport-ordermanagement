@@ -301,6 +301,93 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('ขาตรง');
     });
 
+    /**
+     * The spec prints two settings to a row. The two placket colours are read
+     * as one setting, so they must share a row whatever comes before them —
+     * on screen they sit one under the other, and the paper must not split
+     * them across a row end.
+     */
+    describe('the placket colours on the printed spec', () => {
+        const spec = (labels: string[]) =>
+            labels.map((label, index) => ({ label, value: `ค่า${index}` }));
+
+        /** Each printed spec row as its labels, left cell then right cell. */
+        const printedSpecRows = (html: string): string[][] =>
+            [...html.matchAll(/<tr class="spec-row">([\s\S]*?)<\/tr>/g)].map(
+                (match) =>
+                    [
+                        ...match[1].matchAll(
+                            /<td class="spec-label">(.*?)<\/td>/g,
+                        ),
+                    ].map((cell) => cell[1]),
+            );
+
+        const shirtRowsFor = (labels: string[]) =>
+            printedSpecRows(
+                printedHtml(
+                    makeRow({
+                        details: {
+                            ...makeRow().details,
+                            spec_sections: { shirt: spec(labels), pants: [] },
+                        },
+                    }),
+                ),
+            );
+
+        it('keeps them side by side when they already start a row', () => {
+            const rows = shirtRowsFor([
+                'แพทเทิร์น',
+                'เนื้อผ้า',
+                'สีสาบ (ใน)',
+                'สีสาบ (นอก)',
+                'ปลายแขน',
+            ]);
+
+            expect(rows).toEqual([
+                ['แพทเทิร์น', 'เนื้อผ้า'],
+                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
+                ['ปลายแขน', ''],
+            ]);
+        });
+
+        it('moves the next single setting up so the pair can take a whole row', () => {
+            const rows = shirtRowsFor([
+                'แพทเทิร์น',
+                'เนื้อผ้า',
+                'แบบสาบ',
+                'สีสาบ (ใน)',
+                'สีสาบ (นอก)',
+                'ปลายแขน',
+                'สาบนอก',
+            ]);
+
+            expect(rows).toEqual([
+                ['แพทเทิร์น', 'เนื้อผ้า'],
+                ['แบบสาบ', 'ปลายแขน'],
+                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
+                ['สาบนอก', ''],
+            ]);
+        });
+
+        it('leaves the slot blank rather than split the pair when nothing can move up', () => {
+            const rows = shirtRowsFor(['แบบสาบ', 'สีสาบ (ใน)', 'สีสาบ (นอก)']);
+
+            expect(rows).toEqual([
+                ['แบบสาบ', ''],
+                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
+            ]);
+        });
+
+        it('changes nothing when only one of the two colours was saved', () => {
+            const rows = shirtRowsFor(['แบบสาบ', 'สีสาบ (ใน)', 'ปลายแขน']);
+
+            expect(rows).toEqual([
+                ['แบบสาบ', 'สีสาบ (ใน)'],
+                ['ปลายแขน', ''],
+            ]);
+        });
+    });
+
     it('escapes customer text instead of letting it break the markup', () => {
         const html = printedHtml(
             makeRow({
@@ -942,29 +1029,87 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('สมชาย');
     });
 
-    it('states both lengths above the work sheet person list', () => {
+    /**
+     * The work receipt prints a Form 2 bill the way it prints Form 1: its line
+     * items are one shirt or pair of pants per person, and the size tables add
+     * them up per size and length. Names belong to the roster sheet.
+     */
+    it('prints a form 2 bill through the same size tables as form 1', () => {
         const html = printedHtml(
-            lengthRow(
-                { shirt_style: 'short', pants_style: 'long' },
-                { shirt_style: 'short', pants_style: 'long' },
-            ),
+            makeRow({
+                details: {
+                    personalization_rows: [
+                        {
+                            role: 'player' as const,
+                            name: 'สมชาย',
+                            size_group: 'adults' as const,
+                            size: 'M',
+                            number: '3',
+                            shirt_style: 'short',
+                            quantity: 1,
+                            unit_price: 250,
+                            total_price: 250,
+                        },
+                        {
+                            role: 'player' as const,
+                            name: 'อนุชา',
+                            size_group: 'adults' as const,
+                            size: 'M',
+                            number: '18',
+                            shirt_style: 'long',
+                            quantity: 1,
+                            unit_price: 280,
+                            total_price: 280,
+                        },
+                    ],
+                    items: [
+                        {
+                            item_type: 'shirt',
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_style: 'short',
+                            quantity: 1,
+                            unit_price: 250,
+                            total_price: 250,
+                        },
+                        {
+                            item_type: 'shirt',
+                            size_group: 'adults',
+                            size_label: 'M',
+                            shirt_style: 'long',
+                            quantity: 1,
+                            unit_price: 280,
+                            total_price: 280,
+                        },
+                        {
+                            item_type: 'pants',
+                            size_group: 'adults',
+                            size_label: 'L',
+                            pants_style: 'short',
+                            quantity: 2,
+                            unit_price: 180,
+                            total_price: 360,
+                        },
+                    ],
+                },
+            }),
         );
+        const body = html.slice(html.indexOf('<body>'));
 
-        expect(html).toContain('รายละเอียดรายตัว (Form 2)');
-        expect(html).toContain('แขนสั้น 2 คน');
-        expect(html).toContain('ขายาว 2 คน');
-        expect(html).not.toContain('<th>แขน</th>');
-    });
+        // The Form 1 adult table, with a column per length the bill uses.
+        expect(body).toContain('ขนาดผู้ใหญ่  มัธยมต้น/มัธยมปลาย');
+        expect(body).toContain('เสื้อแขนสั้น');
+        expect(body).toContain('เสื้อแขนยาว');
+        expect(body).toContain('กางเกงขาสั้น');
 
-    it('gives the work sheet a sleeve column when the bill is mixed', () => {
-        const html = printedHtml(
-            lengthRow({ shirt_style: 'short' }, { shirt_style: 'long' }),
-        );
-
-        expect(html).toContain('<th>แขน</th>');
-        expect(html).toContain('len-cell');
-        // The total row spans the wider head, or the money slides a column left.
-        expect(html).toContain('colspan="4" style="text-align: right');
+        // The person list is gone from the receipt...
+        expect(body).not.toContain('รายละเอียดรายตัว (Form 2)');
+        expect(body).not.toContain('ชื่อสกรีน');
+        expect(body).not.toContain('สมชาย');
+        expect(body).not.toContain('อนุชา');
+        // ...and so are the notes and columns that only it needed.
+        expect(body).not.toContain('title-note');
+        expect(body).not.toContain('len-cell');
     });
 
     it('marks the keepers and states the colour their shirt is', () => {

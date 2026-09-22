@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProductionBoardPage } from '@/components/domain/production/ProductionBoardPage';
@@ -16,6 +17,19 @@ const mockPage = vi.hoisted(() => ({
 
 vi.mock('@inertiajs/react', () => ({
     Head: () => null,
+    Link: ({
+        href,
+        className,
+        children,
+    }: {
+        href: string;
+        className?: string;
+        children: ReactNode;
+    }) => (
+        <a href={href} className={className}>
+            {children}
+        </a>
+    ),
     router: {
         get: mockRouterGet,
         reload: mockRouterReload,

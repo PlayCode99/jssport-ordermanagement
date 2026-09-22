@@ -127,10 +127,10 @@ class CatalogItemQuickAddTest extends TestCase
         $user = $this->actingSalesUser();
 
         // A real, pre-existing catalog key that this endpoint must never be
-        // allowed to write to (it belongs to the full sync endpoint / other
-        // parts of the app, not the order-form quick-add flow).
+        // allowed to write to: the size lists are edited on their settings
+        // page through the full sync endpoint, never from the order form.
         $response = $this->actingAs($user)->postJson('/settings/data/catalog-items/quick-add', [
-            'storage_key' => 'jssport.pants-patterns',
+            'storage_key' => 'jssport.size-kids',
             'name' => 'พยายามแทรกข้อมูล',
         ]);
 
@@ -138,7 +138,7 @@ class CatalogItemQuickAddTest extends TestCase
         $response->assertJsonValidationErrors(['storage_key']);
 
         $this->assertDatabaseMissing('catalog_items', [
-            'storage_key' => 'jssport.pants-patterns',
+            'storage_key' => 'jssport.size-kids',
             'name' => 'พยายามแทรกข้อมูล',
         ]);
     }

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockPage, routerMocks } = vi.hoisted(() => ({
@@ -13,6 +14,19 @@ const { mockPage, routerMocks } = vi.hoisted(() => ({
 
 vi.mock('@inertiajs/react', () => ({
     Head: () => null,
+    Link: ({
+        href,
+        className,
+        children,
+    }: {
+        href: string;
+        className?: string;
+        children: ReactNode;
+    }) => (
+        <a href={href} className={className}>
+            {children}
+        </a>
+    ),
     router: routerMocks,
     usePage: () => mockPage,
 }));

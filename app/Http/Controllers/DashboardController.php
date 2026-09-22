@@ -82,9 +82,11 @@ class DashboardController extends Controller
             'jssport.pants-leg-hem',
         ];
 
+        // Hidden rows stay in here on purpose: this only turns an id into a
+        // name for display, and a bill that used an entry before it was hidden
+        // still has to read as that name, not as a number.
         $grouped = CatalogItem::query()
             ->whereIn('storage_key', $keys)
-            ->where('active', true)
             ->get(['storage_key', 'item_id', 'name'])
             ->groupBy('storage_key');
 
@@ -181,7 +183,7 @@ class DashboardController extends Controller
      * @param  array<int, array{key: string, label: string, type: string, storage_keys?: array<int, string>}>  $definitions
      * @return array<int, array{label: string, value: string}>
      */
-    private function buildSpecificationRows(array $values, array $definitions): array
+    private function buildSpecificationRows(array $values, array $definitions, array $savedLabels = []): array
     {
         $rows = [];
 
@@ -190,7 +192,15 @@ class DashboardController extends Controller
 
             $value = '';
             if ($definition['type'] === 'catalog') {
-                $value = $this->mapCatalogValue($definition['storage_keys'] ?? [], $raw);
+                // The name the bill was saved with wins, exactly as on the
+                // production sheet: a rename or a hidden entry later must not
+                // change what this bill says. The catalog only stands in for
+                // bills recorded before those names were being kept.
+                $saved = $savedLabels[$definition['key']] ?? null;
+
+                $value = is_string($saved) && trim($saved) !== ''
+                    ? trim($saved)
+                    : $this->mapCatalogValue($definition['storage_keys'] ?? [], $raw);
             } else {
                 $value = trim((string) $raw);
             }
@@ -218,6 +228,9 @@ class DashboardController extends Controller
 
         $shirtSpecs = is_array($payload['shirt_specs'] ?? null) ? $payload['shirt_specs'] : [];
         $pantsSpecs = is_array($payload['pants_specs'] ?? null) ? $payload['pants_specs'] : [];
+        $savedLabels = is_array($payload['spec_labels'] ?? null) ? $payload['spec_labels'] : [];
+        $shirtLabels = is_array($savedLabels['shirt'] ?? null) ? $savedLabels['shirt'] : [];
+        $pantsLabels = is_array($savedLabels['pants'] ?? null) ? $savedLabels['pants'] : [];
 
         $shirtRows = $this->buildSpecificationRows($shirtSpecs, [
             ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-patterns']],
@@ -227,10 +240,10 @@ class DashboardController extends Controller
             ['key' => 'neck_color_id', 'label' => 'สีแบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-neck-colors', 'jssport.shirt-colors']],
             ['key' => 'collar_id', 'label' => 'ปก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
             ['key' => 'placket_style_id', 'label' => 'แบบสาบ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-plackets']],
-            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'placket_inner_color_id', 'label' => 'สีสาบ (ใน)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-inner-colors', 'jssport.shirt-colors']],
+            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'sleeve_cuff_id', 'label' => 'ปลายแขน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-cuffs']],
-            ['key' => 'panel_style_id', 'label' => 'แบบต่อ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-panels']],
+            ['key' => 'panel_style_id', 'label' => 'สาบนอก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-panels']],
             ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
             ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
             ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
@@ -240,7 +253,7 @@ class DashboardController extends Controller
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
             ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ]);
+        ], $shirtLabels);
 
         $pantsRows = $this->buildSpecificationRows($pantsSpecs, [
             ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-patterns']],
@@ -257,7 +270,7 @@ class DashboardController extends Controller
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
             ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ]);
+        ], $pantsLabels);
 
         return [
             'shirt' => $shirtRows,

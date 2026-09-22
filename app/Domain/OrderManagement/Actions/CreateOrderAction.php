@@ -9,6 +9,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\PaymentType;
 use App\Enums\RoutingStationName;
 use App\Enums\RoutingStatus;
+use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Receipt;
@@ -39,7 +40,7 @@ class CreateOrderAction
                     'delivery_method' => isset($data['delivery_method']) ? (string) $data['delivery_method'] : null,
                 ]);
 
-                $orderCode = $this->generateOrderCode();
+                $orderCode = $this->generateOrderCode((int) $data['branch_id']);
 
                 $subTotalAmount = 0.0;
                 $orderItemsPayload = [];
@@ -425,13 +426,45 @@ class CreateOrderAction
         return (int) $customer->id;
     }
 
-    private function generateOrderCode(): string
+    /**
+     * Bills are numbered per branch and per year: {branch code}-{year}-{running
+     * number}, e.g. 01-2026-00001, so a branch can count its own bills straight
+     * off the numbers. The running number continues from the highest one already
+     * issued under that prefix — deleted bills included, so a number is never
+     * handed out twice — and the rows it is read from are locked for the rest of
+     * the transaction, so two counters opening a bill in the same instant take
+     * consecutive numbers instead of the same one. Bills opened before this
+     * scheme keep their ORD-YYYY-NNNNN codes; they never match a branch prefix.
+     */
+    private function generateOrderCode(int $branchId): string
     {
-        $year = now()->format('Y');
-        $sequence = Order::withTrashed()->count() + 1;
+        $branchCode = trim((string) Branch::query()->whereKey($branchId)->value('branch_code'));
+
+        if ($branchCode === '') {
+            throw new RuntimeException("Branch [{$branchId}] has no branch code to number an order with.");
+        }
+
+        // The year the bill is opened in, on the shop's clock — the same instant
+        // order_date is stamped with, so the code and the date never disagree
+        // around midnight on New Year's Eve.
+        $prefix = $branchCode.'-'.now('Asia/Bangkok')->format('Y').'-';
+        $issuedPattern = '/^'.preg_quote($prefix, '/').'(\d+)$/';
+
+        $lastIssued = Order::withTrashed()
+            ->where('branch_id', $branchId)
+            ->where('order_code', 'like', $prefix.'%')
+            ->lockForUpdate()
+            ->pluck('order_code')
+            ->reduce(function (int $highest, string $orderCode) use ($issuedPattern): int {
+                return preg_match($issuedPattern, $orderCode, $matches) === 1
+                    ? max($highest, (int) $matches[1])
+                    : $highest;
+            }, 0);
+
+        $sequence = $lastIssued + 1;
 
         do {
-            $orderCode = 'ORD-'.$year.'-'.str_pad((string) $sequence, 5, '0', STR_PAD_LEFT);
+            $orderCode = $prefix.str_pad((string) $sequence, 5, '0', STR_PAD_LEFT);
             $sequence++;
         } while (Order::withTrashed()->where('order_code', $orderCode)->exists());
 

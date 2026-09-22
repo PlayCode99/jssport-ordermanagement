@@ -195,12 +195,15 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
         showPantsTab();
         showShirtTab();
 
-        const texts = screen
-            .getAllByRole('combobox')
-            .map((node) => node.textContent?.trim());
-
-        expect(texts).toContain('แพทเทิร์นมาตรฐาน');
-        expect(texts).toContain('ผ้าไมโคร');
+        // The catalog fields are comboboxes now: the saved id is shown as the
+        // catalog name in the text box, and must still be there after the
+        // round trip.
+        expect(screen.getByLabelText<HTMLInputElement>('แพทเทิร์น').value).toBe(
+            'แพทเทิร์นมาตรฐาน',
+        );
+        expect(screen.getByLabelText<HTMLInputElement>('เนื้อผ้า').value).toBe(
+            'ผ้าไมโคร',
+        );
     });
 });
 

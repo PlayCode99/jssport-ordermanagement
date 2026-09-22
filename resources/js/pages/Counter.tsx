@@ -786,6 +786,59 @@ const ADULT_SIZE_ORDER = [
 ];
 const KID_SIZE_ORDER = ['JSS', 'JS', 'JM', 'JL', 'JXL'];
 
+type SpecPrintRow = { label: string; value: string };
+
+/**
+ * Settings that read as one and must share a printed row. The receipt lays
+ * the spec out two settings to a row, so without this the inner placket
+ * colour could end one row and the outer start the next.
+ */
+const PAIRED_SPEC_LABELS: ReadonlyArray<readonly [string, string]> = [
+    ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
+];
+
+const isPairedSpecLabel = (label: string): boolean =>
+    PAIRED_SPEC_LABELS.some((pair) => pair.includes(label));
+
+/**
+ * The receipt's spec settings as printed cells, two to a row, with every
+ * pair kept on one row. A pair that would start in the right-hand column
+ * takes the next single setting up into that slot instead and begins the
+ * following row; when there is no single setting left to move, the slot
+ * stays blank. Nothing else changes place.
+ */
+function layoutSpecPrintCells(
+    rows: SpecPrintRow[],
+): Array<SpecPrintRow | null> {
+    const cells: Array<SpecPrintRow | null> = [];
+    const queue = [...rows];
+
+    while (queue.length > 0) {
+        const row = queue.shift() as SpecPrintRow;
+        const partner = PAIRED_SPEC_LABELS.find(
+            ([first]) => first === row.label,
+        )?.[1];
+        const startsPair = partner !== undefined && queue[0]?.label === partner;
+
+        if (startsPair && cells.length % 2 === 1) {
+            const fillerIndex = queue.findIndex(
+                (candidate, index) =>
+                    index > 0 && !isPairedSpecLabel(candidate.label),
+            );
+
+            cells.push(
+                fillerIndex === -1
+                    ? null
+                    : (queue.splice(fillerIndex, 1)[0] as SpecPrintRow),
+            );
+        }
+
+        cells.push(row);
+    }
+
+    return cells;
+}
+
 export type SportsDayGroupPayload = {
     team_name: string;
     color_name: string;
@@ -3013,8 +3066,6 @@ export default function Counter({
         const pantsRows =
             order.spec_sections?.pants ??
             specificationRows.filter((row) => pantsLabels.has(row.label));
-        const sourcePersonalizationRows = order.personalization_rows ?? [];
-        const isIndividualPrint = sourcePersonalizationRows.length > 0;
         const billingDate = order.billing_date ?? '';
         const dueDate = order.due_date ?? '';
         const printImages = Array.from(
@@ -3039,21 +3090,20 @@ export default function Counter({
                 return '<tr><td colspan="4" class="empty-state">—</td></tr>';
             }
 
-            return Array.from(
-                { length: Math.ceil(rows.length / 2) },
-                (_, index) => {
-                    const first = rows[index * 2];
-                    const second = rows[index * 2 + 1];
+            const cells = layoutSpecPrintCells(rows);
+            const cell = (entry: SpecPrintRow | null | undefined) =>
+                entry
+                    ? `<td class="spec-label">${escapeHtml(entry.label)}</td><td class="spec-value">${escapeHtml(entry.value || '-')}</td>`
+                    : '<td class="spec-label"></td><td class="spec-value"></td>';
 
-                    return `
+            return Array.from(
+                { length: Math.ceil(cells.length / 2) },
+                (_, index) => `
                     <tr class="spec-row">
-                        <td class="spec-label">${escapeHtml(first.label)}</td>
-                        <td class="spec-value">${escapeHtml(first.value || '-')}</td>
-                        <td class="spec-label">${second ? escapeHtml(second.label) : ''}</td>
-                        <td class="spec-value">${second ? escapeHtml(second.value || '-') : ''}</td>
+                        ${cell(cells[index * 2])}
+                        ${cell(cells[index * 2 + 1])}
                     </tr>
-                `;
-                },
+                `,
             ).join('');
         };
 
@@ -3070,29 +3120,10 @@ export default function Counter({
                 </div>
             `;
         };
-        const personalizationPrintRows = sourcePersonalizationRows.map(
-            (row) => ({
-                name: row.name || '-',
-                number: row.number || '-',
-                size_label: row.size || '-',
-                shirt_style: row.shirt_style,
-                quantity: row.quantity,
-                unit_price: row.unit_price,
-                total_price: row.total_price,
-            }),
-        );
-        const printSleeves = summarizePersonLengths(
-            sourcePersonalizationRows.map((row) => row.shirt_style),
-            SHIRT_STYLE_PERSON_LABELS,
-        );
-        const printLegs = summarizePersonLengths(
-            sourcePersonalizationRows.map((row) => row.pants_style),
-            PANTS_STYLE_PERSON_LABELS,
-        );
-        // This table lists shirts, so only the sleeve earns a column of its own,
-        // and only when the bill is mixed. Both lengths are stated above it.
-        const showPrintSleeveColumn = isIndividualPrint && printSleeves.mixed;
-        const individualColumnCount = showPrintSleeveColumn ? 7 : 6;
+        // A Form 2 bill prints its sizes the same way as every other form:
+        // its line items are one shirt or pair of pants per person, which the
+        // size tables below add up per size and length. The name list is its
+        // own sheet (ปริ้นใบรายชื่อ) and stays off the receipt.
         const sizeRows = order.items?.length ? order.items : [];
         const printWindow = window.open('', '_blank', 'width=1200,height=900');
 
@@ -3100,38 +3131,20 @@ export default function Counter({
             return;
         }
 
-        const sizeRowsMarkup = isIndividualPrint
-            ? personalizationPrintRows.length > 0
-                ? personalizationPrintRows
+        const sizeRowsMarkup =
+            sizeRows.length > 0
+                ? sizeRows
                       .map(
                           (row) => `
-                <tr>
-                    <td>${escapeHtml(row.name)}</td>
-                    <td>${escapeHtml(row.number)}</td>
-                    <td>${escapeHtml(row.size_label)}</td>
-                    ${showPrintSleeveColumn ? `<td class="len-cell${row.shirt_style === 'long' ? ' is-long' : ''}">${escapeHtml(printSleeves.labelOf(row.shirt_style))}</td>` : ''}
-                    <td>${row.quantity}</td>
-                    <td>฿ ${formatMoney(Number(row.unit_price || 0))}</td>
-                    <td>฿ ${formatMoney(Number(row.total_price || 0))}</td>
-                </tr>`,
-                      )
-                      .join('')
-                : `<tr><td colspan="${individualColumnCount}" class="empty-state">ไม่มีข้อมูลรายตัว</td></tr>`
-            : sizeRows.length > 0
-              ? isIndividualPrint
-                  ? ''
-                  : sizeRows
-                        .map(
-                            (row) => `
                 <tr>
                     <td>${escapeHtml(row.size_label || '-')}</td>
                     <td>${row.quantity}</td>
                     <td>฿ ${formatMoney(Number(row.unit_price || 0))}</td>
                     <td>฿ ${formatMoney(Number(row.total_price || 0))}</td>
                 </tr>`,
-                        )
-                        .join('')
-              : `<tr><td colspan="${isIndividualPrint ? individualColumnCount : 4}" class="empty-state">ไม่มีข้อมูลไซซ์</td></tr>`;
+                      )
+                      .join('')
+                : '<tr><td colspan="4" class="empty-state">ไม่มีข้อมูลไซซ์</td></tr>';
 
         /**
          * One table per size group, laid out like the order form: the set block
@@ -3396,37 +3409,20 @@ export default function Counter({
                       .join('');
 
         const specTablesMarkup = `<div class="spec-sections${pantsRows.length > 0 ? ' has-two' : ''}">${renderSpecSection('สเปกเสื้อ', shirtRows)}${pantsRows.length > 0 ? renderSpecSection('สเปกกางเกง', pantsRows) : ''}</div>`;
-        const totalQuantity = (
-            isIndividualPrint ? personalizationPrintRows : sizeRows
-        ).reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-        const totalAmount = (
-            isIndividualPrint ? personalizationPrintRows : sizeRows
-        ).reduce((sum, row) => sum + Number(row.total_price || 0), 0);
-        const sizeTableTitle = isIndividualPrint
-            ? 'รายละเอียดรายตัว (Form 2)'
-            : 'ขนาดผู้ใหญ่ มัธยมต้น/มัธยมปลาย';
-        // Said once above the table, so a whole team in one length costs no
-        // column and a mixed bill still shows its split at a glance.
-        const individualLengthNote = [printSleeves.caption, printLegs.caption]
-            .filter((caption) => caption !== '')
-            .join('  |  ');
+        const totalQuantity = sizeRows.reduce(
+            (sum, row) => sum + Number(row.quantity || 0),
+            0,
+        );
+        const totalAmount = sizeRows.reduce(
+            (sum, row) => sum + Number(row.total_price || 0),
+            0,
+        );
+        const sizeTableTitle = 'ขนาดผู้ใหญ่ มัธยมต้น/มัธยมปลาย';
         const branchHeaderColor = resolveBranchHeaderColor(
             order.branch_name,
             DEFAULT_BRANCH_HEADER_COLOR,
         );
-        const sizeTableHeadMarkup = isIndividualPrint
-            ? `
-                                <tr>
-                                    <th>ชื่อสกรีน</th>
-                                    <th>เบอร์</th>
-                                    <th>ไซซ์</th>
-                                    ${showPrintSleeveColumn ? '<th>แขน</th>' : ''}
-                                    <th>จำนวน</th>
-                                    <th>ราคา</th>
-                                    <th>รวม</th>
-                                </tr>
-            `
-            : `
+        const sizeTableHeadMarkup = `
                                 <tr>
                                     <th>ไซซ์</th>
                                     <th>จำนวน</th>
@@ -3434,16 +3430,7 @@ export default function Counter({
                                     <th>รวม</th>
                                 </tr>
             `;
-        const sizeTableTotalRowMarkup = isIndividualPrint
-            ? `
-                                <tr>
-                                    <td colspan="${showPrintSleeveColumn ? 4 : 3}" style="text-align: right; font-weight: 700;">ยอดรวม</td>
-                                    <td style="font-weight: 700; color: #174395;">${totalQuantity.toLocaleString('th-TH')} ตัว</td>
-                                    <td style="font-weight: 700;">-</td>
-                                    <td style="font-weight: 700; color: #E21E26;">฿ ${formatMoney(totalAmount)}</td>
-                                </tr>
-            `
-            : `
+        const sizeTableTotalRowMarkup = `
                                 <tr>
                                     <td style="text-align: right; font-weight: 700;">ยอดรวม</td>
                                     <td style="font-weight: 700; color: #174395;">${totalQuantity.toLocaleString('th-TH')} ตัว</td>
@@ -3544,8 +3531,6 @@ export default function Counter({
                         .spec-label { width: 18%; background: #e0f2fe; font-weight: 700; white-space: nowrap; }
                         .spec-value { width: 32%; background: #ffffff; }
                         .table-title { background: #174395; color: #ffffff; font-weight: 700; text-align: center; padding: 3px; font-size: 12px; margin-top: 0; }
-                        .title-note { margin-left: 8px; font-size: 10px; font-weight: 600; opacity: 0.9; }
-                        .len-cell.is-long { font-weight: 700; color: #3730a3; }
                         /* Two columns at all times, not only under @media print.
                            The fitter measures this window to decide how much room
                            the artwork can have, so a rule that only applies on the
@@ -3671,20 +3656,8 @@ export default function Counter({
                         ${specTablesMarkup}
 
                         ${
-                            isIndividualPrint
-                                ? `
-                        <div class="table-title">${sizeTableTitle}${individualLengthNote !== '' ? `<span class="title-note">${escapeHtml(individualLengthNote)}</span>` : ''}</div>
-                        <table class="size-table">
-                            <thead>
-                                ${sizeTableHeadMarkup}
-                            </thead>
-                            <tbody>
-                                ${sizeRowsMarkup}
-                                ${sizeTableTotalRowMarkup}
-                            </tbody>
-                        </table>`
-                                : sizeGroupTablesMarkup ||
-                                  `
+                            sizeGroupTablesMarkup ||
+                            `
                         <div class="table-title">${sizeTableTitle}</div>
                         <table class="size-table">
                             <thead>

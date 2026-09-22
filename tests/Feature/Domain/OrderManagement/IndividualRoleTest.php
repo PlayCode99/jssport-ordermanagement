@@ -10,6 +10,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
@@ -20,6 +21,25 @@ use Tests\TestCase;
 class IndividualRoleTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * The bills below are dated 2026-09-09, and a bill may not be opened on a
+     * past date. The clock is pinned so the suite does not start failing the
+     * day after that date goes by.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::parse('2026-09-09 08:00:00'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     private function actor(): User
     {

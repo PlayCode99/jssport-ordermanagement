@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CatalogItem;
+use App\Support\UserAccessControl;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,13 +16,19 @@ use Inertia\Response;
 class ShirtCatalogController extends Controller
 {
     /**
+     * Rows come back in the catalog's own order — the position the shop put
+     * each entry in — so a screen that lets the shop reorder (the size lists)
+     * shows the list the way the order form will. Screens that sort by date
+     * themselves are unaffected.
+     *
      * @return array<int, array{id: int, createdAt: string, name: string, createdBy: string, active: bool}>
      */
     private function loadCatalogRows(string $storageKey): array
     {
         return CatalogItem::query()
             ->where('storage_key', $storageKey)
-            ->orderByDesc('created_at')
+            ->orderBy('sort_order')
+            ->orderBy('item_id')
             ->get()
             ->map(fn (CatalogItem $item): array => [
                 'id' => (int) $item->item_id,
@@ -35,141 +42,53 @@ class ShirtCatalogController extends Controller
     }
 
     /**
-     * @var array<string, array{title: string, routePath: string, storageKey: string}>
+     * Catalogs the shop puts in an order of its own on the settings page. The
+     * order form lists these exactly as arranged there.
      */
-    private const CATALOGS = [
-        'patterns' => [
-            'title' => 'แพทเทิร์น',
-            'routePath' => '/settings/data/shirts/patterns',
-            'storageKey' => 'jssport.shirt-patterns',
-        ],
-        'fabrics' => [
-            'title' => 'เนื้อผ้า',
-            'routePath' => '/settings/data/shirts/fabrics',
-            'storageKey' => 'jssport.shirt-fabrics',
-        ],
-        'colors' => [
-            'title' => 'สีเสื้อ',
-            'routePath' => '/settings/data/shirts/colors',
-            'storageKey' => 'jssport.shirt-colors',
-        ],
-        'collars' => [
-            'title' => 'ปก',
-            'routePath' => '/settings/data/shirts/collars',
-            'storageKey' => 'jssport.shirt-collars',
-        ],
-        'plackets' => [
-            'title' => 'แบบสาป',
-            'routePath' => '/settings/data/shirts/plackets',
-            'storageKey' => 'jssport.shirt-plackets',
-        ],
-        'sleeves' => [
-            'title' => 'แบบแขน',
-            'routePath' => '/settings/data/shirts/sleeves',
-            'storageKey' => 'jssport.shirt-sleeves',
-        ],
-        'cuffs' => [
-            'title' => 'ปลายแขน',
-            'routePath' => '/settings/data/shirts/cuffs',
-            'storageKey' => 'jssport.shirt-cuffs',
-        ],
-        'panels' => [
-            'title' => 'แบบต่อ',
-            'routePath' => '/settings/data/shirts/panels',
-            'storageKey' => 'jssport.shirt-panels',
-        ],
-        'sublimation' => [
-            'title' => 'ซับลิเมชั่น',
-            'routePath' => '/settings/data/shirts/sublimation',
-            'storageKey' => 'jssport.shirt-sublimation',
-        ],
+    public const SORTABLE_STORAGE_KEYS = [
+        self::SIZE_KIDS_STORAGE_KEY,
+        self::SIZE_ADULTS_STORAGE_KEY,
     ];
 
-    /**
-     * @var array<string, array{title: string, storageKey: string}>
-     */
-    private const PANTS_CATALOGS = [
-        'patterns' => [
-            'title' => 'แพทเทิร์น',
-            'storageKey' => 'jssport.pants-patterns',
-        ],
-        'leg-style' => [
-            'title' => 'แบบขา',
-            'storageKey' => 'jssport.pants-leg-style',
-        ],
-        'leg-hem' => [
-            'title' => 'ปลายขา',
-            'storageKey' => 'jssport.pants-leg-hem',
-        ],
-    ];
+    public const SIZE_KIDS_STORAGE_KEY = 'jssport.size-kids';
+
+    public const SIZE_ADULTS_STORAGE_KEY = 'jssport.size-adults';
 
     /**
-     * The only storage_keys the quick-add-from-order-form endpoint is
-     * allowed to write to. This is a deliberate whitelist rather than
-     * accepting any storage_key the client sends — otherwise a caller
-     * could use this endpoint to inject rows into unrelated catalogs
-     * (branches, job types, pricing, etc).
-     *
-     * @var array<int, string>
+     * The catalogs behind the sewing-spec fields on the order form. The form
+     * is the one place these are managed from: anyone opening a bill can add
+     * to them, and an owner or system admin can rename or hide an entry.
      */
-    private const QUICK_ADD_ALLOWED_STORAGE_KEYS = [
+    public const SPEC_CATALOG_STORAGE_KEYS = [
+        'jssport.shirt-patterns',
+        'jssport.shirt-fabrics',
         'jssport.shirt-fabric-colors',
+        'jssport.shirt-collars',
         'jssport.shirt-neck-colors',
+        'jssport.shirt-plackets',
         'jssport.shirt-placket-outer-colors',
         'jssport.shirt-placket-inner-colors',
+        'jssport.shirt-cuffs',
+        'jssport.shirt-panels',
         'jssport.shirt-screen-colors',
         'jssport.shirt-embroidery-colors',
-        self::JOB_NAMES_STORAGE_KEY,
+        'jssport.shirt-sublimation',
+        'jssport.pants-patterns',
+        'jssport.pants-leg-style',
+        'jssport.pants-leg-hem',
     ];
 
-    public function patterns(Request $request): Response
-    {
-        return $this->renderCatalog($request, 'patterns');
-    }
-
-    public function index(Request $request): Response
-    {
-        return Inertia::render('settings/data/shirts/index');
-    }
-
-    public function pantsIndex(Request $request): Response
-    {
-        return Inertia::render('settings/data/pants/index');
-    }
-
-    public function show(Request $request, string $catalog): Response
-    {
-        return $this->renderCatalog($request, $catalog);
-    }
-
-    public function showPantsCatalog(Request $request, string $catalog): Response
-    {
-        $known = self::PANTS_CATALOGS[$catalog] ?? null;
-
-        $resolvedTitle = trim((string) $request->query('title'));
-        if ($resolvedTitle === '') {
-            $resolvedTitle = $known['title'] ?? $catalog;
-        }
-
-        $resolvedStorageKey = $known['storageKey'] ?? "jssport.pants-catalog-{$catalog}";
-
-        return $this->renderSharedCatalog(
-            title: $resolvedTitle,
-            routePath: "/settings/data/pants/catalog/{$catalog}",
-            storageKey: $resolvedStorageKey,
-            dataLabel: 'Pants Data',
-            parentTitle: 'แบบกางเกง',
-            parentPath: '/settings/data/pants',
-            pagePrefix: 'แบบกางเกง'
-        );
-    }
+    private const QUICK_ADD_ALLOWED_STORAGE_KEYS = [
+        ...self::SPEC_CATALOG_STORAGE_KEYS,
+        self::JOB_NAMES_STORAGE_KEY,
+    ];
 
     public function sizeKids(Request $request): Response
     {
         return $this->renderSharedCatalog(
             title: 'ไซซ์เด็ก',
             routePath: '/settings/data/size-kids',
-            storageKey: 'jssport.size-kids',
+            storageKey: self::SIZE_KIDS_STORAGE_KEY,
             dataLabel: 'Size Data',
             parentTitle: 'ไซซ์เด็ก',
             parentPath: '/settings/data/size-kids',
@@ -182,7 +101,7 @@ class ShirtCatalogController extends Controller
         return $this->renderSharedCatalog(
             title: 'ไซซ์ผู้ใหญ่',
             routePath: '/settings/data/size-adults',
-            storageKey: 'jssport.size-adults',
+            storageKey: self::SIZE_ADULTS_STORAGE_KEY,
             dataLabel: 'Size Data',
             parentTitle: 'ไซซ์ผู้ใหญ่',
             parentPath: '/settings/data/size-adults',
@@ -254,7 +173,10 @@ class ShirtCatalogController extends Controller
                 ->whereNotIn('item_id', $incomingIds)
                 ->delete();
 
-            foreach ($rows as $row) {
+            // The list arrives in the order the screen shows it, and that
+            // order is what the row's place in the catalog is: moving a size
+            // up on the settings page is what moves it on the order form.
+            foreach (array_values($rows) as $position => $row) {
                 $timestamp = Carbon::parse((string) $row['createdAt']);
 
                 CatalogItem::query()->updateOrCreate(
@@ -264,6 +186,7 @@ class ShirtCatalogController extends Controller
                     ],
                     [
                         'name' => trim((string) $row['name']),
+                        'sort_order' => $position + 1,
                         'created_by' => trim((string) ($row['createdBy'] ?? '')),
                         'active' => (bool) $row['active'],
                         'created_at' => $timestamp,
@@ -329,15 +252,17 @@ class ShirtCatalogController extends Controller
 
             try {
                 $item = DB::transaction(function () use ($storageKey, $name, $request): CatalogItem {
-                    $nextItemId = (int) (CatalogItem::query()
+                    $existingRows = CatalogItem::query()
                         ->where('storage_key', $storageKey)
-                        ->lockForUpdate()
-                        ->max('item_id') ?? 0) + 1;
+                        ->lockForUpdate();
+                    $nextItemId = (int) ($existingRows->clone()->max('item_id') ?? 0) + 1;
+                    $lastPosition = (int) ($existingRows->clone()->max('sort_order') ?? 0);
 
                     return CatalogItem::query()->create([
                         'storage_key' => $storageKey,
                         'item_id' => $nextItemId,
                         'name' => $name,
+                        'sort_order' => $lastPosition + 1,
                         'created_by' => $request->user()?->name,
                         'active' => true,
                     ]);
@@ -359,26 +284,99 @@ class ShirtCatalogController extends Controller
         ]);
     }
 
-    private function renderCatalog(Request $request, string $catalog): Response
+    /**
+     * Rename a spec master-data entry from the order form.
+     *
+     * Bills that already use the entry keep the name they were saved with (the
+     * form snapshots it into spec_labels), so a rename only changes what new
+     * bills see.
+     */
+    public function renameCatalogItem(Request $request): JsonResponse
     {
-        $known = self::CATALOGS[$catalog] ?? null;
+        $this->authorizeMasterDataManagement($request);
 
-        $resolvedTitle = trim((string) $request->query('title'));
-        if ($resolvedTitle === '') {
-            $resolvedTitle = $known['title'] ?? $catalog;
+        $validated = $request->validate([
+            'storage_key' => ['required', 'string', Rule::in(self::SPEC_CATALOG_STORAGE_KEYS)],
+            'item_id' => ['required', 'integer', 'min:1'],
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $storageKey = (string) $validated['storage_key'];
+        $itemId = (int) $validated['item_id'];
+        $name = trim((string) $validated['name']);
+
+        if ($name === '') {
+            return response()->json(['message' => 'กรุณาระบุชื่อ'], 422);
         }
 
-        $resolvedStorageKey = $known['storageKey'] ?? "jssport.shirt-catalog-{$catalog}";
+        $item = CatalogItem::query()
+            ->where('storage_key', $storageKey)
+            ->where('item_id', $itemId)
+            ->first();
 
-        return $this->renderSharedCatalog(
-            title: $resolvedTitle,
-            routePath: "/settings/data/shirts/catalog/{$catalog}",
-            storageKey: $resolvedStorageKey,
-            dataLabel: 'Shirt Data',
-            parentTitle: 'แบบเสื้อ',
-            parentPath: '/settings/data/shirts',
-            pagePrefix: 'แบบเสื้อ'
-        );
+        if (! $item instanceof CatalogItem) {
+            return response()->json(['message' => 'ไม่พบรายการนี้'], 404);
+        }
+
+        $clash = CatalogItem::query()
+            ->where('storage_key', $storageKey)
+            ->where('item_id', '!=', $itemId)
+            ->where('active', true)
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)])
+            ->exists();
+
+        if ($clash) {
+            return response()->json(['message' => 'มีชื่อนี้อยู่แล้ว'], 422);
+        }
+
+        $item->name = $name;
+        $item->save();
+
+        return response()->json([
+            'item' => ['id' => (int) $item->item_id, 'name' => $item->name, 'active' => (bool) $item->active],
+        ]);
+    }
+
+    /**
+     * Take a spec master-data entry out of the form's choices.
+     *
+     * The row is kept and only marked inactive: bills that used it still
+     * resolve its name on the counter and the floor, and adding the same name
+     * again later simply brings it back.
+     */
+    public function hideCatalogItem(Request $request): JsonResponse
+    {
+        $this->authorizeMasterDataManagement($request);
+
+        $validated = $request->validate([
+            'storage_key' => ['required', 'string', Rule::in(self::SPEC_CATALOG_STORAGE_KEYS)],
+            'item_id' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $item = CatalogItem::query()
+            ->where('storage_key', (string) $validated['storage_key'])
+            ->where('item_id', (int) $validated['item_id'])
+            ->first();
+
+        if (! $item instanceof CatalogItem) {
+            return response()->json(['message' => 'ไม่พบรายการนี้'], 404);
+        }
+
+        if ($item->active) {
+            $item->active = false;
+            $item->save();
+        }
+
+        return response()->json([
+            'item' => ['id' => (int) $item->item_id, 'name' => $item->name, 'active' => false],
+        ]);
+    }
+
+    private function authorizeMasterDataManagement(Request $request): void
+    {
+        $user = $request->user();
+
+        abort_unless($user !== null && UserAccessControl::canManageMasterData($user), 403);
     }
 
     private function renderSharedCatalog(
@@ -399,6 +397,7 @@ class ShirtCatalogController extends Controller
                 'parentTitle' => $parentTitle,
                 'parentPath' => $parentPath,
                 'pagePrefix' => $pagePrefix,
+                'sortable' => in_array($storageKey, self::SORTABLE_STORAGE_KEYS, true),
             ],
             'rows' => $this->loadCatalogRows($storageKey),
         ]);

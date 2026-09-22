@@ -13,6 +13,7 @@ class CatalogItem extends Model
         'storage_key',
         'item_id',
         'name',
+        'sort_order',
         'created_by',
         'active',
     ];
@@ -21,6 +22,7 @@ class CatalogItem extends Model
     {
         return [
             'item_id' => 'integer',
+            'sort_order' => 'integer',
             'active' => 'boolean',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',

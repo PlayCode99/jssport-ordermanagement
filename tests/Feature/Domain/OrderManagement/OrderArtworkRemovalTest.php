@@ -190,4 +190,141 @@ class OrderArtworkRemovalTest extends TestCase
         $this->assertCount(1, $copy->getMedia('shirt_artwork'));
         $this->assertCount(2, $source->refresh()->getMedia('shirt_artwork'));
     }
+
+    /**
+     * A กีฬาสี bill keeps its artwork per colour house. The form gets each
+     * house's images with their media ids, and asks for one to go the same
+     * way it does for any other artwork — on an edit and on a re-opened copy.
+     */
+    private function sportsDayOrderWithHouseArtwork(User $creator): Order
+    {
+        return (new CreateOrderAction)->execute($this->orderData([
+            'sports_day_artwork' => [
+                0 => [$this->image('red-1.jpg'), $this->image('red-2.jpg')],
+                1 => [$this->image('blue-1.jpg')],
+            ],
+        ]), $creator->id);
+    }
+
+    public function test_the_form_gets_each_houses_artwork_with_its_media_id(): void
+    {
+        $order = $this->sportsDayOrderWithHouseArtwork($this->creator());
+
+        $byHouse = $order->sportsDayArtworkMedia();
+
+        $this->assertSame([0, 1], array_keys($byHouse));
+        $this->assertCount(2, $byHouse['0']);
+        $this->assertCount(1, $byHouse['1']);
+
+        // Same images, same order, as the URL list the sheets print from.
+        $this->assertSame(
+            $order->sports_day_artwork_urls['0'],
+            array_column($byHouse['0'], 'url'),
+        );
+        $this->assertSame(
+            $order->getMedia('sports_day_artwork')->pluck('id')->map(fn ($id): int => (int) $id)->all(),
+            array_merge(array_column($byHouse['0'], 'id'), array_column($byHouse['1'], 'id')),
+        );
+    }
+
+    public function test_editing_removes_one_houses_image_and_leaves_the_rest(): void
+    {
+        $creator = $this->creator();
+        $order = $this->sportsDayOrderWithHouseArtwork($creator);
+        $removedId = $order->sportsDayArtworkMedia()['0'][0]['id'];
+
+        (new UpdateOrderAction)->execute($order, $this->orderData([
+            'removed_media_ids' => [$removedId],
+        ]), $creator->id);
+
+        $left = $order->refresh()->sportsDayArtworkMedia();
+
+        $this->assertCount(1, $left['0']);
+        $this->assertNotSame($removedId, $left['0'][0]['id']);
+        $this->assertCount(1, $left['1']);
+    }
+
+    public function test_a_re_opened_copy_leaves_out_the_house_image_the_user_dropped(): void
+    {
+        $creator = $this->creator();
+        $source = $this->sportsDayOrderWithHouseArtwork($creator);
+        $droppedId = $source->sportsDayArtworkMedia()['0'][1]['id'];
+
+        $copy = (new CreateOrderAction)->execute($this->orderData([
+            'duplicate_from_id' => $source->id,
+            'removed_media_ids' => [$droppedId],
+        ]), $creator->id);
+
+        $copied = $copy->sportsDayArtworkMedia();
+
+        // The copy keeps the houses apart and drops only the one image...
+        $this->assertCount(1, $copied['0']);
+        $this->assertCount(1, $copied['1']);
+        // ...while the source bill keeps everything it had.
+        $this->assertCount(2, $source->refresh()->sportsDayArtworkMedia()['0']);
+    }
+
+    /**
+     * A ชุดพละ bill keeps its artwork per size table, and the same identity
+     * route applies: each table's images reach the form with their media ids.
+     */
+    private function peUniformOrderWithTableArtwork(User $creator): Order
+    {
+        return (new CreateOrderAction)->execute($this->orderData([
+            'pe_uniform_artwork' => [
+                'kids' => [$this->image('kids-1.jpg'), $this->image('kids-2.jpg')],
+                'adults' => [$this->image('adults-1.jpg')],
+            ],
+        ]), $creator->id);
+    }
+
+    public function test_the_form_gets_each_size_tables_artwork_with_its_media_id(): void
+    {
+        $order = $this->peUniformOrderWithTableArtwork($this->creator());
+
+        $byTable = $order->peUniformArtworkMedia();
+
+        $this->assertSame(['kids', 'adults'], array_keys($byTable));
+        $this->assertCount(2, $byTable['kids']);
+        $this->assertCount(1, $byTable['adults']);
+        $this->assertSame(
+            $order->pe_uniform_artwork_urls['kids'],
+            array_column($byTable['kids'], 'url'),
+        );
+    }
+
+    public function test_editing_removes_one_tables_image_and_leaves_the_rest(): void
+    {
+        $creator = $this->creator();
+        $order = $this->peUniformOrderWithTableArtwork($creator);
+        $removedId = $order->peUniformArtworkMedia()['kids'][0]['id'];
+
+        (new UpdateOrderAction)->execute($order, $this->orderData([
+            'removed_media_ids' => [$removedId],
+        ]), $creator->id);
+
+        $left = $order->refresh()->peUniformArtworkMedia();
+
+        $this->assertCount(1, $left['kids']);
+        $this->assertNotSame($removedId, $left['kids'][0]['id']);
+        $this->assertCount(1, $left['adults']);
+    }
+
+    public function test_a_re_opened_copy_leaves_out_the_table_image_the_user_dropped(): void
+    {
+        $creator = $this->creator();
+        $source = $this->peUniformOrderWithTableArtwork($creator);
+        $droppedId = $source->peUniformArtworkMedia()['adults'][0]['id'];
+
+        $copy = (new CreateOrderAction)->execute($this->orderData([
+            'duplicate_from_id' => $source->id,
+            'removed_media_ids' => [$droppedId],
+        ]), $creator->id);
+
+        $copied = $copy->peUniformArtworkMedia();
+
+        $this->assertCount(2, $copied['kids']);
+        $this->assertArrayNotHasKey('adults', $copied);
+        $this->assertCount(1, $source->refresh()->peUniformArtworkMedia()['adults']);
+    }
 }

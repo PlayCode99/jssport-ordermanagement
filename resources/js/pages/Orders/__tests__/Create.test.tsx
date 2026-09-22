@@ -264,7 +264,6 @@ describe('buildEditInitialFormData', () => {
                 }),
             ]),
         );
-        expect(result.artwork_status).toBe('confirmed');
     });
 
     it('does not create placeholder size tables when the saved order has no size rows', () => {

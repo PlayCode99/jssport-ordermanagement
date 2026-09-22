@@ -7,7 +7,7 @@ const table = (tableType: 'kids' | 'adults', sizeLabel: string) => ({
     table_type: tableType,
     title: tableType === 'kids' ? 'ตารางไซส์เด็ก' : 'ตารางไซส์ผู้ใหญ่',
     artwork_files: [],
-    artwork_urls: [],
+    saved_artwork: [],
     rows: [
         {
             id: `r-${tableType}`,
