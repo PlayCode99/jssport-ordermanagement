@@ -25,6 +25,7 @@ class ListGarmentTypesAction
             ->map(static fn (GarmentType $type): array => [
                 'id' => (int) $type->id,
                 'category' => (string) $type->category->value,
+                'style' => $type->style,
                 'code' => (string) $type->code,
                 'name' => (string) $type->name,
                 'is_active' => (bool) $type->is_active,

@@ -223,7 +223,20 @@ trait ProductionCostCalculation
      *
      * @var list<string>
      */
-    private const PRODUCTION_GROUP_STYLES = ['short', 'long', 'unspecified'];
+    private const PRODUCTION_GROUP_STYLES = ['short', 'long', 'sleeveless', 'unspecified'];
+
+    /**
+     * The lengths a garment can be cut in. Trousers are never sleeveless, and
+     * carrying the batch would offer the floor a sheet nobody can sew.
+     *
+     * @return list<string>
+     */
+    private function productionStylesFor(string $garment): array
+    {
+        return $garment === 'pants'
+            ? ['short', 'long', 'unspecified']
+            : self::PRODUCTION_GROUP_STYLES;
+    }
 
     /** @var array<string, string> */
     private const PRODUCTION_GROUP_BASE_LABELS = [
@@ -235,7 +248,7 @@ trait ProductionCostCalculation
 
     /** @var array<string, array<string, string>> */
     private const PRODUCTION_STYLE_LABELS = [
-        'shirt' => ['short' => 'แขนสั้น', 'long' => 'แขนยาว', 'unspecified' => 'ไม่ระบุแขน'],
+        'shirt' => ['short' => 'แขนสั้น', 'long' => 'แขนยาว', 'sleeveless' => 'แขนกุด', 'unspecified' => 'ไม่ระบุแขน'],
         'pants' => ['short' => 'ขาสั้น', 'long' => 'ขายาว', 'unspecified' => 'ไม่ระบุขา'],
     ];
 
@@ -296,7 +309,7 @@ trait ProductionCostCalculation
     {
         $normalized = mb_strtolower(trim((string) $style));
 
-        return in_array($normalized, ['short', 'long'], true) ? $normalized : 'unspecified';
+        return in_array($normalized, ['short', 'long', 'sleeveless'], true) ? $normalized : 'unspecified';
     }
 
     private function normalizePricingSizeGroup(string $sizeGroup): ?string
@@ -329,7 +342,7 @@ trait ProductionCostCalculation
 
         foreach (['shirt', 'pants'] as $garment) {
             foreach (['kids', 'adults'] as $sizeGroup) {
-                foreach (self::PRODUCTION_GROUP_STYLES as $style) {
+                foreach ($this->productionStylesFor($garment) as $style) {
                     $totals[$garment.'_'.$sizeGroup.'_'.$style] = 0;
                 }
             }
@@ -433,7 +446,7 @@ trait ProductionCostCalculation
             $components = $garment === 'shirt' ? $shirtComponents : $pantsComponents;
 
             foreach (['kids', 'adults'] as $sizeGroup) {
-                foreach (self::PRODUCTION_GROUP_STYLES as $style) {
+                foreach ($this->productionStylesFor($garment) as $style) {
                     $key = $garment.'_'.$sizeGroup.'_'.$style;
                     $quantity = (int) ($batchQuantities[$key] ?? 0);
 
@@ -445,6 +458,13 @@ trait ProductionCostCalculation
 
                     $groups[] = [
                         'key' => $key,
+                        // The steps this sheet is made of. The costing table on
+                        // a sleeveless sheet must not list a sleeve being
+                        // attached, so each sheet carries its own list rather
+                        // than sharing one per garment.
+                        // The steps this sheet is made of, so a sheet's costing
+                        // table is read against the work it actually names.
+                        'components' => $components->all(),
                         'label' => self::PRODUCTION_GROUP_BASE_LABELS[$garment.'_'.$sizeGroup]
                             .' '.self::PRODUCTION_STYLE_LABELS[$garment][$style],
                         'garment' => $garment,

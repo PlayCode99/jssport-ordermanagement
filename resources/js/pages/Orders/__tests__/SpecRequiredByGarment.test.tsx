@@ -79,9 +79,7 @@ describe('the spec a bill has to fill in', () => {
     it('asks for the shirt spec when the table only orders shirts', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        // The separate column, not the set one: a set is a shirt and a pair of
-        // pants together, so it would rightly ask for both specs.
-        typeInto('จำนวนเสื้อแยก แถวที่ 1', '10');
+        typeInto('จำนวนเสื้อ แถวที่ 1', '10');
         submit();
 
         const messages = missingMessages().join(' | ');
@@ -91,22 +89,10 @@ describe('the spec a bill has to fill in', () => {
         expect(messages).not.toContain('สเปกแบบกางเกง');
     });
 
-    it('asks for both specs for a set, which is a shirt and a pair of pants', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
-
-        typeInto('จำนวนเสื้อชุด แถวที่ 1', '10');
-        submit();
-
-        const messages = missingMessages().join(' | ');
-
-        expect(messages).toContain('สเปกแบบเสื้อ');
-        expect(messages).toContain('สเปกแบบกางเกง');
-    });
-
     it('asks for the pants spec as soon as the table orders pants', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        typeInto('จำนวนกางเกงแยก แถวที่ 1', '4');
+        typeInto('จำนวนกางเกง แถวที่ 1', '4');
         submit();
 
         expect(missingMessages().join(' | ')).toContain('สเปกแบบกางเกง');
@@ -115,8 +101,8 @@ describe('the spec a bill has to fill in', () => {
     it('asks for both when the bill carries shirts and pants', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        typeInto('จำนวนเสื้อแยก แถวที่ 1', '10');
-        typeInto('จำนวนกางเกงแยก แถวที่ 1', '10');
+        typeInto('จำนวนเสื้อ แถวที่ 1', '10');
+        typeInto('จำนวนกางเกง แถวที่ 1', '10');
         submit();
 
         const messages = missingMessages().join(' | ');
@@ -128,13 +114,13 @@ describe('the spec a bill has to fill in', () => {
     it('counts every blank box, not just a handful of them', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        typeInto('จำนวนเสื้อแยก แถวที่ 1', '10');
+        typeInto('จำนวนเสื้อ แถวที่ 1', '10');
         submit();
 
-        // 21 fields on the shirt tab, of which the garment type arrives already
-        // chosen, so a blank form is short of the other 20.
+        // 20 fields on the shirt tab now that สาบนอก is retired, of which the
+        // garment type arrives already chosen, so a blank form is short of 19.
         expect(missingMessages().join(' | ')).toContain(
-            'สเปกแบบเสื้อ ยังไม่ได้กรอก 20 ช่อง',
+            'สเปกแบบเสื้อ ยังไม่ได้กรอก 19 ช่อง',
         );
     });
 
@@ -144,7 +130,7 @@ describe('the spec a bill has to fill in', () => {
         // Start on the pants tab with only shirts ordered: the complaint is
         // about the shirt spec, so that is the tab the counter must land on.
         fireEvent.click(screen.getByRole('button', { name: 'แบบกางเกง' }));
-        typeInto('จำนวนเสื้อแยก แถวที่ 1', '10');
+        typeInto('จำนวนเสื้อ แถวที่ 1', '10');
         submit();
 
         expect(

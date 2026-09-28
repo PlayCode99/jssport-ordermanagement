@@ -241,9 +241,8 @@ class DashboardController extends Controller
             ['key' => 'collar_id', 'label' => 'ปก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
             ['key' => 'placket_style_id', 'label' => 'แบบสาบ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-plackets']],
             ['key' => 'placket_inner_color_id', 'label' => 'สีสาบ (ใน)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-inner-colors', 'jssport.shirt-colors']],
-            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'sleeve_cuff_id', 'label' => 'ปลายแขน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-cuffs']],
-            ['key' => 'panel_style_id', 'label' => 'สาบนอก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-panels']],
+            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
             ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
             ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
             ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
@@ -285,7 +284,7 @@ class DashboardController extends Controller
     /** Sleeve or leg length as saved on a person row, '' when the bill has none. */
     private function personalizationStyle(mixed $style): string
     {
-        return in_array($style, ['short', 'long'], true) ? (string) $style : '';
+        return in_array($style, ['short', 'long', 'sleeveless'], true) ? (string) $style : '';
     }
 
     private function mapPersonalizationRows(array $specification): array
@@ -1040,6 +1039,11 @@ class DashboardController extends Controller
                     'spec_sections' => $this->mapSpecificationSections($specification ?? []),
                     'personalization_rows' => $this->mapPersonalizationRows($specification ?? []),
                     'sports_day_groups' => $this->mapSportsDayGroups($specification ?? []),
+                    // Which counter form wrote the bill. The receipt lays the
+                    // sizes out the way that form takes them, and order_items
+                    // alone cannot say which form it was: Form 1 and Form 2
+                    // both record plain shirts and trousers.
+                    'form_mode' => (string) ($this->decodeSpecificationPayload($specification ?? [])['mode'] ?? ''),
                     'individual_keeper_color' => trim((string) (
                         $this->decodeSpecificationPayload($specification ?? [])['individual_keeper_color'] ?? ''
                     )),

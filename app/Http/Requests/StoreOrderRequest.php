@@ -88,6 +88,19 @@ class StoreOrderRequest extends FormRequest
             'shirt_artwork.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
             'pants_artwork' => ['nullable', 'array'],
             'pants_artwork.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
+            // Artwork drawn for one production batch only, keyed by that
+            // batch. The key itself is checked against the batches that can
+            // exist, so an image can never be pinned to a sheet that cannot.
+            'shirt_artwork_scoped' => ['nullable', 'array'],
+            'shirt_artwork_scoped.*' => ['array'],
+            'shirt_artwork_scoped.*.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
+            'pants_artwork_scoped' => ['nullable', 'array'],
+            'pants_artwork_scoped.*' => ['array'],
+            'pants_artwork_scoped.*.*' => ['file', 'image', 'mimes:webp,png,jpg,jpeg', 'max:5120'],
+            // Batches to pin artwork already on file to, keyed by media id.
+            // An empty value puts an image back on every sheet of its garment.
+            'artwork_scopes' => ['nullable', 'array'],
+            'artwork_scopes.*' => ['nullable', 'string', 'max:64'],
             'reference_designs' => ['nullable', 'array'],
             'reference_designs.*' => ['file', 'mimes:webp,png,jpg,pdf', 'max:5120'],
 
@@ -115,7 +128,8 @@ class StoreOrderRequest extends FormRequest
             'items.*.item_type' => ['required', 'string'],
             'items.*.size_group' => ['required', 'string', Rule::in(['kids', 'adults', 'oversize'])],
             'items.*.size_label' => ['required', 'string', 'max:50'],
-            'items.*.shirt_style' => ['nullable', 'string', Rule::in(['short', 'long'])],
+            // A shirt can be cut sleeveless; a pair of trousers cannot.
+            'items.*.shirt_style' => ['nullable', 'string', Rule::in(['short', 'long', 'sleeveless'])],
             'items.*.pants_style' => ['nullable', 'string', Rule::in(['short', 'long'])],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
@@ -154,6 +168,12 @@ class StoreOrderRequest extends FormRequest
             'pants_artwork.*.image' => 'ไฟล์ Art Work กางเกง ต้องเป็นไฟล์รูปภาพเท่านั้น',
             'pants_artwork.*.mimes' => 'ไฟล์ Art Work กางเกง ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
             'pants_artwork.*.max' => 'ไฟล์ Art Work กางเกง ต้องมีขนาดไม่เกิน 5MB',
+            'shirt_artwork_scoped.*.*.image' => 'ไฟล์ Art Work เสื้อ ต้องเป็นไฟล์รูปภาพเท่านั้น',
+            'shirt_artwork_scoped.*.*.mimes' => 'ไฟล์ Art Work เสื้อ ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
+            'shirt_artwork_scoped.*.*.max' => 'ไฟล์ Art Work เสื้อ ต้องมีขนาดไม่เกิน 5MB',
+            'pants_artwork_scoped.*.*.image' => 'ไฟล์ Art Work กางเกง ต้องเป็นไฟล์รูปภาพเท่านั้น',
+            'pants_artwork_scoped.*.*.mimes' => 'ไฟล์ Art Work กางเกง ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
+            'pants_artwork_scoped.*.*.max' => 'ไฟล์ Art Work กางเกง ต้องมีขนาดไม่เกิน 5MB',
             'sports_day_artwork.*.*.image' => 'ไฟล์ Art Work คณะสี ต้องเป็นไฟล์รูปภาพเท่านั้น',
             'sports_day_artwork.*.*.mimes' => 'ไฟล์ Art Work คณะสี ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
             'sports_day_artwork.*.*.max' => 'ไฟล์ Art Work คณะสี ต้องมีขนาดไม่เกิน 5MB',

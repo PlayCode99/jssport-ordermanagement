@@ -102,14 +102,14 @@ class OrderItemGarmentStyleTest extends TestCase
         $this->assertNull($order->items()->first()->pants_style);
     }
 
-    public function test_it_rejects_a_style_that_is_not_short_or_long(): void
+    public function test_it_rejects_a_length_the_floor_cannot_cut(): void
     {
         $order = (new CreateOrderAction)->execute($this->baseOrderData([
             [
                 'item_type' => 'set',
                 'size_group' => 'adults',
                 'size_label' => 'L',
-                'shirt_style' => 'sleeveless',
+                'shirt_style' => 'three-quarter',
                 'pants_style' => '',
                 'quantity' => 4,
                 'unit_price' => 250,
@@ -117,6 +117,27 @@ class OrderItemGarmentStyleTest extends TestCase
         ]), $this->creator()->id);
 
         $this->assertNull($order->items()->first()->shirt_style);
+        $this->assertNull($order->items()->first()->pants_style);
+    }
+
+    public function test_a_shirt_can_be_sleeveless_and_a_pair_of_trousers_cannot(): void
+    {
+        // Sleeveless is a real cut with its own steps and its own sheet, but
+        // only for shirts: trousers offered it would print a sheet nobody can
+        // sew, so the length is dropped rather than recorded.
+        $order = (new CreateOrderAction)->execute($this->baseOrderData([
+            [
+                'item_type' => 'set',
+                'size_group' => 'adults',
+                'size_label' => 'L',
+                'shirt_style' => 'sleeveless',
+                'pants_style' => 'sleeveless',
+                'quantity' => 4,
+                'unit_price' => 250,
+            ],
+        ]), $this->creator()->id);
+
+        $this->assertSame('sleeveless', $order->items()->first()->shirt_style);
         $this->assertNull($order->items()->first()->pants_style);
     }
 

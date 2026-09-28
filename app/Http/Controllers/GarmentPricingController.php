@@ -25,9 +25,15 @@ class GarmentPricingController extends Controller
     {
         $category = $request->filled('category') ? (string) $request->string('category') : null;
 
+        // A length is picked before a garment is, so the page knows which of
+        // the three screens it is on: the lengths, the garments cut to one, or
+        // neither when no category has been chosen yet.
+        $style = $request->filled('style') ? (string) $request->string('style') : null;
+
         return Inertia::render('settings/data/garments/types', [
             'rows' => $listGarmentTypes->execute($category),
             'selectedCategory' => $category,
+            'selectedStyle' => in_array($style, ['short', 'long', 'sleeveless', 'all'], true) ? $style : null,
         ]);
     }
 
@@ -41,10 +47,18 @@ class GarmentPricingController extends Controller
         $types = $listGarmentTypes->execute($category);
 
         $selectedTypeName = null;
+        $selectedTypeStyle = null;
+        $selectedTypeCategory = null;
+
         if ($garmentTypeId !== null) {
             foreach ($types as $type) {
                 if ((int) $type['id'] === $garmentTypeId) {
                     $selectedTypeName = (string) $type['name'];
+                    // Carried so the page can say which garment it is pricing
+                    // and get back to the list it was opened from, instead of
+                    // asking the reader to pick it all over again.
+                    $selectedTypeStyle = $type['style'] ?? null;
+                    $selectedTypeCategory = (string) $type['category'];
                     break;
                 }
             }
@@ -56,6 +70,8 @@ class GarmentPricingController extends Controller
             'selectedCategory' => $category,
             'selectedGarmentTypeId' => $garmentTypeId,
             'selectedGarmentTypeName' => $selectedTypeName,
+            'selectedGarmentTypeStyle' => $selectedTypeStyle,
+            'selectedGarmentTypeCategory' => $selectedTypeCategory,
         ]);
     }
 

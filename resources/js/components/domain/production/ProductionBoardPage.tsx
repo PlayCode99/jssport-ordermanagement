@@ -86,7 +86,7 @@ type ConfirmDialogState = {
 type ProductionGroupGarment = 'shirt' | 'pants';
 type ProductionGroupSizeGroup = 'kids' | 'adults';
 /** Sleeve or leg length. 'unspecified' is for rows saved before we recorded it. */
-type ProductionGroupStyle = 'short' | 'long' | 'unspecified';
+type ProductionGroupStyle = 'short' | 'long' | 'sleeveless' | 'unspecified';
 type ProductionGroupBaseKey =
     `${ProductionGroupGarment}_${ProductionGroupSizeGroup}`;
 /** One batch, which is one printed sheet on the production floor. */
@@ -103,23 +103,30 @@ type ProductionGroupTheme = {
  */
 const PRODUCTION_GROUP_THEME_MAP: Record<
     ProductionGroupBaseKey,
-    Record<'short' | 'long', ProductionGroupTheme>
+    Record<'short' | 'long' | 'sleeveless', ProductionGroupTheme>
 > = {
     shirt_kids: {
         short: { backgroundColor: '#0F766E', borderColor: '#115E59' },
         long: { backgroundColor: '#134E4A', borderColor: '#0B3B38' },
+        sleeveless: { backgroundColor: '#0E7490', borderColor: '#155E75' },
     },
     shirt_adults: {
         short: { backgroundColor: '#1D4ED8', borderColor: '#1E3A8A' },
         long: { backgroundColor: '#1E3A8A', borderColor: '#172554' },
+        sleeveless: { backgroundColor: '#4338CA', borderColor: '#312E81' },
     },
+    // Trousers are never sleeveless. The entry is here because the map is
+    // keyed by every length a sheet can carry, not because a sheet will ask
+    // for it.
     pants_kids: {
         short: { backgroundColor: '#B45309', borderColor: '#92400E' },
         long: { backgroundColor: '#7C2D12', borderColor: '#5C2110' },
+        sleeveless: { backgroundColor: '#B45309', borderColor: '#92400E' },
     },
     pants_adults: {
         short: { backgroundColor: '#7C3AED', borderColor: '#5B21B6' },
         long: { backgroundColor: '#5B21B6', borderColor: '#4C1D95' },
+        sleeveless: { backgroundColor: '#7C3AED', borderColor: '#5B21B6' },
     },
 };
 
@@ -133,8 +140,20 @@ const PRODUCTION_STYLE_LABELS: Record<
     ProductionGroupGarment,
     Record<ProductionGroupStyle, string>
 > = {
-    shirt: { short: 'แขนสั้น', long: 'แขนยาว', unspecified: 'ไม่ระบุแขน' },
-    pants: { short: 'ขาสั้น', long: 'ขายาว', unspecified: 'ไม่ระบุขา' },
+    shirt: {
+        short: 'แขนสั้น',
+        long: 'แขนยาว',
+        sleeveless: 'แขนกุด',
+        unspecified: 'ไม่ระบุแขน',
+    },
+    // Trousers are never sleeveless, so the label would name a sheet that
+    // cannot exist. It is spelled out rather than left missing.
+    pants: {
+        short: 'ขาสั้น',
+        long: 'ขายาว',
+        sleeveless: 'ขาสั้น',
+        unspecified: 'ไม่ระบุขา',
+    },
 };
 
 const PRODUCTION_GROUP_BASE_LABELS: Record<ProductionGroupBaseKey, string> = {
@@ -144,10 +163,24 @@ const PRODUCTION_GROUP_BASE_LABELS: Record<ProductionGroupBaseKey, string> = {
     pants_adults: 'กางเกงผู้ใหญ่',
 };
 
+/**
+ * The lengths a garment can be cut in, and so the sheets it can print. A pair
+ * of trousers is never sleeveless.
+ */
+function productionStylesFor(
+    garment: ProductionGroupGarment,
+): readonly ProductionGroupStyle[] {
+    return garment === 'pants'
+        ? (['short', 'long', 'unspecified'] as const)
+        : (['short', 'long', 'sleeveless', 'unspecified'] as const);
+}
+
 function normalizeProductionStyle(
     style: string | null | undefined,
 ): ProductionGroupStyle {
-    return style === 'short' || style === 'long' ? style : 'unspecified';
+    return style === 'short' || style === 'long' || style === 'sleeveless'
+        ? style
+        : 'unspecified';
 }
 const PRODUCTION_ARTWORK_CONTAINER_HEIGHT = '70mm';
 
@@ -492,22 +525,16 @@ const shirtSpecFields: SpecField[] = [
         storageKeys: ['jssport.shirt-colors'],
     },
     {
-        key: 'placket_outer_color_id',
-        label: 'สีสาบ (นอก)',
-        type: 'catalog',
-        storageKeys: ['jssport.shirt-colors'],
-    },
-    {
         key: 'sleeve_cuff_id',
         label: 'ปลายแขน',
         type: 'catalog',
         storageKeys: ['jssport.shirt-cuffs'],
     },
     {
-        key: 'panel_style_id',
-        label: 'สาบนอก',
+        key: 'placket_outer_color_id',
+        label: 'สีสาบ (นอก)',
         type: 'catalog',
-        storageKeys: ['jssport.shirt-panels'],
+        storageKeys: ['jssport.shirt-colors'],
     },
     {
         key: 'screen_color_id',
@@ -1396,7 +1423,12 @@ export function ProductionBoardPage({
                         @media print {
                             .p-dialog-only { display: none !important; }
                             .p-preview-only { display: none !important; }
-                            .p-print-page {
+                            /* Every sheet starts at the top of its own page. The
+                               sibling selector is spelled out because a rule that
+                               only spaced the sheets on screen would otherwise
+                               outrank a plain .p-print-page reset. */
+                            .p-print-page,
+                            .p-print-page + .p-print-page {
                                 page-break-after: always;
                                 break-after: page;
                                 margin: 0;
@@ -3178,25 +3210,26 @@ export function ProductionBoardPage({
                                 ).flatMap((garment) =>
                                     (['kids', 'adults'] as const).flatMap(
                                         (sizeGroup) =>
-                                            (
-                                                [
-                                                    'short',
-                                                    'long',
-                                                    'unspecified',
-                                                ] as const
-                                            ).map((style) => {
-                                                const baseKey =
-                                                    `${garment}_${sizeGroup}` as ProductionGroupBaseKey;
+                                            // A shirt can be cut sleeveless and
+                                            // so prints a sheet of its own. A
+                                            // pair of trousers cannot, and a
+                                            // sheet for one would be a page
+                                            // nobody can sew.
+                                            productionStylesFor(garment).map(
+                                                (style) => {
+                                                    const baseKey =
+                                                        `${garment}_${sizeGroup}` as ProductionGroupBaseKey;
 
-                                                return {
-                                                    key: `${baseKey}_${style}` as ProductionGroupKey,
-                                                    baseKey,
-                                                    label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${PRODUCTION_STYLE_LABELS[garment][style]}`,
-                                                    garment,
-                                                    sizeGroup,
-                                                    style,
-                                                };
-                                            }),
+                                                    return {
+                                                        key: `${baseKey}_${style}` as ProductionGroupKey,
+                                                        baseKey,
+                                                        label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${PRODUCTION_STYLE_LABELS[garment][style]}`,
+                                                        garment,
+                                                        sizeGroup,
+                                                        style,
+                                                    };
+                                                },
+                                            ),
                                     ),
                                 );
                                 const groupData = groupDefinitions.reduce(
@@ -3244,6 +3277,16 @@ export function ProductionBoardPage({
                                                 : item.shirt_style,
                                         );
                                         const key = `${garment}_${sizeGroup}_${style}`;
+
+                                        // A length the board does not know how
+                                        // to print is skipped rather than
+                                        // allowed to take the whole room down
+                                        // with it: one odd row on one bill must
+                                        // not stop the floor seeing any of its
+                                        // work.
+                                        if (!groupData[key]) {
+                                            continue;
+                                        }
 
                                         groupData[key].quantity += quantity;
 
@@ -3445,18 +3488,41 @@ export function ProductionBoardPage({
                                                             subtotal:
                                                                 unitTotal *
                                                                 quantity,
-                                                            // The house's own artwork, in full. Unlike the other forms —
-                                                            // which deliberately show a single image to mirror the paper
-                                                            // sheet — every image attached to a colour house must reach
-                                                            // that house's page, so the floor gets what was attached.
-                                                            artworkUrls: (
-                                                                detailOrder
+                                                            // Every image this sheet is entitled to, in full: the ones
+                                                            // pinned to it, the ones pinned to nothing — which belong on
+                                                            // every sheet of the garment — and, for a bill drawn up before
+                                                            // artwork was pinned to sheets, the house's old pile. Unlike
+                                                            // the other forms, which show a single image to mirror the
+                                                            // paper sheet, a colour house's page carries all of them.
+                                                            artworkUrls: [
+                                                                ...(
+                                                                    (garment ===
+                                                                    'shirt'
+                                                                        ? detailOrder.shirt_artwork_media
+                                                                        : detailOrder.pants_artwork_media) ??
+                                                                    []
+                                                                )
+                                                                    .filter(
+                                                                        (
+                                                                            item,
+                                                                        ) =>
+                                                                            !item.batch ||
+                                                                            item.batch ===
+                                                                                `sports_day_${teamIndex}_${garment}_${sizeGroup}`,
+                                                                    )
+                                                                    .map(
+                                                                        (
+                                                                            item,
+                                                                        ) =>
+                                                                            item.url,
+                                                                    ),
+                                                                ...(detailOrder
                                                                     .sports_day_artwork_urls?.[
                                                                     String(
                                                                         teamIndex,
                                                                     )
-                                                                ] ?? []
-                                                            ).filter(
+                                                                ] ?? []),
+                                                            ].filter(
                                                                 (
                                                                     url,
                                                                 ): url is string =>
@@ -3536,14 +3602,40 @@ export function ProductionBoardPage({
                                                * The singular *_artwork_url fields only ever hold one image,
                                                * so a job with several reference sheets printed incomplete.
                                                */
+                                              /**
+                                               * The artwork this sheet is
+                                               * entitled to: images pinned to
+                                               * its own batch, plus images
+                                               * pinned to none — which belong
+                                               * on every sheet of the garment,
+                                               * and are what a bill drawn up
+                                               * without pinning has.
+                                               */
                                               const resolveGroupArtworkUrls = (
                                                   garment: ProductionGroupGarment,
+                                                  batchKey?: string,
                                               ): string[] => {
-                                                  const garmentUrls =
+                                                  const media =
                                                       (garment === 'shirt'
-                                                          ? detailOrder.shirt_artwork_urls
-                                                          : detailOrder.pants_artwork_urls) ??
-                                                      [];
+                                                          ? detailOrder.shirt_artwork_media
+                                                          : detailOrder.pants_artwork_media) ??
+                                                      null;
+                                                  const garmentUrls = media
+                                                      ? media
+                                                            .filter(
+                                                                (item) =>
+                                                                    !item.batch ||
+                                                                    item.batch ===
+                                                                        batchKey,
+                                                            )
+                                                            .map(
+                                                                (item) =>
+                                                                    item.url,
+                                                            )
+                                                      : ((garment === 'shirt'
+                                                            ? detailOrder.shirt_artwork_urls
+                                                            : detailOrder.pants_artwork_urls) ??
+                                                        []);
                                                   const cleaned =
                                                       garmentUrls.filter(
                                                           (
@@ -3598,6 +3690,7 @@ export function ProductionBoardPage({
                                                   artworkUrls:
                                                       resolveGroupArtworkUrls(
                                                           group.garment,
+                                                          group.key,
                                                       ),
                                                   artworkUrl:
                                                       resolveGroupArtworkUrl(
@@ -3999,9 +4092,21 @@ export function ProductionBoardPage({
                                                acted on larger again. The old sheet set 86 of its 91 pieces of
                                                text at 8-9px.
                                             ------------------------------------------------------------------ */
+                                            /* 281 x 195mm, inside the 287 x 200mm that A4
+                                               landscape leaves at a 5mm margin. A sheet cut to
+                                               exactly the printable area has no room for a printer
+                                               whose own unprintable border is wider than the margin
+                                               asks for. Vertically that cost a blank sheet between
+                                               every work sheet — the last millimetre spilled onto a
+                                               page of its own — on some machines and not others,
+                                               which is what made it look random. Horizontally it
+                                               costs no extra page, it simply takes the right-hand
+                                               edge of the sheet off the paper, which is worse for
+                                               being quiet. Six millimetres of margin on each
+                                               dimension buys back both. */
                                             .p-print-page {
-                                                width: 287mm;
-                                                height: 200mm;
+                                                width: 281mm;
+                                                height: 195mm;
                                                 margin: 0 auto;
                                                 padding: 0;
                                                 border: 0;
@@ -4013,8 +4118,16 @@ export function ProductionBoardPage({
                                                 gap: 2.5mm;
                                                 overflow: hidden;
                                             }
-                                            .p-print-page + .p-print-page {
-                                                margin-top: 8mm;
+                                            /* Spacing between the stacked sheets in the preview.
+                                               On paper each sheet starts at the top of its own
+                                               page, and a gap here would push the sheet past the
+                                               printable area: a flex page that no longer fits is
+                                               fragmented, and everything below the header is
+                                               dropped. Screen only, deliberately. */
+                                            @media screen {
+                                                .p-print-page + .p-print-page {
+                                                    margin-top: 8mm;
+                                                }
                                             }
                                             /* A name list runs to whatever length the team is, so
                                                it flows and breaks across pages rather than being
@@ -4022,7 +4135,7 @@ export function ProductionBoardPage({
                                                flex column so a short list still fills its page. */
                                             .p-print-page-flow {
                                                 height: auto;
-                                                min-height: 200mm;
+                                                min-height: 195mm;
                                                 overflow: visible;
                                             }
                                             .p-roster-card {
@@ -4066,8 +4179,16 @@ export function ProductionBoardPage({
                                                 break-inside: avoid;
                                                 page-break-inside: avoid;
                                             }
+                                            /* 7.5mm, not the 8mm the row would
+                                               otherwise take. The sheet's parts are
+                                               all fixed heights, and at 8mm they came
+                                               to 201.37mm of content — measured in
+                                               Chrome — on a sheet that is now 195mm
+                                               tall. Nineteen rows at 7.5mm leave the
+                                               list 3mm inside its page instead of
+                                               spilling a sliver onto one of its own. */
                                             .p-personalization-table tbody td {
-                                                height: 8mm;
+                                                height: 7.5mm;
                                             }
                                             .p-personalization-table
                                                 tbody

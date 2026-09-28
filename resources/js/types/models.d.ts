@@ -20,6 +20,13 @@ export type StationDepartment =
     | 'sewing'
     | 'qc';
 
+/** One artwork image and the production batch it is pinned to, if any. */
+export type ArtworkMediaItem = {
+    id: number;
+    url: string;
+    batch: string | null;
+};
+
 export type OrderStatus =
     | 'draft'
     | 'designing'
@@ -141,6 +148,13 @@ export interface Order {
     shirt_artwork_urls?: string[];
     sports_day_artwork_urls?: Record<string, string[]>;
     pants_artwork_urls?: string[];
+    /**
+     * Artwork with the production batch each image is pinned to. A null batch
+     * means the image belongs on every sheet of its garment, which is how a
+     * bill drawn up without pinning behaves.
+     */
+    shirt_artwork_media?: ArtworkMediaItem[];
+    pants_artwork_media?: ArtworkMediaItem[];
     delivery_method: string | null;
     shipping_address: string | null;
     reference_designs?: string[];
@@ -187,8 +201,13 @@ export interface OrderItem {
     item_type: string;
     size_group: SizeGroup;
     size_label: string;
-    /** Sleeve and leg length, null on rows saved before the columns existed. */
-    shirt_style?: 'short' | 'long' | null;
+    /**
+     * Sleeve and leg length, null on rows saved before the columns existed.
+     * A shirt can be cut sleeveless and a pair of trousers cannot, so the two
+     * do not take the same set of answers — writing them the same would let a
+     * check for แขนกุด narrow to never and pass silently.
+     */
+    shirt_style?: 'short' | 'long' | 'sleeveless' | null;
     pants_style?: 'short' | 'long' | null;
     quantity: number;
     unit_price: number;

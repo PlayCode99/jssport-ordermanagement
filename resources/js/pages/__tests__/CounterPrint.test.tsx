@@ -266,6 +266,52 @@ describe('counter work-sheet PDF', () => {
         expect(printedHtml()).toContain('size: A4 portrait');
     });
 
+    /**
+     * A job type is a list of processes joined with '+'. The masthead used to
+     * give its cells fixed fractions of the row, so 'ซับลิเมชั่น + ปัก + สกรีน'
+     * was clipped to 'ซับลิเมชั่น + ปัก + ...' — naming a shorter job than the
+     * one that was sold — beside a job-name column with room to spare. Each
+     * column is sized to its own text now.
+     */
+    /**
+     * A sleeveless shirt is a length like any other, and the sheet has to say
+     * so. The print code knew two lengths by name and printed a dash for
+     * anything else, so a bill sold as แขนกุด reached the floor saying nothing
+     * about its sleeves at all.
+     */
+    it('prints แขนกุด on the sheet rather than a dash', () => {
+        const html = printedHtml(
+            makeRow({
+                details: {
+                    items: [
+                        {
+                            item_type: 'shirt',
+                            size_group: 'adults',
+                            size_label: 'L',
+                            shirt_style: 'sleeveless',
+                            quantity: 6,
+                            unit_price: 200,
+                            total_price: 1200,
+                        },
+                    ],
+                },
+            }) as never,
+        );
+
+        expect(html).toContain('แขนกุด');
+    });
+
+    it('never clips the job type in the masthead', () => {
+        const html = printedHtml();
+
+        // The type's column is sized to its own text; the job name, which
+        // had room to spare, gives up what is left over.
+        expect(html).toContain(
+            'grid-template-columns: minmax(0, 1fr) minmax(0, max-content) max-content;',
+        );
+        expect(html).not.toContain('grid-template-columns: 2.4fr 1fr 1fr;');
+    });
+
     it('carries the order identity', () => {
         const html = printedHtml();
 
@@ -792,8 +838,30 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('fit-probe');
         expect(html).toContain('height: 100mm');
         expect(html).toContain('pxPerMm');
-        // A4 portrait less the page margins on both sides.
-        expect(html).toContain('297 - (4 * 2)');
+        // A4 portrait less the page margins on both sides, taken from the
+        // margin the sheet actually asks for rather than written out twice.
+        expect(html).toMatch(/297 - \((\d+) \* 2\)/);
+    });
+
+    /**
+     * A printer keeps a border of its own that it cannot print on, and most
+     * want between four and six millimetres. The sheet used to be laid out to
+     * exactly the 202 x 289mm a 4mm margin leaves, so those printers cut off
+     * its right edge and its foot — and the fitter had no reason to shrink
+     * anything, because what it measured did fit. Whatever the margin is, it
+     * has to leave the printer room, and the sheet has to be sized from it.
+     */
+    it('leaves the printer a border of its own', () => {
+        const html = printedHtml();
+        const margin = Number(
+            /@page \{ size: A4 portrait; margin: (\d+)mm/.exec(html)?.[1],
+        );
+
+        expect(margin).toBeGreaterThanOrEqual(6);
+        // The sheet is exactly the page less that margin on both sides: 210mm
+        // of paper, so a 7mm margin leaves 196mm of sheet.
+        expect(html).toContain(`max-width: ${210 - margin * 2}mm`);
+        expect(html).toContain(`297 - (${margin} * 2)`);
     });
 
     it('prints the artwork at one fixed height on every sheet', () => {
@@ -891,6 +959,21 @@ describe('counter work-sheet PDF', () => {
 
         return written;
     };
+
+    /**
+     * The name list's masthead is sized the same way as the work sheet's: the
+     * customer and the due date take the width their own text needs, and the
+     * job name takes what is left, instead of fixed fractions that clipped a
+     * long customer name while another cell kept half a column of white.
+     */
+    it('never clips the masthead on the roster either', () => {
+        const html = rosterHtml();
+
+        expect(html).toContain(
+            'grid-template-columns: minmax(0, 1fr) minmax(0, max-content) max-content;',
+        );
+        expect(html).not.toContain('grid-template-columns: 2.4fr 1fr 1fr;');
+    });
 
     it('offers the roster only on a bill that has a name list', () => {
         renderCounter(rosterRow());

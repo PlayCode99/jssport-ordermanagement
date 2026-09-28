@@ -228,17 +228,25 @@ describe('production sheet costing column', () => {
         expect(css).not.toContain('grid-template-columns: 55% 45%');
     });
 
-    it('is exactly one A4 landscape page', () => {
+    it('is one fixed box that fits inside an A4 landscape page', () => {
         const css = printStyles();
 
         // The sheet used to lay out 942px of content inside a 748px page, so
         // every other group printed onto a second sheet. The page is now a box
-        // of a fixed size and the blocks are fitted into it.
+        // of a fixed size and the blocks are fitted into it — and the box is
+        // kept a few millimetres short of the 200mm the page has, so a printer
+        // with a wider unprintable border cannot push a sliver of it onto a
+        // sheet of its own.
         const page = css.match(/\.p-print-page \{[^}]*\}/s)?.[0] ?? '';
+        const width = Number(/width:\s*([\d.]+)mm/.exec(page)?.[1]);
+        const height = Number(/height:\s*([\d.]+)mm/.exec(page)?.[1]);
 
-        expect(page).toContain('width: 287mm');
-        expect(page).toContain('height: 200mm');
         expect(page).toContain('overflow: hidden');
+        // Inside the 287 x 200mm that A4 landscape leaves at a 5mm margin.
+        expect(width).toBeGreaterThan(0);
+        expect(width).toBeLessThanOrEqual(282);
+        expect(height).toBeGreaterThan(0);
+        expect(height).toBeLessThanOrEqual(196);
     });
 
     it('never sets print type below the size a shop floor can read', () => {

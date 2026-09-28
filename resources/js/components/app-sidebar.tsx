@@ -2,6 +2,7 @@ import { Link, usePage } from '@inertiajs/react';
 import {
     ChartColumn,
     ClipboardCheck,
+    Coins,
     Database,
     DraftingCompass,
     LayoutGrid,
@@ -101,8 +102,6 @@ export function AppSidebar() {
 
         return USER_ACCESS_ROLES.COUNTER;
     }, [authUser?.access_role, authUser?.role, authUser?.station_department]);
-    const shirtTypeMenus = (page.props.garmentSidebarShirtTypes ??
-        []) as Array<{ id: number; code: string; name: string }>;
     const mainUrl = page.props.currentTeam
         ? `/${page.props.currentTeam.slug}/counter`
         : '/counter';
@@ -115,15 +114,6 @@ export function AppSidebar() {
         landingPath: (page.props as { landingPath?: string | null })
             .landingPath,
     });
-
-    const shirtTypeChildren = useMemo<NavItem[]>(
-        () =>
-            shirtTypeMenus.map((item) => ({
-                title: item.name,
-                href: `/settings/data/garments/prices?category=SHIRT&garment_type_id=${item.id}`,
-            })),
-        [shirtTypeMenus],
-    );
 
     const editRoomChildren = useMemo<NavItem[]>(() => {
         const rooms: NavItem[] = [];
@@ -227,6 +217,25 @@ export function AppSidebar() {
         resolvedRole === USER_ACCESS_ROLES.OWNER ||
         resolvedRole === USER_ACCESS_ROLES.ADMIN_SYSTEM
     ) {
+        // A shirt's lengths have nothing to do with a pair of trousers', so
+        // the two open as their own lists rather than one page with a filter
+        // at the top that has to be set every time.
+        mainNavItems.push({
+            title: 'เซทราคาใบงาน',
+            href: '/settings/data/garments/types?category=SHIRT',
+            icon: Coins,
+            children: [
+                {
+                    title: 'เซทราคาใบงานเสื้อ',
+                    href: '/settings/data/garments/types?category=SHIRT',
+                },
+                {
+                    title: 'เซทราคาใบงานกางเกง',
+                    href: '/settings/data/garments/types?category=PANTS',
+                },
+            ],
+        });
+
         mainNavItems.push({
             title: 'จัดการข้อมูล',
             href: '/settings/data',
@@ -247,23 +256,6 @@ export function AppSidebar() {
                 {
                     title: 'ชื่อหน่วยงาน, ชื่องาน',
                     href: '/settings/data/job-names',
-                },
-                {
-                    title: 'รายละเอียด / ราคาชิ้นงาน',
-                    href: '/settings/data/garments/types',
-                },
-                {
-                    title: 'ประเภทเสื้อ',
-                    href: '/settings/data/garments/prices?category=SHIRT',
-                    children:
-                        shirtTypeChildren.length > 0
-                            ? shirtTypeChildren
-                            : [
-                                  {
-                                      title: 'เสื้อโปโล',
-                                      href: '/settings/data/garments/prices?category=SHIRT',
-                                  },
-                              ],
                 },
                 {
                     title: 'ไซซ์เด็ก',

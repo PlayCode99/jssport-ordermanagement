@@ -19,6 +19,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Throwable;
 
 class CreateOrderAction
@@ -56,7 +57,7 @@ class CreateOrderAction
                         'size_group' => (string) $item['size_group'],
                         'size_label' => (string) $item['size_label'],
                         'shirt_style' => $this->garmentStyle($item['shirt_style'] ?? null),
-                        'pants_style' => $this->garmentStyle($item['pants_style'] ?? null),
+                        'pants_style' => $this->garmentStyle($item['pants_style'] ?? null, 'pants'),
                         'quantity' => $quantity,
                         'unit_price' => $unitPrice,
                         'total_price' => $itemTotalPrice,
@@ -142,6 +143,19 @@ class CreateOrderAction
                     $this->storeArtworkAsWebpIfPresent($order, $pantsArtworkFile, 'pants_artwork');
                 }
 
+                // Artwork drawn for one production batch only. The batch is
+                // stored on the media itself, so the sheet for that batch can
+                // take it while the other sheets of the same garment do not.
+                foreach (['shirt_artwork', 'pants_artwork'] as $collection) {
+                    foreach (Arr::wrap($data[$collection.'_scoped'] ?? []) as $batch => $batchFiles) {
+                        $normalizedBatch = Order::normalizeArtworkBatch($batch, $collection);
+
+                        foreach (Arr::wrap($batchFiles) as $batchFile) {
+                            $this->storeArtworkAsWebpIfPresent($order, $batchFile, $collection, $normalizedBatch);
+                        }
+                    }
+                }
+
                 foreach (Arr::wrap($data['reference_designs'] ?? []) as $referenceDesign) {
                     if ($referenceDesign instanceof UploadedFile) {
                         $order->addMedia($referenceDesign)->toMediaCollection('reference_designs');
@@ -192,6 +206,7 @@ class CreateOrderAction
                     $order,
                     $data['duplicate_from_id'] ?? null,
                     $data['removed_media_ids'] ?? [],
+                    $data['artwork_scopes'] ?? [],
                 );
 
                 // Lock in what the shop pays for this work today. Editing the
@@ -272,8 +287,10 @@ class CreateOrderAction
      * keeps its own images intact -- including images the user removed from the
      * duplicate, which are skipped here rather than deleted from the source.
      */
-    private function copyArtworkFromSourceOrder(Order $order, mixed $sourceOrderId, mixed $removedMediaIds = []): void
+    private function copyArtworkFromSourceOrder(Order $order, mixed $sourceOrderId, mixed $removedMediaIds = [], mixed $artworkScopes = []): void
     {
+        $scopes = $this->artworkScopes($artworkScopes);
+
         if (! is_numeric($sourceOrderId)) {
             return;
         }
@@ -295,22 +312,68 @@ class CreateOrderAction
                     continue;
                 }
 
-                $media->copy($order, $collection);
+                $copy = $media->copy($order, $collection);
+
+                // The scope is keyed by the source image's id, because that is
+                // what the form was looking at. Re-pinning on the copy leaves
+                // the bill being copied from untouched.
+                if (array_key_exists((int) $media->id, $scopes) && in_array($collection, Order::batchedArtworkCollections(), true)) {
+                    $this->pinArtworkBatch($copy, Order::normalizeArtworkBatch($scopes[(int) $media->id], $collection));
+                }
             }
         }
     }
 
-    private function storeArtworkAsWebpIfPresent(Order $order, mixed $file, string $collection): void
+    /**
+     * Limits an image to one production batch, or puts it back on every sheet
+     * of its garment when the batch is null.
+     */
+    private function pinArtworkBatch(Media $media, ?string $batch): void
+    {
+        $properties = $media->custom_properties;
+
+        if ($batch === null) {
+            unset($properties[Order::ARTWORK_BATCH_PROPERTY]);
+        } else {
+            $properties[Order::ARTWORK_BATCH_PROPERTY] = $batch;
+        }
+
+        $media->custom_properties = $properties;
+        $media->save();
+    }
+
+    /**
+     * Batches the form asked to pin artwork to, keyed by media id.
+     *
+     * @return array<int, mixed>
+     */
+    private function artworkScopes(mixed $scopes): array
+    {
+        $normalized = [];
+
+        foreach (Arr::wrap($scopes) as $mediaId => $batch) {
+            if (is_numeric($mediaId)) {
+                $normalized[(int) $mediaId] = $batch;
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function storeArtworkAsWebpIfPresent(Order $order, mixed $file, string $collection, ?string $batch = null): void
     {
         if (! $file instanceof UploadedFile) {
             return;
         }
 
+        $properties = $batch === null ? [] : [Order::ARTWORK_BATCH_PROPERTY => $batch];
         $webpBinary = $this->convertUploadedImageToWebpBinary($file);
 
         if ($webpBinary === null) {
             if (strtolower((string) $file->getClientOriginalExtension()) === 'webp') {
-                $order->addMedia($file)->toMediaCollection($collection);
+                $order->addMedia($file)
+                    ->withCustomProperties($properties)
+                    ->toMediaCollection($collection);
 
                 return;
             }
@@ -324,6 +387,7 @@ class CreateOrderAction
         $order->addMediaFromString($webpBinary)
             ->usingFileName($safeBaseName.'.webp')
             ->usingName($safeBaseName)
+            ->withCustomProperties($properties)
             ->toMediaCollection($collection);
     }
 
@@ -368,12 +432,20 @@ class CreateOrderAction
      * @param  array<string, mixed>  $context
      */
     /**
-     * Only 'short' and 'long' are meaningful; anything else means the row was
+     * A shirt takes short, long or sleeveless; trousers take the first two.
+     * Anything else means the row was
      * recorded without a stated style and is stored as null.
      */
-    private function garmentStyle(mixed $value): ?string
+    /**
+     * A length the floor can actually cut. Sleeveless belongs to shirts alone,
+     * and a row that names anything else keeps no length at all rather than
+     * being guessed into one — the sheet says so instead.
+     */
+    private function garmentStyle(mixed $value, string $garment = 'shirt'): ?string
     {
-        return in_array($value, ['short', 'long'], true) ? (string) $value : null;
+        $allowed = $garment === 'pants' ? ['short', 'long'] : ['short', 'long', 'sleeveless'];
+
+        return in_array($value, $allowed, true) ? (string) $value : null;
     }
 
     private function logCreateStage(string $stage, int $creatorUserId, array $data, array $context = []): void

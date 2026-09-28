@@ -26,6 +26,9 @@ class UpdateGarmentTypeRequest extends FormRequest
         return [
             'category' => ['required', 'string', Rule::in(array_column(GarmentCategory::cases(), 'value'))],
             'code' => ['required', 'string', 'max:50', Rule::unique('garment_types', 'code')->ignore($garmentTypeId)],
+            // A length decides the work, so a garment cannot be priced
+            // without one. Sleeveless belongs to shirts alone.
+            'style' => ['required', 'string', Rule::in(['short', 'long', 'sleeveless'])],
             'name' => ['required', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'display_order' => ['nullable', 'integer', 'min:0'],

@@ -185,6 +185,8 @@ export interface OrderTableRow {
             paid_amount: number;
         };
         specification: Record<string, string | number | null> | null;
+        /** Which counter form wrote the bill: matrix, individual, sports_day, pe_uniform. */
+        form_mode?: string | null;
         specification_display?: Array<{ label: string; value: string }>;
         spec_sections?: {
             shirt: Array<{ label: string; value: string }>;
@@ -231,7 +233,7 @@ export interface OrderTableRow {
             number: string;
             pants_size?: string;
             pants_number?: string;
-            /** 'short' | 'long', or '' on a bill saved before lengths existed. */
+            /** The length, or '' on a bill saved before lengths existed. */
             shirt_style?: string;
             pants_style?: string;
             quantity: number;
@@ -614,8 +616,18 @@ function formatMoney(value: number): string {
  * the fitter shrinks it when there is a lot to print and lets it grow when
  * there is little, never going below a size that is still readable.
  */
+const PRINT_PAGE_WIDTH_MM = 210;
 const PRINT_PAGE_HEIGHT_MM = 297;
-const PRINT_PAGE_MARGIN_MM = 4;
+/**
+ * 7mm, which is more than the sheet needs and deliberately so. A printer keeps
+ * a border of its own that it cannot print on, and most want between four and
+ * six millimetres. The sheet used to be laid out to exactly the 202 x 289mm a
+ * 4mm margin leaves, so on those printers the right edge and the foot of the
+ * sheet were simply cut off — and because the fitter sizes the sheet to this
+ * figure, it had no reason to shrink anything: what it measured did fit, it was
+ * the paper that did not. Everything on the sheet is derived from this number.
+ */
+const PRINT_PAGE_MARGIN_MM = 7;
 /**
  * The artwork block is the same height on every sheet, so two bills printed one
  * after the other look alike instead of one carrying a poster and the next a
@@ -1095,6 +1107,7 @@ export function buildSportsDayMatrices(
 const SHIRT_STYLE_PRINT_LABELS: Record<string, string> = {
     short: 'แขนสั้น',
     long: 'แขนยาว',
+    sleeveless: 'แขนกุด',
 };
 const PANTS_STYLE_PRINT_LABELS: Record<string, string> = {
     short: 'ขาสั้น',
@@ -1110,11 +1123,16 @@ const PANTS_STYLE_PRINT_LABELS: Record<string, string> = {
 const STYLE_CHIP_CLASSES: Record<string, string> = {
     short: 'bg-sky-100 text-sky-800 ring-1 ring-sky-200',
     long: 'bg-violet-100 text-violet-800 ring-1 ring-violet-200',
+    // Pink, because sky and violet are taken and the size group already owns
+    // green and orange. It is far enough from the brand red that a length
+    // never reads as a warning.
+    sleeveless: 'bg-pink-100 text-pink-800 ring-1 ring-pink-200',
 };
 
 const SHIRT_STYLE_COLUMN_LABELS: Record<string, string> = {
     short: 'เสื้อแขนสั้น',
     long: 'เสื้อแขนยาว',
+    sleeveless: 'เสื้อแขนกุด',
 };
 const PANTS_STYLE_COLUMN_LABELS: Record<string, string> = {
     short: 'กางเกงขาสั้น',
@@ -1128,6 +1146,7 @@ const PANTS_STYLE_COLUMN_LABELS: Record<string, string> = {
 const SHIRT_STYLE_PERSON_LABELS: Record<string, string> = {
     short: 'แขนสั้น',
     long: 'แขนยาว',
+    sleeveless: 'แขนกุด',
 };
 const PANTS_STYLE_PERSON_LABELS: Record<string, string> = {
     short: 'ขาสั้น',
@@ -1157,15 +1176,18 @@ function summarizePersonLengths(
 ): PersonLengthSummary {
     const counts = new Map<string, number>();
 
+    // Which lengths exist is the label table's business, not this function's.
+    // Written out as a pair, it printed a dash for a sleeveless shirt — the
+    // bill said แขนกุด and the sheet said nothing.
     for (const style of styles) {
-        if (style !== 'short' && style !== 'long') {
+        if (!style || labels[style] === undefined) {
             continue;
         }
 
         counts.set(style, (counts.get(style) ?? 0) + 1);
     }
 
-    const used = ['short', 'long'].filter((style) => counts.has(style));
+    const used = Object.keys(labels).filter((style) => counts.has(style));
 
     return {
         mixed: used.length > 1,
@@ -1176,8 +1198,374 @@ function summarizePersonLengths(
             )
             .join(' · '),
         labelOf: (style) =>
-            style === 'short' || style === 'long' ? labels[style] : '-',
+            style && labels[style] !== undefined ? labels[style] : '-',
     };
+}
+
+/**
+ * The order-item types a garment table can show: one garment, one size, one
+ * price. A bill carrying anything else — a set, or a line recorded before the
+ * garment was named — is shown on the layout it was sold on, because putting
+ * it on the garment tables would mean inventing a price split.
+ */
+const GARMENT_TABLE_ITEM_TYPES = [
+    'separate_shirt',
+    'separate_pants',
+    'shirt',
+    'pants',
+];
+
+type CounterOrderItem = {
+    item_type?: string;
+    size_group?: string;
+    size_label?: string;
+    shirt_style?: string | null;
+    pants_style?: string | null;
+    quantity?: number;
+    unit_price?: number;
+    total_price?: number;
+};
+
+/**
+ * The counter forms that sell shirts and trousers as separate pieces and read
+ * back as a shirt list beside a trouser list. Form 2 takes its numbers one
+ * person at a time, but it is billed and cut by size like the other two, so
+ * it is shown the same way — its name list prints on its own sheet.
+ *
+ * order_items cannot say which form wrote a bill, so the form it was written
+ * on decides the layout.
+ */
+const GARMENT_TABLE_FORM_MODES = ['matrix', 'pe_uniform', 'individual'];
+
+function billUsesGarmentTables(
+    items: CounterOrderItem[],
+    formMode: string | null | undefined,
+): boolean {
+    if (!GARMENT_TABLE_FORM_MODES.includes((formMode ?? '').trim())) {
+        return false;
+    }
+
+    return (
+        items.length > 0 &&
+        items.every((item) =>
+            GARMENT_TABLE_ITEM_TYPES.includes(
+                (item.item_type ?? '').toLowerCase(),
+            ),
+        )
+    );
+}
+
+type GarmentPrintLine = {
+    key: string;
+    sizeLabel: string;
+    styleLabel: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+};
+
+type GarmentSizeGroup = {
+    sizeGroup: 'kids' | 'adults';
+    title: string;
+    shirt: GarmentPrintLine[];
+    pants: GarmentPrintLine[];
+};
+
+/**
+ * The saved lines of one garment, gathered into what the shop cuts: a size, a
+ * length and a price. Form 2 records a line per person, so twenty-five people
+ * in one size have to read as one line of twenty-five — but only where the
+ * length and the price agree, because two prices are two things to bill and
+ * two lengths are two things to cut.
+ *
+ * A line saved before lengths were recorded keeps no length rather than being
+ * called short: the bill never said.
+ */
+function buildGarmentLines(
+    items: CounterOrderItem[],
+    sizeGroup: 'kids' | 'adults',
+    garment: 'shirt' | 'pants',
+): GarmentPrintLine[] {
+    const wanted =
+        garment === 'shirt'
+            ? ['separate_shirt', 'shirt']
+            : ['separate_pants', 'pants'];
+    const styleLabels =
+        garment === 'shirt'
+            ? SHIRT_STYLE_PRINT_LABELS
+            : PANTS_STYLE_PRINT_LABELS;
+    const sizeOrder = sizeGroup === 'kids' ? KID_SIZE_ORDER : ADULT_SIZE_ORDER;
+    const rankOf = (label: string): number => {
+        const rank = sizeOrder.indexOf(label.trim().toUpperCase());
+
+        return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+    };
+
+    const lines = new Map<string, GarmentPrintLine>();
+
+    items
+        .filter(
+            (item) =>
+                ((item.size_group ?? 'adults') === 'kids'
+                    ? 'kids'
+                    : 'adults') === sizeGroup &&
+                wanted.includes((item.item_type ?? '').toLowerCase()),
+        )
+        .forEach((item) => {
+            const style =
+                garment === 'shirt' ? item.shirt_style : item.pants_style;
+            const quantity = Math.max(0, Number(item.quantity ?? 0));
+            const unitPrice = Math.max(0, Number(item.unit_price ?? 0));
+            const sizeLabel = (item.size_label ?? '').trim() || '-';
+            // Whatever lengths the label table knows, not a pair written out
+            // here: a sleeveless shirt used to fall through to an empty cell.
+            const styleLabel =
+                style && styleLabels[style] !== undefined
+                    ? styleLabels[style]
+                    : '';
+            const key = `${sizeGroup}-${garment}-${sizeLabel}-${styleLabel}-${unitPrice}`;
+            const line = lines.get(key) ?? {
+                key,
+                sizeLabel,
+                styleLabel,
+                quantity: 0,
+                unitPrice,
+                total: 0,
+            };
+
+            line.quantity += quantity;
+            // The line total the bill was saved with wins, so a receipt
+            // reprinted years later still reads what the customer paid.
+            line.total += Number(item.total_price ?? quantity * unitPrice);
+            lines.set(key, line);
+        });
+
+    return [...lines.values()].sort(
+        (left, right) =>
+            rankOf(left.sizeLabel) - rankOf(right.sizeLabel) ||
+            left.sizeLabel.localeCompare(right.sizeLabel, 'th') ||
+            left.styleLabel.localeCompare(right.styleLabel, 'th'),
+    );
+}
+
+/** Pieces and money for one garment's lines. */
+function garmentLineTotals(lines: GarmentPrintLine[]): {
+    quantity: number;
+    amount: number;
+} {
+    return lines.reduce(
+        (totals, line) => ({
+            quantity: totals.quantity + line.quantity,
+            amount: totals.amount + line.total,
+        }),
+        { quantity: 0, amount: 0 },
+    );
+}
+
+function buildGarmentSizeGroups(items: CounterOrderItem[]): GarmentSizeGroup[] {
+    return (['kids', 'adults'] as const)
+        .map((sizeGroup) => ({
+            sizeGroup,
+            title:
+                sizeGroup === 'kids'
+                    ? 'ขนาดเด็ก · อนุบาล/ประถม'
+                    : 'ขนาดผู้ใหญ่ · มัธยมต้น/มัธยมปลาย',
+            shirt: buildGarmentLines(items, sizeGroup, 'shirt'),
+            pants: buildGarmentLines(items, sizeGroup, 'pants'),
+        }))
+        .filter((group) => group.shirt.length > 0 || group.pants.length > 0);
+}
+
+/**
+ * The sizes of a bill sold as separate pieces, read back the way Forms 1, 2
+ * and 4 all take them: a shirt list beside a trouser list, per size group,
+ * with what each garment came to and the figure the customer is asked for.
+ */
+function GarmentSizeGroupCards({ groups }: { groups: GarmentSizeGroup[] }) {
+    return (
+        <div className="space-y-3">
+            {groups.map((group) => {
+                const shirtTotals = garmentLineTotals(group.shirt);
+                const pantsTotals = garmentLineTotals(group.pants);
+                const isKids = group.sizeGroup === 'kids';
+
+                return (
+                    <div
+                        key={group.sizeGroup}
+                        className={`overflow-hidden rounded-lg border ${isKids ? 'border-emerald-200' : 'border-orange-200'}`}
+                    >
+                        <div
+                            className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-bold text-white ${
+                                isKids ? 'bg-emerald-700' : 'bg-orange-700'
+                            }`}
+                        >
+                            <span>{group.title}</span>
+                            <span className="font-semibold">
+                                {(
+                                    shirtTotals.quantity + pantsTotals.quantity
+                                ).toLocaleString('th-TH')}{' '}
+                                ตัว · ฿{' '}
+                                {formatMoney(
+                                    shirtTotals.amount + pantsTotals.amount,
+                                )}
+                            </span>
+                        </div>
+
+                        <div className="space-y-2 p-2">
+                            <div className="grid gap-2 lg:grid-cols-2">
+                                <GarmentPreviewTable
+                                    sizeHeading="ไซซ์เสื้อ"
+                                    lengthHeading="แขน"
+                                    lines={group.shirt}
+                                    accent="shirt"
+                                />
+                                <GarmentPreviewTable
+                                    sizeHeading="ไซซ์กางเกง"
+                                    lengthHeading="ขา"
+                                    lines={group.pants}
+                                    accent="pants"
+                                />
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs">
+                                <span className="text-slate-600">
+                                    รวม เสื้อ{' '}
+                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                        {shirtTotals.quantity.toLocaleString(
+                                            'th-TH',
+                                        )}
+                                    </strong>{' '}
+                                    ตัว ฿{' '}
+                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                        {formatMoney(shirtTotals.amount)}
+                                    </strong>
+                                </span>
+                                <span className="text-slate-600">
+                                    รวม กางเกง{' '}
+                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                        {pantsTotals.quantity.toLocaleString(
+                                            'th-TH',
+                                        )}
+                                    </strong>{' '}
+                                    ตัว ฿{' '}
+                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                        {formatMoney(pantsTotals.amount)}
+                                    </strong>
+                                </span>
+                                <span className="font-bold text-slate-900">
+                                    ราคารวม ฿{' '}
+                                    <strong className="text-sm font-bold text-[#E21E26] tabular-nums">
+                                        {formatMoney(
+                                            shirtTotals.amount +
+                                                pantsTotals.amount,
+                                        )}
+                                    </strong>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+/**
+ * A garment's lines as the counter reads them back: size, length, how many,
+ * what one costs and what the line comes to. Shirts sit in one of these and
+ * trousers in the one beside it, which is how Forms 1 and 4 take them.
+ */
+function GarmentPreviewTable({
+    sizeHeading,
+    lengthHeading,
+    lines,
+    accent,
+}: {
+    sizeHeading: string;
+    lengthHeading: string;
+    lines: GarmentPrintLine[];
+    accent: 'shirt' | 'pants';
+}) {
+    const totals = garmentLineTotals(lines);
+    const headClass =
+        accent === 'shirt'
+            ? 'bg-blue-50 text-blue-900'
+            : 'bg-rose-50 text-rose-900';
+
+    return (
+        <div className="min-w-0 overflow-x-auto rounded-md border border-slate-200">
+            <table className="w-full min-w-[320px] text-left text-xs">
+                <thead>
+                    <tr className={headClass}>
+                        <th className="px-2 py-1.5 font-semibold">
+                            {sizeHeading}
+                        </th>
+                        <th className="px-2 py-1.5 font-semibold">
+                            {lengthHeading}
+                        </th>
+                        <th className="px-2 py-1.5 text-right font-semibold">
+                            จำนวน
+                        </th>
+                        <th className="px-2 py-1.5 text-right font-semibold">
+                            ราคา/ตัว
+                        </th>
+                        <th className="px-2 py-1.5 text-right font-semibold">
+                            รวม
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {lines.length === 0 ? (
+                        <tr className="border-t border-slate-200">
+                            <td
+                                colSpan={5}
+                                className="px-2 py-2 text-center text-slate-400"
+                            >
+                                —
+                            </td>
+                        </tr>
+                    ) : (
+                        lines.map((line) => (
+                            <tr
+                                key={line.key}
+                                className="border-t border-slate-200 odd:bg-white even:bg-slate-50/70"
+                            >
+                                <td className="px-2 py-1.5 font-bold text-slate-900">
+                                    {line.sizeLabel}
+                                </td>
+                                <td className="px-2 py-1.5 text-slate-700">
+                                    {line.styleLabel || '-'}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-semibold text-slate-900 tabular-nums">
+                                    {line.quantity.toLocaleString('th-TH')}
+                                </td>
+                                <td className="px-2 py-1.5 text-right text-slate-700 tabular-nums">
+                                    ฿ {formatMoney(line.unitPrice)}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-bold text-slate-900 tabular-nums">
+                                    ฿ {formatMoney(line.total)}
+                                </td>
+                            </tr>
+                        ))
+                    )}
+                </tbody>
+                <tfoot>
+                    <tr className="border-t border-slate-300 bg-slate-100 font-bold text-slate-900">
+                        <td className="px-2 py-1.5" colSpan={2}>
+                            รวม
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                            {totals.quantity.toLocaleString('th-TH')} ตัว
+                        </td>
+                        <td className="px-2 py-1.5" />
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                            ฿ {formatMoney(totals.amount)}
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    );
 }
 
 type PrintSizeRow = {
@@ -1221,7 +1609,9 @@ function buildPrintSizeRows(
     const rows: PrintSizeRow[] = [];
 
     const styleOf = (value: unknown): string =>
-        value === 'short' || value === 'long' ? value : '';
+        value === 'short' || value === 'long' || value === 'sleeveless'
+            ? value
+            : '';
 
     // 'garment' is the value used before the split existed and is read as a set,
     // which is what Form 1 wrote it for.
@@ -2537,6 +2927,21 @@ export default function Counter({
         [selectedOrder],
     );
 
+    /**
+     * Forms 1 and 4 read back as a shirt list and a trouser list side by side.
+     * null means this bill is not one of those — a colour-house bill, a name
+     * list, or a bill written on the retired set layout — and the size rows
+     * below are shown instead.
+     */
+    const dialogGarmentGroups = useMemo(() => {
+        const details = selectedOrder?.details;
+        const items = details?.items ?? [];
+
+        return billUsesGarmentTables(items, details?.form_mode)
+            ? buildGarmentSizeGroups(items)
+            : null;
+    }, [selectedOrder]);
+
     const dialogSizeGroups = useMemo(() => {
         const items = selectedOrder?.details?.items ?? [];
 
@@ -2973,7 +3378,13 @@ export default function Counter({
                         .subtitle { font-size: 9px; color: #374151; margin-top: 1px; line-height: 1.15; }
                         .masthead-branch { font-size: 10px; line-height: 1.2; }
                         .masthead-branch .branch-label { color: #E21E26; font-weight: 700; }
-                        .masthead-job { display: grid; grid-template-columns: 2.4fr 1fr 1fr; gap: 6px; align-items: baseline; border-top: 1px solid ${branchHeaderColor}; padding: 2px 7px 3px; }
+                        /* Sized the same way as the work sheet's masthead: the
+                           customer and the due date get the width their text needs
+                           and the job name takes what is left, rather than fixed
+                           fractions that starve one cell while another keeps half a
+                           column of white. Each track can still give way when every
+                           field is long, the job name first. */
+                        .masthead-job { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) max-content; gap: 6px; align-items: baseline; border-top: 1px solid ${branchHeaderColor}; padding: 2px 7px 3px; }
                         .masthead-job > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                         .job-label { font-size: 9px; color: ${branchHeaderColor}; font-weight: 700; }
                         .job-value { font-size: 13px; color: #111827; font-weight: 800; }
@@ -3175,13 +3586,21 @@ export default function Counter({
                 styleOf: (row: PrintSizeRow) => string,
                 quantitiesOf: (row: PrintSizeRow) => number[],
             ): string[] => {
-                const used = ['short', 'long', ''].filter((style) =>
-                    rows.some(
-                        (row) =>
-                            styleOf(row) === style &&
+                // Read off the rows rather than written out here. Spelled as a
+                // pair, a sleeveless shirt got no column of its own and its
+                // quantity never reached the paper.
+                const present = new Set(
+                    rows
+                        .filter((row) =>
                             quantitiesOf(row).some((quantity) => quantity > 0),
-                    ),
+                        )
+                        .map((row) => styleOf(row)),
                 );
+                const known = ['short', 'long', 'sleeveless', ''];
+                const used = [
+                    ...known.filter((style) => present.has(style)),
+                    ...[...present].filter((style) => !known.includes(style)),
+                ];
 
                 // Never drop the column entirely: an order with no shirts at all
                 // still prints the shirt column, as the sheet always has.
@@ -3390,23 +3809,121 @@ export default function Counter({
             order.sports_day_groups ?? [],
         );
 
+        /**
+         * Forms 1 and 4 sell shirts and trousers as separate pieces, each with
+         * its own sizes, so the sheet reads as two tables side by side: the
+         * shirt list, the trouser list, and what each comes to. The grand
+         * total sits under them, which is the figure the customer is asked
+         * for.
+         */
+        const renderGarmentGroup = (group: GarmentSizeGroup): string => {
+            const themeClass =
+                group.sizeGroup === 'kids' ? 'theme-kids' : 'theme-adults';
+            // A dash reads as "nothing here" in a cell, the way the rest of the
+            // sheet writes an empty figure; the totals underneath are always a
+            // number, because a total of nothing is still nothing owed.
+            const money = (value: number): string =>
+                value > 0 ? formatMoney(value) : '-';
+            const shirtTotals = garmentLineTotals(group.shirt);
+            const pantsTotals = garmentLineTotals(group.pants);
+
+            const renderTable = (
+                heading: string,
+                lengthHeading: string,
+                lines: GarmentPrintLine[],
+                totals: { quantity: number; amount: number },
+            ): string => {
+                const body =
+                    lines.length > 0
+                        ? lines
+                              .map(
+                                  (line) => `
+                        <tr>
+                            <td class="size-label">${escapeHtml(line.sizeLabel)}</td>
+                            <td>${escapeHtml(line.styleLabel) || '-'}</td>
+                            <td class="g-num">${line.quantity.toLocaleString('th-TH')}</td>
+                            <td class="g-num">${money(line.unitPrice)}</td>
+                            <td class="g-num size-subtotal">${money(line.total)}</td>
+                        </tr>`,
+                              )
+                              .join('')
+                        : '<tr><td colspan="5" class="empty-state">—</td></tr>';
+
+                return `
+                    <table class="size-table g-table">
+                        <thead>
+                            <tr>
+                                <th>${escapeHtml(heading)}</th>
+                                <th>${escapeHtml(lengthHeading)}</th>
+                                <th class="g-num">จำนวน</th>
+                                <th class="g-num">ราคา/ตัว</th>
+                                <th class="g-num">รวม</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${body}
+                            <tr class="size-total-row">
+                                <td class="size-total-label" colspan="2">รวม</td>
+                                <td class="g-num">${totals.quantity.toLocaleString('th-TH')} ตัว</td>
+                                <td></td>
+                                <td class="g-num size-subtotal">${formatMoney(totals.amount)} บ.</td>
+                            </tr>
+                        </tbody>
+                    </table>`;
+            };
+
+            return `
+                <div class="size-block ${themeClass}">
+                    <div class="table-title">${escapeHtml(group.title)}</div>
+                    <div class="g-pair">
+                        ${renderTable('ไซซ์เสื้อ', 'แขน', group.shirt, shirtTotals)}
+                        ${renderTable('ไซซ์กางเกง', 'ขา', group.pants, pantsTotals)}
+                    </div>
+                    <table class="size-table g-summary">
+                        <tbody>
+                            <tr>
+                                <td class="g-sum-cell">
+                                    <span class="g-sum-key">เสื้อ</span>
+                                    <span class="g-sum-qty">${shirtTotals.quantity.toLocaleString('th-TH')} ตัว</span>
+                                    <span class="g-sum-money">${formatMoney(shirtTotals.amount)} บ.</span>
+                                </td>
+                                <td class="g-sum-cell">
+                                    <span class="g-sum-key">กางเกง</span>
+                                    <span class="g-sum-qty">${pantsTotals.quantity.toLocaleString('th-TH')} ตัว</span>
+                                    <span class="g-sum-money">${formatMoney(pantsTotals.amount)} บ.</span>
+                                </td>
+                                <td class="g-sum-cell g-sum-grand">
+                                    <span class="g-sum-key">ราคารวม</span>
+                                    <span class="g-sum-qty">${(shirtTotals.quantity + pantsTotals.quantity).toLocaleString('th-TH')} ตัว</span>
+                                    <span class="g-sum-money">${formatMoney(shirtTotals.amount + pantsTotals.amount)} บาท</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>`;
+        };
+
         const sizeGroupTablesMarkup =
             sportsDayMatrices.length > 0
                 ? sportsDayMatrices.map(renderSportsDayMatrix).join('')
-                : [
-                      renderSizeGroupTable(
-                          'kids',
-                          'ขนาดเด็ก  อนุบาล/ประถม',
-                          'theme-kids',
-                      ),
-                      renderSizeGroupTable(
-                          'adults',
-                          'ขนาดผู้ใหญ่  มัธยมต้น/มัธยมปลาย',
-                          'theme-adults',
-                      ),
-                  ]
-                      .filter((markup) => markup !== '')
-                      .join('');
+                : billUsesGarmentTables(sizeRows, order.form_mode)
+                  ? buildGarmentSizeGroups(sizeRows)
+                        .map(renderGarmentGroup)
+                        .join('')
+                  : [
+                        renderSizeGroupTable(
+                            'kids',
+                            'ขนาดเด็ก  อนุบาล/ประถม',
+                            'theme-kids',
+                        ),
+                        renderSizeGroupTable(
+                            'adults',
+                            'ขนาดผู้ใหญ่  มัธยมต้น/มัธยมปลาย',
+                            'theme-adults',
+                        ),
+                    ]
+                        .filter((markup) => markup !== '')
+                        .join('');
 
         const specTablesMarkup = `<div class="spec-sections${pantsRows.length > 0 ? ' has-two' : ''}">${renderSpecSection('สเปกเสื้อ', shirtRows)}${pantsRows.length > 0 ? renderSpecSection('สเปกกางเกง', pantsRows) : ''}</div>`;
         const totalQuantity = sizeRows.reduce(
@@ -3446,11 +3963,11 @@ export default function Counter({
                     <meta charset="utf-8" />
                     <title>ใบรับงาน ${escapeHtml(order.order_code)}</title>
                     <style>
-                        @page { size: A4 portrait; margin: 4mm; }
+                        @page { size: A4 portrait; margin: ${PRINT_PAGE_MARGIN_MM}mm; }
                         * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                         html, body { margin: 0; padding: 0; background: #ffffff; color: #111827; }
                         body { font-family: 'TH Sarabun New', 'Prompt', 'Noto Sans Thai', Arial, sans-serif; font-size: 11px; line-height: 1.2; }
-                        .page { width: 100%; max-width: 202mm; margin: 0 auto; padding: 0; }
+                        .page { width: 100%; max-width: ${PRINT_PAGE_WIDTH_MM - PRINT_PAGE_MARGIN_MM * 2}mm; margin: 0 auto; padding: 0; }
                         /* One masthead instead of three stacked blocks: a slim
                            title bar, the company row, then the job line. Roughly a
                            third shorter, which goes straight to the artwork. */
@@ -3471,7 +3988,14 @@ export default function Counter({
                         .subtitle { font-size: 9px; color: #374151; margin-top: 1px; line-height: 1.15; }
                         .masthead-branch { font-size: 10px; line-height: 1.2; }
                         .masthead-branch .branch-label { color: #E21E26; font-weight: 700; }
-                        .masthead-job { display: grid; grid-template-columns: 2.4fr 1fr 1fr; gap: 6px; align-items: baseline; border-top: 1px solid ${branchHeaderColor}; padding: 2px 7px 3px; }
+                        /* The job type and the due date are given exactly the width
+                           their text needs, and the job name takes what is left.
+                           Fixed fractions used to hand the job name far more room
+                           than it uses and squeeze the type, so "ซับลิเมชั่น + ปัก +
+                           สกรีน" printed as "ซับลิเมชั่น + ปัก + ..." beside half a
+                           column of white. Each track can still give way on a sheet
+                           where everything is long, the job name first. */
+                        .masthead-job { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) max-content; gap: 6px; align-items: baseline; border-top: 1px solid ${branchHeaderColor}; padding: 2px 7px 3px; }
                         .masthead-job > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                         .job-label { font-size: 9px; color: ${branchHeaderColor}; font-weight: 700; }
                         .job-value { font-size: 13px; color: #111827; font-weight: 800; }
@@ -3575,7 +4099,30 @@ export default function Counter({
                         .size-block.theme-kids { --tbl-strong: #15803d; --tbl-head: #dcfce7; --tbl-soft: #f0fdf4; }
                         .size-block.theme-adults { --tbl-strong: #c2410c; --tbl-head: #ffedd5; --tbl-soft: #fff7ed; }
                         .size-block .table-title { background: var(--tbl-strong); }
-                        .empty-state { color: #6b7280; font-style: italic; }
+                        .empty-state { color: #6b7280; font-style: italic; text-align: center; }
+
+                        /* Forms 1 and 4: the shirt list and the trouser list sit
+                           side by side, each with its own sizes, and the pair is
+                           kept on one page so a total is never read away from the
+                           lines it came from. */
+                        .g-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; align-items: start; }
+                        .g-pair .g-table { margin-top: 2px; }
+                        .size-table .g-num { text-align: right; white-space: nowrap; }
+                        /* The three figures read across one line rather than down
+                           three: what each garment came to, then what the customer
+                           is asked for, which is set apart and largest because it
+                           is the one figure that gets acted on. */
+                        .g-summary { margin-top: 3px; table-layout: fixed; }
+                        .g-summary td { border: 1px solid #000000; padding: 3px 6px; }
+                        .g-sum-cell { width: 27%; }
+                        .g-sum-cell .g-sum-key { font-weight: 700; }
+                        .g-sum-cell .g-sum-qty { margin-left: 5px; color: #374151; }
+                        .g-sum-cell .g-sum-money { float: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+                        .g-sum-grand { width: 46%; background: var(--tbl-soft, #fff7e6); }
+                        .g-sum-grand .g-sum-key,
+                        .g-sum-grand .g-sum-money { font-size: calc(var(--size-font, 11px) + 2px); }
+                        .g-sum-grand .g-sum-money { color: var(--tbl-strong, #c2410c); }
+                        .size-block, .g-pair, .g-summary { page-break-inside: avoid; break-inside: avoid; }
                         .footer-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10px; }
                         .footer-table td { border: 1px solid #000000; padding: 4px; vertical-align: top; }
                         .footer-table .section-title { margin-bottom: 2px; font-size: 11px; }
@@ -4282,103 +4829,126 @@ export default function Counter({
                                     รายการไซซ์และราคา
                                 </h3>
                                 {isIndividualOrder ? (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full min-w-[760px] text-left text-xs">
-                                            <thead>
-                                                <tr className="text-slate-600">
-                                                    <th className="px-2 py-1">
-                                                        สกรีนชื่อ (Name)
-                                                    </th>
-                                                    <th className="px-2 py-1">
-                                                        ไซซ์
-                                                    </th>
-                                                    <th className="px-2 py-1">
-                                                        เบอร์
-                                                    </th>
-                                                    <th className="px-2 py-1 text-right">
-                                                        จำนวน
-                                                    </th>
-                                                    <th className="px-2 py-1 text-right">
-                                                        ราคาต่อหน่วย
-                                                    </th>
-                                                    <th className="px-2 py-1 text-right">
-                                                        รวม
-                                                    </th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {personalizationRows.map(
-                                                    (item, index) => (
-                                                        <tr
-                                                            key={`${item.name}-${item.number}-${index}`}
-                                                            className="border-t border-slate-200"
-                                                        >
-                                                            <td className="px-2 py-1.5 font-medium text-slate-900">
-                                                                {item.name ||
-                                                                    '-'}
+                                    <div className="space-y-3">
+                                        {/* The sizes first, read back the way Forms 1 and 4
+                                            are — what the shop bills and cuts by. */}
+                                        {dialogGarmentGroups !== null ? (
+                                            <GarmentSizeGroupCards
+                                                groups={dialogGarmentGroups}
+                                            />
+                                        ) : null}
+
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-semibold text-slate-600">
+                                                รายชื่อสกรีนชื่อ-เบอร์รายตัว
+                                            </p>
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full min-w-[760px] text-left text-xs">
+                                                    <thead>
+                                                        <tr className="text-slate-600">
+                                                            <th className="px-2 py-1">
+                                                                สกรีนชื่อ (Name)
+                                                            </th>
+                                                            <th className="px-2 py-1">
+                                                                ไซซ์
+                                                            </th>
+                                                            <th className="px-2 py-1">
+                                                                เบอร์
+                                                            </th>
+                                                            <th className="px-2 py-1 text-right">
+                                                                จำนวน
+                                                            </th>
+                                                            <th className="px-2 py-1 text-right">
+                                                                ราคาต่อหน่วย
+                                                            </th>
+                                                            <th className="px-2 py-1 text-right">
+                                                                รวม
+                                                            </th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {personalizationRows.map(
+                                                            (item, index) => (
+                                                                <tr
+                                                                    key={`${item.name}-${item.number}-${index}`}
+                                                                    className="border-t border-slate-200"
+                                                                >
+                                                                    <td className="px-2 py-1.5 font-medium text-slate-900">
+                                                                        {item.name ||
+                                                                            '-'}
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5 text-slate-700">
+                                                                        {item.size ||
+                                                                            '-'}
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5 text-slate-700">
+                                                                        {item.number ||
+                                                                            '-'}
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5 text-right">
+                                                                        {
+                                                                            item.quantity
+                                                                        }
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5 text-right">
+                                                                        ฿{' '}
+                                                                        {formatMoney(
+                                                                            item.unit_price,
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5 text-right">
+                                                                        ฿{' '}
+                                                                        {formatMoney(
+                                                                            item.total_price,
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ),
+                                                        )}
+                                                        <tr className="border-t border-slate-300 bg-slate-50">
+                                                            <td
+                                                                colSpan={3}
+                                                                className="px-2 py-1.5 text-right font-bold text-slate-800"
+                                                            >
+                                                                รวม
                                                             </td>
-                                                            <td className="px-2 py-1.5 text-slate-700">
-                                                                {item.size ||
-                                                                    '-'}
-                                                            </td>
-                                                            <td className="px-2 py-1.5 text-slate-700">
-                                                                {item.number ||
-                                                                    '-'}
-                                                            </td>
-                                                            <td className="px-2 py-1.5 text-right">
-                                                                {item.quantity}
-                                                            </td>
-                                                            <td className="px-2 py-1.5 text-right">
-                                                                ฿{' '}
-                                                                {formatMoney(
-                                                                    item.unit_price,
+                                                            <td className="px-2 py-1.5 text-right font-bold text-slate-900">
+                                                                {personalizationRows.reduce(
+                                                                    (
+                                                                        sum,
+                                                                        item,
+                                                                    ) =>
+                                                                        sum +
+                                                                        Number(
+                                                                            item.quantity ||
+                                                                                0,
+                                                                        ),
+                                                                    0,
                                                                 )}
                                                             </td>
-                                                            <td className="px-2 py-1.5 text-right">
+                                                            <td className="px-2 py-1.5" />
+                                                            <td className="px-2 py-1.5 text-right font-bold text-[#E21E26]">
                                                                 ฿{' '}
                                                                 {formatMoney(
-                                                                    item.total_price,
+                                                                    personalizationRows.reduce(
+                                                                        (
+                                                                            sum,
+                                                                            item,
+                                                                        ) =>
+                                                                            sum +
+                                                                            Number(
+                                                                                item.total_price ||
+                                                                                    0,
+                                                                            ),
+                                                                        0,
+                                                                    ),
                                                                 )}
                                                             </td>
                                                         </tr>
-                                                    ),
-                                                )}
-                                                <tr className="border-t border-slate-300 bg-slate-50">
-                                                    <td
-                                                        colSpan={3}
-                                                        className="px-2 py-1.5 text-right font-bold text-slate-800"
-                                                    >
-                                                        รวม
-                                                    </td>
-                                                    <td className="px-2 py-1.5 text-right font-bold text-slate-900">
-                                                        {personalizationRows.reduce(
-                                                            (sum, item) =>
-                                                                sum +
-                                                                Number(
-                                                                    item.quantity ||
-                                                                        0,
-                                                                ),
-                                                            0,
-                                                        )}
-                                                    </td>
-                                                    <td className="px-2 py-1.5" />
-                                                    <td className="px-2 py-1.5 text-right font-bold text-[#E21E26]">
-                                                        ฿{' '}
-                                                        {formatMoney(
-                                                            personalizationRows.reduce(
-                                                                (sum, item) =>
-                                                                    sum +
-                                                                    Number(
-                                                                        item.total_price ||
-                                                                            0,
-                                                                    ),
-                                                                0,
-                                                            ),
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
                                     </div>
                                 ) : dialogSportsDayMatrices.length > 0 ? (
                                     <div className="space-y-3">
@@ -4597,6 +5167,10 @@ export default function Counter({
                                             },
                                         )}
                                     </div>
+                                ) : dialogGarmentGroups !== null ? (
+                                    <GarmentSizeGroupCards
+                                        groups={dialogGarmentGroups}
+                                    />
                                 ) : dialogSizeGroups.length === 0 ? (
                                     <p className="rounded-md border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-500">
                                         ยังไม่มีรายการไซซ์

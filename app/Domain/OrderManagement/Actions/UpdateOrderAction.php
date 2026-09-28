@@ -45,7 +45,8 @@ class UpdateOrderAction
                         'item_type' => (string) ($item['item_type'] ?? 'garment'),
                         'size_group' => (string) ($item['size_group'] ?? 'adults'),
                         'size_label' => (string) ($item['size_label'] ?? 'M'),
-                        'shirt_style' => in_array($item['shirt_style'] ?? null, ['short', 'long'], true)
+                        // Sleeveless is a shirt cut; trousers have only the two.
+                        'shirt_style' => in_array($item['shirt_style'] ?? null, ['short', 'long', 'sleeveless'], true)
                             ? (string) $item['shirt_style']
                             : null,
                         'pants_style' => in_array($item['pants_style'] ?? null, ['short', 'long'], true)
@@ -146,6 +147,27 @@ class UpdateOrderAction
                     }
                 }
 
+                // Artwork drawn for one production batch only. The batch rides
+                // on the media itself, so only that batch's sheet takes it.
+                foreach (Order::batchedArtworkCollections() as $collection) {
+                    foreach (Arr::wrap($data[$collection.'_scoped'] ?? []) as $batch => $batchFiles) {
+                        $normalizedBatch = Order::normalizeArtworkBatch($batch, $collection);
+                        $properties = $normalizedBatch === null
+                            ? []
+                            : [Order::ARTWORK_BATCH_PROPERTY => $normalizedBatch];
+
+                        foreach (Arr::wrap($batchFiles) as $batchFile) {
+                            if ($batchFile instanceof UploadedFile) {
+                                $order->addMedia($batchFile)
+                                    ->withCustomProperties($properties)
+                                    ->toMediaCollection($collection);
+                            }
+                        }
+                    }
+                }
+
+                $this->pinArtworkBatches($order, $data['artwork_scopes'] ?? []);
+
                 // Form 3 (กีฬาสี): files arrive keyed by colour house index. The
                 // index is stored on the media itself so the artwork can be
                 // handed back to the right house on the printed sheet.
@@ -202,6 +224,50 @@ class UpdateOrderAction
      * touched, so a stray or hand-crafted id can never delete another order's
      * images -- or any non-artwork media.
      */
+    /**
+     * Re-pins artwork already on file: to one production batch, or back to
+     * every sheet of its garment when the batch is empty.
+     *
+     * Only this order's own shirt and trouser artwork can be re-pinned, so a
+     * crafted request cannot reach another bill's images.
+     *
+     * @param  mixed  $scopes  batch keyed by media id
+     */
+    private function pinArtworkBatches(Order $order, mixed $scopes): void
+    {
+        $requested = [];
+
+        foreach (Arr::wrap($scopes) as $mediaId => $batch) {
+            if (is_numeric($mediaId)) {
+                $requested[(int) $mediaId] = $batch;
+            }
+        }
+
+        if ($requested === []) {
+            return;
+        }
+
+        foreach (Order::batchedArtworkCollections() as $collection) {
+            foreach ($order->getMedia($collection) as $media) {
+                if (! array_key_exists((int) $media->id, $requested)) {
+                    continue;
+                }
+
+                $batch = Order::normalizeArtworkBatch($requested[(int) $media->id], $collection);
+                $properties = $media->custom_properties;
+
+                if ($batch === null) {
+                    unset($properties[Order::ARTWORK_BATCH_PROPERTY]);
+                } else {
+                    $properties[Order::ARTWORK_BATCH_PROPERTY] = $batch;
+                }
+
+                $media->custom_properties = $properties;
+                $media->save();
+            }
+        }
+    }
+
     private function removeArtworkMedia(Order $order, mixed $removedMediaIds): void
     {
         $ids = array_values(array_filter(

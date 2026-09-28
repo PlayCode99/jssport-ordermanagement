@@ -2,6 +2,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     CalendarClock,
     Copy,
+    ImagePlus,
     Link2,
     Link2Off,
     Loader2,
@@ -13,6 +14,13 @@ import {
 } from 'lucide-react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import {
+    ArtworkBatchDialog,
+    ARTWORK_SCOPE_ALL,
+    batchesMissingArtwork,
+    savedImageScope,
+} from '@/components/domain/orders/ArtworkBatchDialog';
+import type { ArtworkGarment } from '@/components/domain/orders/ArtworkBatchDialog';
 import { DeliveryDatePicker } from '@/components/domain/orders/DeliveryDatePicker';
 import type { DeliveryDateLoad } from '@/components/domain/orders/DeliveryDatePicker';
 import { MasterDataComboBox } from '@/components/domain/orders/MasterDataComboBox';
@@ -43,12 +51,23 @@ type SizeTableType = 'kids' | 'adults';
 type SizeFormMode = 'matrix' | 'individual' | 'sports_day' | 'pe_uniform';
 
 /**
- * ชุดพละ is Form 1's size tables with artwork attached to each table, so the
- * two modes share the whole size-table half of the form and differ only in
- * whether the artwork panel is there.
+ * ชุดพละ is Form 1 under another name on the bill: the same size tables, the
+ * same artwork dialog, the same production sheets. The mode is kept so a bill
+ * reopens as what it was sold as, not because the form behaves differently.
  */
 export function usesSizeTables(mode: SizeFormMode): boolean {
     return mode === 'matrix' || mode === 'pe_uniform';
+}
+
+/**
+ * Every form takes its artwork through the one Art Work dialog, pinned to the
+ * sheets the bill will produce. The modes differ only in where the sheets are
+ * read from — a size table, a list of people, or a set of colour houses.
+ */
+export function usesArtworkBatches(mode: SizeFormMode): boolean {
+    return (
+        usesSizeTables(mode) || mode === 'individual' || mode === 'sports_day'
+    );
 }
 
 type OptionItem = {
@@ -148,6 +167,11 @@ type ShirtSpecsForm = {
     placket_outer_color_id: string;
     placket_inner_color_id: string;
     sleeve_cuff_id: string;
+    /**
+     * Retired from the form: no longer asked for and no longer shown. The
+     * value bills were saved with is still carried in and out, so reopening
+     * one of the 25 bills that has it does not quietly erase it.
+     */
     panel_style_id: string;
     screen_color_id: string;
     embroidery_color_id: string;
@@ -180,7 +204,36 @@ type PantsSpecsForm = {
     embroidery_note_text: string;
 };
 
-type GarmentStyle = 'short' | 'long';
+/**
+ * How a garment is cut. A shirt can be sleeveless, which is not a short sleeve
+ * at another price but its own set of steps — nothing to attach at the
+ * shoulder, an armhole to bind instead — so it prints its own sheet and is
+ * priced from its own card. Trousers have only the two lengths.
+ */
+type GarmentStyle = 'short' | 'long' | 'sleeveless';
+type PantsStyle = Exclude<GarmentStyle, 'sleeveless'>;
+
+/**
+ * The length a saved row was sold at. A bill reopened for editing must come
+ * back as what it was: reading anything unrecognised as 'short' would quietly
+ * turn a sleeveless order into a short-sleeved one the next time it is saved.
+ */
+export function readShirtStyle(value: unknown): GarmentStyle {
+    return value === 'long' || value === 'sleeveless' || value === 'short'
+        ? value
+        : 'short';
+}
+
+export function readPantsStyle(value: unknown): PantsStyle {
+    return value === 'long' ? 'long' : 'short';
+}
+
+export const SHIRT_STYLES: readonly GarmentStyle[] = [
+    'short',
+    'long',
+    'sleeveless',
+];
+export const PANTS_STYLES: readonly PantsStyle[] = ['short', 'long'];
 
 type SizeRowForm = {
     id: string;
@@ -198,18 +251,38 @@ type SizeRowForm = {
     separate_pants_price: number;
 };
 
+/**
+ * One line of a garment table on Form 1 / Form 4: a size, the length it is cut
+ * in, how many, and what a single piece costs. Shirts and trousers keep their
+ * own lists, so a bill can order four shirt sizes against two trouser sizes.
+ */
+type GarmentRowForm = {
+    id: string;
+    size_label: string;
+    style: GarmentStyle;
+    quantity: number;
+    unit_price: number;
+};
+
+/** Which of a table's two garment lists a row belongs to. */
+type GarmentList = 'shirt_rows' | 'pants_rows';
+
 type SizeTableForm = {
     id: string;
     table_type: SizeTableType;
     title: string;
-    rows: SizeRowForm[];
-    /** ชุดพละ only: newly picked files, not yet uploaded. */
-    artwork_files: File[];
     /**
-     * ชุดพละ only: artwork already saved against this table, with the media id
-     * so an image can be taken off the bill (or left out of a re-opened copy).
+     * Shirts and trousers, each priced per piece. This is what Form 1 and
+     * Form 4 bill on.
      */
-    saved_artwork: SavedArtwork[];
+    shirt_rows: GarmentRowForm[];
+    pants_rows: GarmentRowForm[];
+    /**
+     * The set-and-separate columns bills were written on before the set was
+     * retired. Kept so a bill that was saved with sets still opens, prints and
+     * totals exactly as it was sold; new bills never fill this in.
+     */
+    rows: SizeRowForm[];
 };
 
 /** A keeper wears the same shirt as the team in a different colour. */
@@ -265,11 +338,9 @@ type SportsDayGroupForm = {
     team_name: string;
     fabric_color_id: string;
     rows: SportsDayRowForm[];
-    /** Newly picked files, not yet uploaded. */
-    artwork_files: File[];
     /**
-     * Artwork already saved against this house, with the media id so an image
-     * can be taken off the bill (or left out of a re-opened copy) by identity.
+     * Artwork saved against this house before artwork was pinned to sheets.
+     * Kept with its media id so an old bill's pictures can still be taken off.
      */
     saved_artwork: SavedArtwork[];
 };
@@ -298,6 +369,15 @@ type OrderCreateFormData = {
     payment_method: PaymentMethod;
     payment_status: PaymentStatus;
     shirt_artwork_files: File[];
+    /**
+     * Artwork drawn for one production batch only, keyed by that batch.
+     * Files outside this go on every sheet of their garment, which is how
+     * most bills are drawn up.
+     */
+    shirt_artwork_scoped: Record<string, File[]>;
+    pants_artwork_scoped: Record<string, File[]>;
+    /** Batch each saved image is pinned to, keyed by media id. '' = every sheet. */
+    artwork_scopes: Record<string, string>;
     pants_artwork_files: File[];
     // Media ids of saved artwork the user removed while editing.
     removed_media_ids: number[];
@@ -496,8 +576,10 @@ function formatMoney(value: number): string {
 export const SHIRT_STYLE_LABELS: Record<GarmentStyle, string> = {
     short: 'แขนสั้น',
     long: 'แขนยาว',
+    sleeveless: 'แขนกุด',
 };
-export const PANTS_STYLE_LABELS: Record<GarmentStyle, string> = {
+/** Partial on purpose: there is no such thing as sleeveless trousers. */
+export const PANTS_STYLE_LABELS: Partial<Record<GarmentStyle, string>> = {
     short: 'ขาสั้น',
     long: 'ขายาว',
 };
@@ -556,12 +638,19 @@ function isPriceColumn(key: PropertyKey): key is PriceColumn {
  */
 function LinkToggleHeader({
     label,
+    name = label,
     linked,
     onToggle,
     linkedHint,
     unlinkedHint,
 }: {
     label: string;
+    /**
+     * What the toggle is called out loud, when the column heading alone would
+     * not say which table it belongs to (two garment tables sit side by side,
+     * both headed "ราคา/ตัว").
+     */
+    name?: string;
     linked: boolean;
     onToggle: () => void;
     linkedHint: string;
@@ -576,7 +665,7 @@ function LinkToggleHeader({
                 aria-pressed={linked}
                 title={linked ? linkedHint : unlinkedHint}
                 aria-label={
-                    linked ? `ยกเลิกลิงก์${label}` : `ลิงก์${label}กับแถวแรก`
+                    linked ? `ยกเลิกลิงก์${name}` : `ลิงก์${name}กับแถวแรก`
                 }
                 className={`rounded p-0.5 transition-colors ${
                     linked
@@ -632,6 +721,510 @@ function createSizeRow(sizeLabel: string): SizeRowForm {
 }
 
 /**
+ * The production batches a bill will be split into, in the order the floor
+ * reads them. A sheet is printed per batch, so this is also the list of
+ * places a piece of artwork can be pinned to.
+ *
+ * Derived from the size tables rather than stored: the batches a bill has are
+ * whatever it was typed as, and they change the moment a row does.
+ */
+export type ArtworkBatch = {
+    key: string;
+    garment: ProductionGarment;
+    label: string;
+    quantity: number;
+};
+
+type ProductionGarment = 'shirt' | 'pants';
+
+const BATCH_BASE_LABELS: Record<string, string> = {
+    shirt_kids: 'เสื้อไซต์เด็ก',
+    shirt_adults: 'เสื้อไซต์ผู้ใหญ่',
+    pants_kids: 'กางเกงเด็ก',
+    pants_adults: 'กางเกงผู้ใหญ่',
+};
+
+const BATCH_STYLE_LABELS: Record<
+    ProductionGarment,
+    Partial<Record<GarmentStyle, string>>
+> = {
+    shirt: { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' },
+    pants: { short: 'ขาสั้น', long: 'ขายาว' },
+};
+
+/**
+ * Collects the sheets a bill will produce, keyed the way production keys them:
+ * garment, size group and length. Every form that ends up as plain order items
+ * — Form 1, Form 2 and Form 4 — batches the same way, so they all count into
+ * one of these.
+ */
+function createBatchTotals() {
+    const totals = new Map<string, ArtworkBatch>();
+
+    const add = (
+        garment: ProductionGarment,
+        sizeGroup: SizeTableType,
+        style: GarmentStyle,
+        quantity: number,
+    ) => {
+        const base = `${garment}_${sizeGroup === 'kids' ? 'kids' : 'adults'}`;
+        const key = `${base}_${style}`;
+        const existing = totals.get(key);
+
+        if (existing) {
+            existing.quantity += quantity;
+
+            return;
+        }
+
+        totals.set(key, {
+            key,
+            garment,
+            label: `${BATCH_BASE_LABELS[base]} ${BATCH_STYLE_LABELS[garment][style]}`,
+            quantity,
+        });
+    };
+
+    // Shirts before trousers, kids before adults, short before long — the same
+    // order the sheets come off the printer in.
+    const rank = (batch: ArtworkBatch): number =>
+        [
+            'shirt_kids_short',
+            'shirt_kids_long',
+            'shirt_kids_sleeveless',
+            'shirt_adults_short',
+            'shirt_adults_long',
+            'shirt_adults_sleeveless',
+            'pants_kids_short',
+            'pants_kids_long',
+            'pants_adults_short',
+            'pants_adults_long',
+        ].indexOf(batch.key);
+
+    const sorted = (): ArtworkBatch[] =>
+        [...totals.values()].sort((left, right) => rank(left) - rank(right));
+
+    return { add, sorted };
+}
+
+/**
+ * Form 2 sells to a list of people rather than a size table, but each person
+ * carries their own sleeve and leg length, so the bill still comes out as the
+ * same eight possible sheets. The conditions below are the ones that decide
+ * whether a person's line is sent to production at all: a batch nobody is
+ * billed for is not a sheet, and asking for artwork for it would be asking
+ * for a picture that never gets printed.
+ */
+export function resolveIndividualArtworkBatches(
+    rows: PersonalizationRowForm[],
+    includePants: boolean,
+): ArtworkBatch[] {
+    const { add, sorted } = createBatchTotals();
+
+    rows.filter((row) => !isBlankPersonalizationRow(row)).forEach((row) => {
+        const shirtQuantity = Math.max(row.quantity, 0);
+
+        if (shirtQuantity > 0 || row.unit_price > 0) {
+            add(
+                'shirt',
+                row.size_group,
+                row.shirt_style,
+                Math.max(shirtQuantity, 1),
+            );
+        }
+
+        if (
+            includePants &&
+            row.pants_quantity > 0 &&
+            row.pants_unit_price > 0
+        ) {
+            add('pants', row.size_group, row.pants_style, row.pants_quantity);
+        }
+    });
+
+    return sorted();
+}
+
+/**
+ * Form 3 is cut per colour house, and a house's sheet carries no sleeve
+ * length: the board prints one sheet per house, garment and size group. The
+ * house is named by its position on the bill, which is what the production
+ * sheet keys itself by, so renaming a house does not orphan its artwork.
+ */
+export function resolveSportsDayArtworkBatches(
+    groups: SportsDayGroupForm[],
+): ArtworkBatch[] {
+    const batches: ArtworkBatch[] = [];
+
+    groups.forEach((group, index) => {
+        const houseName =
+            group.team_name.trim() !== ''
+                ? group.team_name.trim()
+                : `คณะที่ ${index + 1}`;
+
+        (['shirt', 'pants'] as const).forEach((garment) => {
+            (['kids', 'adults'] as const).forEach((sizeGroup) => {
+                const quantity = group.rows
+                    .filter((row) => row.size_group === sizeGroup)
+                    .reduce(
+                        (sum, row) =>
+                            sum +
+                            Math.max(
+                                garment === 'shirt'
+                                    ? row.shirt_qty
+                                    : row.pants_qty,
+                                0,
+                            ),
+                        0,
+                    );
+
+                // A sheet nobody is billed for is never printed, so there is
+                // nothing to ask for a picture of.
+                if (quantity <= 0) {
+                    return;
+                }
+
+                batches.push({
+                    key: `sports_day_${index}_${garment}_${sizeGroup}`,
+                    garment,
+                    label: `${houseName} · ${BATCH_BASE_LABELS[`${garment}_${sizeGroup}`]}`,
+                    quantity,
+                });
+            });
+        });
+    });
+
+    return batches;
+}
+
+export function resolveArtworkBatches(
+    sizeTables: SizeTableForm[],
+): ArtworkBatch[] {
+    const { add, sorted } = createBatchTotals();
+
+    sizeTables.forEach((table) => {
+        table.shirt_rows
+            .filter((row) => !isBlankGarmentRow(row))
+            .forEach((row) =>
+                add(
+                    'shirt',
+                    table.table_type,
+                    row.style,
+                    Math.max(row.quantity, 0),
+                ),
+            );
+        table.pants_rows
+            .filter((row) => !isBlankGarmentRow(row))
+            .forEach((row) =>
+                add(
+                    'pants',
+                    table.table_type,
+                    row.style,
+                    Math.max(row.quantity, 0),
+                ),
+            );
+    });
+
+    return sorted();
+}
+
+/**
+ * One garment's lines on Form 1 / Form 4: shirts in one of these, trousers in
+ * another beside it. Each list keeps its own sizes, so a bill can order four
+ * shirt sizes against two trouser sizes, and prices per piece with the line
+ * total worked out beside it — the figure the counter reads back to the
+ * customer without doing the multiplication in their head.
+ */
+function GarmentTable({
+    title,
+    garment,
+    rows,
+    sizeOptions,
+    priceLinked,
+    onTogglePriceLink,
+    onChange,
+    onAdd,
+    onRemove,
+}: {
+    title: string;
+    garment: 'shirt' | 'pants';
+    rows: GarmentRowForm[];
+    sizeOptions: string[];
+    priceLinked: boolean;
+    onTogglePriceLink: () => void;
+    onChange: <K extends keyof GarmentRowForm>(
+        rowId: string,
+        key: K,
+        value: GarmentRowForm[K],
+    ) => void;
+    onAdd: () => void;
+    onRemove: (rowId: string) => void;
+}) {
+    const isShirt = garment === 'shirt';
+    const styleLabels = isShirt ? SHIRT_STYLE_LABELS : PANTS_STYLE_LABELS;
+    const sizeHeading = isShirt ? 'ไซซ์เสื้อ' : 'ไซซ์กางเกง';
+    const styleHeading = isShirt ? 'แขน' : 'ขา';
+    const totals = garmentRowsTotals(rows);
+    const accent = isShirt
+        ? { bar: 'bg-[#174395]', head: 'bg-blue-50/70' }
+        : { bar: 'bg-[#E21E26]', head: 'bg-rose-50/70' };
+
+    return (
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200">
+            <div
+                className={`flex items-center justify-between gap-2 border-b border-slate-200 px-2.5 py-1.5 ${accent.head}`}
+            >
+                <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <span className={`h-3 w-1 rounded-full ${accent.bar}`} />
+                    {title}
+                </span>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-1.5 text-[11px]"
+                    onClick={onAdd}
+                >
+                    <Plus className="size-3" />
+                    เพิ่มแถว
+                </Button>
+            </div>
+
+            <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] table-fixed border-collapse text-xs">
+                    <thead>
+                        <tr className="bg-slate-100 text-slate-700">
+                            <th className="w-[24%] border border-slate-200 px-1.5 py-1.5 font-semibold">
+                                {sizeHeading}
+                            </th>
+                            <th className="w-[22%] border border-slate-200 px-1.5 py-1.5 font-semibold">
+                                {styleHeading}
+                            </th>
+                            <th className="w-[16%] border border-slate-200 px-1.5 py-1.5 font-semibold">
+                                จำนวน
+                            </th>
+                            <th className="w-[20%] border border-slate-200 px-1.5 py-1.5 font-semibold">
+                                <LinkToggleHeader
+                                    label="ราคา/ตัว"
+                                    name={`ราคาต่อตัว${title}`}
+                                    linked={priceLinked}
+                                    onToggle={onTogglePriceLink}
+                                    linkedHint={`ราคา${title}: ทุกแถวใช้ราคาตามแถวแรก (กดเพื่อยกเลิก)`}
+                                    unlinkedHint={`ราคา${title}: แต่ละแถวกรอกราคาเอง (กดเพื่อลิงก์)`}
+                                />
+                            </th>
+                            <th className="w-[18%] border border-slate-200 px-1.5 py-1.5 font-semibold">
+                                รวม
+                            </th>
+                            <th className="w-[8%] border border-slate-200 px-1 py-1.5" />
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row, rowIndex) => (
+                            <tr
+                                key={row.id}
+                                className="odd:bg-white even:bg-slate-50/50"
+                            >
+                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                    <Select
+                                        value={row.size_label}
+                                        onValueChange={(value) =>
+                                            onChange(
+                                                row.id,
+                                                'size_label',
+                                                value,
+                                            )
+                                        }
+                                    >
+                                        <SelectTrigger
+                                            className="h-8 w-full bg-white text-xs"
+                                            aria-label={`${sizeHeading} แถวที่ ${rowIndex + 1}`}
+                                        >
+                                            <SelectValue placeholder="ไม่ระบุ" />
+                                        </SelectTrigger>
+                                        <SelectContent
+                                            position="popper"
+                                            side="bottom"
+                                            sideOffset={4}
+                                            avoidCollisions
+                                            collisionPadding={12}
+                                        >
+                                            {sizeOptions.map((sizeOption) => (
+                                                <SelectItem
+                                                    key={`${row.id}-${sizeOption}`}
+                                                    value={sizeOption}
+                                                >
+                                                    {sizeOption}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </td>
+                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                    <Select
+                                        value={row.style}
+                                        onValueChange={(value) =>
+                                            onChange(
+                                                row.id,
+                                                'style',
+                                                value as GarmentStyle,
+                                            )
+                                        }
+                                    >
+                                        <SelectTrigger
+                                            className="h-8 w-full bg-white px-1.5 text-[11px]"
+                                            aria-label={`${styleHeading}${isShirt ? 'เสื้อ' : 'กางเกง'} แถวที่ ${rowIndex + 1}`}
+                                        >
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(isShirt
+                                                ? SHIRT_STYLES
+                                                : PANTS_STYLES
+                                            ).map((styleOption) => (
+                                                <SelectItem
+                                                    key={styleOption}
+                                                    value={styleOption}
+                                                >
+                                                    {styleLabels[styleOption]}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </td>
+                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        value={numberFieldValue(row.quantity)}
+                                        placeholder="0"
+                                        onChange={(event) =>
+                                            onChange(
+                                                row.id,
+                                                'quantity',
+                                                toNumber(event.target.value),
+                                            )
+                                        }
+                                        className="h-8 w-full min-w-0 text-right text-xs md:text-xs"
+                                        aria-label={`จำนวน${isShirt ? 'เสื้อ' : 'กางเกง'} แถวที่ ${rowIndex + 1}`}
+                                    />
+                                </td>
+                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        value={numberFieldValue(row.unit_price)}
+                                        placeholder="0"
+                                        onChange={(event) =>
+                                            onChange(
+                                                row.id,
+                                                'unit_price',
+                                                toNumber(event.target.value),
+                                            )
+                                        }
+                                        className="h-8 w-full min-w-0 text-right text-xs md:text-xs"
+                                        aria-label={`ราคาต่อตัว${isShirt ? 'เสื้อ' : 'กางเกง'} แถวที่ ${rowIndex + 1}`}
+                                    />
+                                </td>
+                                <td className="border border-slate-200 px-1.5 py-1.5 text-right align-middle font-semibold text-slate-800 tabular-nums">
+                                    {formatMoney(garmentRowTotal(row))}
+                                </td>
+                                <td className="border border-slate-200 px-1 py-1.5 text-center align-middle">
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        className="size-7 text-slate-400 hover:text-rose-600"
+                                        aria-label={`ลบแถวที่ ${rowIndex + 1} ของ${title}`}
+                                        disabled={rows.length <= 1}
+                                        onClick={() => onRemove(row.id)}
+                                    >
+                                        <Trash2 className="size-3.5" />
+                                    </Button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                    <tfoot>
+                        <tr className="bg-slate-100 font-bold text-slate-800">
+                            <td
+                                className="border border-slate-200 px-1.5 py-1.5"
+                                colSpan={2}
+                            >
+                                รวม
+                            </td>
+                            <td className="border border-slate-200 px-1.5 py-1.5 text-right tabular-nums">
+                                {totals.quantity.toLocaleString('th-TH')} ตัว
+                            </td>
+                            <td className="border border-slate-200 px-1.5 py-1.5" />
+                            <td
+                                className="border border-slate-200 px-1.5 py-1.5 text-right tabular-nums"
+                                colSpan={2}
+                            >
+                                {formatMoney(totals.amount)} บ.
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * The order-item types a garment table can hold: a piece of one garment, at
+ * one size, at one price.
+ */
+const GARMENT_TABLE_ITEM_TYPES = [
+    'separate_shirt',
+    'separate_pants',
+    'shirt',
+    'pants',
+];
+
+function createGarmentRow(sizeLabel = ''): GarmentRowForm {
+    return {
+        id: uid('garment'),
+        size_label: sizeLabel,
+        style: 'short',
+        quantity: 0,
+        unit_price: 0,
+    };
+}
+
+/**
+ * A row nobody has filled in. A blank table opens with several of these and
+ * they must stay off the bill, so a size on its own — picked and then thought
+ * better of — is not enough to count: there has to be a quantity.
+ */
+export function isBlankGarmentRow(row: GarmentRowForm): boolean {
+    return row.quantity <= 0;
+}
+
+export function garmentRowTotal(row: GarmentRowForm): number {
+    return Math.max(row.quantity, 0) * Math.max(row.unit_price, 0);
+}
+
+/**
+ * What a garment list comes to: pieces and money, counting only the rows that
+ * will actually reach the bill.
+ */
+export function garmentRowsTotals(rows: GarmentRowForm[]): {
+    quantity: number;
+    amount: number;
+} {
+    return rows
+        .filter((row) => !isBlankGarmentRow(row))
+        .reduce(
+            (totals, row) => ({
+                quantity: totals.quantity + Math.max(row.quantity, 0),
+                amount: totals.amount + garmentRowTotal(row),
+            }),
+            { quantity: 0, amount: 0 },
+        );
+}
+
+/**
  * A new table opens with a few blank rows rather than one row per size in the
  * catalogue: a bill rarely uses every size, and a wall of pre-filled rows has to
  * be read and deleted before the first real entry can be made. The size is left
@@ -650,11 +1243,15 @@ function createSizeTable(tableType: SizeTableType): SizeTableForm {
         id: uid('table'),
         table_type: tableType,
         title: tableType === 'kids' ? 'ตารางไซส์เด็ก' : 'ตารางไซส์ผู้ใหญ่',
+        shirt_rows: Array.from({ length: NEW_SIZE_TABLE_ROWS }, () =>
+            createGarmentRow(),
+        ),
+        pants_rows: Array.from({ length: NEW_SIZE_TABLE_ROWS }, () =>
+            createGarmentRow(),
+        ),
         rows: Array.from({ length: NEW_SIZE_TABLE_ROWS }, () =>
             createSizeRow(''),
         ),
-        artwork_files: [],
-        saved_artwork: [],
     };
 }
 
@@ -681,7 +1278,6 @@ function createSportsDayGroup(teamName = ''): SportsDayGroupForm {
         rows: Array.from({ length: NEW_SPORTS_DAY_ROWS }, () =>
             createSportsDayRow(),
         ),
-        artwork_files: [],
         saved_artwork: [],
     };
 }
@@ -751,6 +1347,80 @@ function buildLineItemsFromSportsDay(
     }));
 }
 
+/**
+ * A line somebody actually entered on the retired set-and-separate table.
+ * Reopening a bill written that way fills these in; a bill written on the
+ * garment tables leaves them all blank.
+ */
+function sizeRowHasEntry(row: SizeRowForm): boolean {
+    return (
+        row.set_shirt_qty > 0 ||
+        row.set_pants_qty > 0 ||
+        row.set_price > 0 ||
+        row.separate_shirt_qty > 0 ||
+        row.separate_pants_qty > 0 ||
+        row.separate_shirt_price > 0 ||
+        row.separate_pants_price > 0
+    );
+}
+
+/**
+ * Whether these tables still hold the retired layout. The data answers it, so
+ * the same bill totals and bills the same way wherever it is read from —
+ * nothing has to remember to pass a flag along.
+ */
+export function usesLegacySizeRows(sizeTables: SizeTableForm[]): boolean {
+    return sizeTables.some((table) => table.rows.some(sizeRowHasEntry));
+}
+
+/**
+ * Shirts and trousers are sold as separate pieces, each at its own price, so
+ * every filled row becomes one order line. A row with no price is still
+ * recorded: a piece given away is a piece the floor has to cut.
+ */
+function buildRequestItemsFromGarmentTables(
+    sizeTables: SizeTableForm[],
+): RequestOrderItem[] {
+    return sizeTables.flatMap((table) => {
+        const sizeGroup = mapTableTypeToSizeGroup(table.table_type);
+
+        const linesFor = (
+            rows: GarmentRowForm[],
+            garment: 'shirt' | 'pants',
+        ): RequestOrderItem[] =>
+            rows
+                .filter((row) => !isBlankGarmentRow(row))
+                .map((row) => ({
+                    item_type:
+                        garment === 'shirt'
+                            ? ('separate_shirt' as const)
+                            : ('separate_pants' as const),
+                    size_group: sizeGroup,
+                    size_label: row.size_label || '-',
+                    ...(garment === 'shirt'
+                        ? { shirt_style: row.style }
+                        : { pants_style: row.style }),
+                    quantity: Math.max(row.quantity, 0),
+                    unit_price: Math.max(row.unit_price, 0),
+                }));
+
+        return [
+            ...linesFor(table.shirt_rows, 'shirt'),
+            ...linesFor(table.pants_rows, 'pants'),
+        ];
+    });
+}
+
+function buildLineItemsFromGarmentTables(
+    sizeTables: SizeTableForm[],
+): OrderLineItemPayload[] {
+    return buildRequestItemsFromGarmentTables(sizeTables).map((item) => ({
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_id: null,
+    }));
+}
+
 export function resolveRequestItems(
     mode: SizeFormMode,
     sizeTables: SizeTableForm[],
@@ -761,7 +1431,9 @@ export function resolveRequestItems(
     // ชุดพละ builds its order items exactly like Form 1, which is what keeps
     // production reading the same shape whichever of the two the counter used.
     if (usesSizeTables(mode)) {
-        return buildRequestItems(sizeTables);
+        return usesLegacySizeRows(sizeTables)
+            ? buildRequestItems(sizeTables)
+            : buildRequestItemsFromGarmentTables(sizeTables);
     }
 
     if (mode === 'sports_day') {
@@ -1057,6 +1729,9 @@ export function buildEditInitialFormData(
             payment_method: 'cash',
             payment_status: 'pending',
             shirt_artwork_files: [],
+            shirt_artwork_scoped: {},
+            pants_artwork_scoped: {},
+            artwork_scopes: {},
             pants_artwork_files: [],
             removed_media_ids: [],
             transfer_slip_file: null,
@@ -1136,11 +1811,6 @@ export function buildEditInitialFormData(
     // column. They are persisted in the spec JSON and read straight back.
     const savedSportsDayArtwork = (order.sports_day_artwork_media ??
         {}) as Record<string, SavedArtwork[]>;
-    // ชุดพละ artwork is keyed by which size table it belongs to.
-    const savedPeArtwork = (order.pe_uniform_artwork_media ?? {}) as Record<
-        string,
-        SavedArtwork[]
-    >;
     const savedSportsDayGroups: SportsDayGroupForm[] = (
         Array.isArray(specPayload.sports_day_groups)
             ? specPayload.sports_day_groups
@@ -1153,7 +1823,6 @@ export function buildEditInitialFormData(
             id: uid(`sd-group-${groupIndex}`),
             team_name: toStringValueFromUnknown(group.team_name),
             fabric_color_id: toStringValueFromUnknown(group.fabric_color_id),
-            artwork_files: [],
             saved_artwork: Array.isArray(
                 savedSportsDayArtwork[String(groupIndex)],
             )
@@ -1179,6 +1848,66 @@ export function buildEditInitialFormData(
     });
 
     const items = Array.isArray(order.items) ? order.items : [];
+
+    /**
+     * A bill written before the set was retired, or before the garment on a
+     * line was named. Neither can be shown on the garment tables without
+     * inventing something — a price split, or which garment a line is — so any
+     * line the tables cannot represent keeps the bill on the layout it was
+     * sold on. Nothing is dropped or silently re-priced.
+     */
+    const billNeedsLegacyRows = items.some(
+        (item) =>
+            !GARMENT_TABLE_ITEM_TYPES.includes(
+                (item.item_type ?? '').toLowerCase(),
+            ),
+    );
+
+    /**
+     * Each saved line becomes one row, rather than being grouped by size: two
+     * lines of the same size in different lengths are two things to cut, and
+     * merging them would lose one of the prices.
+     */
+    const buildGarmentRowsForTable = (
+        sizeGroup: 'kids' | 'adults',
+        garment: 'shirt' | 'pants',
+    ): GarmentRowForm[] => {
+        const wantedTypes =
+            garment === 'shirt'
+                ? ['separate_shirt', 'shirt']
+                : ['separate_pants', 'pants'];
+
+        return items
+            .filter((item) => {
+                const normalizedGroup =
+                    (item.size_group ?? 'adults') === 'kids'
+                        ? 'kids'
+                        : 'adults';
+
+                return (
+                    normalizedGroup === sizeGroup &&
+                    wantedTypes.includes((item.item_type ?? '').toLowerCase())
+                );
+            })
+            .map((item, index) => ({
+                id: uid(`${garment}-${sizeGroup}-${index}`),
+                size_label: toStringValue(item.size_label),
+                style:
+                    garment === 'shirt'
+                        ? readShirtStyle(item.shirt_style)
+                        : readPantsStyle(item.pants_style),
+                quantity: Math.max(0, toNumberValue(item.quantity)),
+                unit_price: toNumberValue(item.unit_price),
+            }));
+    };
+
+    /** A garment list always opens with somewhere to type, saved rows or not. */
+    const garmentRowsOrBlank = (rows: GarmentRowForm[]): GarmentRowForm[] =>
+        rows.length > 0
+            ? rows
+            : Array.from({ length: NEW_SIZE_TABLE_ROWS }, () =>
+                  createGarmentRow(),
+              );
 
     const buildGroupedRowsForTable = (
         sizeGroup: 'kids' | 'adults',
@@ -1247,7 +1976,11 @@ export function buildEditInitialFormData(
 
             // Style is stored per saved item; the first item that states one wins,
             // which keeps the single-choice-per-row rule when reopening an order.
-            if (item.shirt_style === 'short' || item.shirt_style === 'long') {
+            if (
+                item.shirt_style === 'short' ||
+                item.shirt_style === 'long' ||
+                item.shirt_style === 'sleeveless'
+            ) {
                 row.shirt_style = item.shirt_style;
             }
 
@@ -1271,18 +2004,26 @@ export function buildEditInitialFormData(
             );
         })
         .map((tableType) => {
-            const rows = buildGroupedRowsForTable(tableType);
+            const rows = billNeedsLegacyRows
+                ? buildGroupedRowsForTable(tableType)
+                : [];
 
             return {
                 id: uid(`table-${tableType}`),
                 table_type: tableType,
                 title:
                     tableType === 'kids' ? 'ตารางไซส์เด็ก' : 'ตารางไซส์ผู้ใหญ่',
+                shirt_rows: billNeedsLegacyRows
+                    ? []
+                    : garmentRowsOrBlank(
+                          buildGarmentRowsForTable(tableType, 'shirt'),
+                      ),
+                pants_rows: billNeedsLegacyRows
+                    ? []
+                    : garmentRowsOrBlank(
+                          buildGarmentRowsForTable(tableType, 'pants'),
+                      ),
                 rows: rows.length > 0 ? rows : [],
-                artwork_files: [],
-                saved_artwork: Array.isArray(savedPeArtwork[tableType])
-                    ? savedPeArtwork[tableType]
-                    : [],
             };
         });
 
@@ -1304,16 +2045,12 @@ export function buildEditInitialFormData(
             size: toStringValue(row.size),
             // Rows written before lengths existed are short, the same default
             // the form gives a fresh person.
-            shirt_style: (row.shirt_style === 'long'
-                ? 'long'
-                : 'short') as GarmentStyle,
+            shirt_style: readShirtStyle(row.shirt_style),
             number: toStringValue(row.number),
             quantity: Math.max(1, toNumberValue(row.quantity)),
             unit_price: toNumberValue(row.unit_price),
             pants_size: toStringValueFromUnknown(row.pants_size),
-            pants_style: (row.pants_style === 'long'
-                ? 'long'
-                : 'short') as GarmentStyle,
+            pants_style: readPantsStyle(row.pants_style),
             pants_number: toStringValueFromUnknown(row.pants_number),
             pants_quantity: toNumberValueFromUnknown(row.pants_quantity),
             pants_unit_price: toNumberValueFromUnknown(row.pants_unit_price),
@@ -1349,6 +2086,9 @@ export function buildEditInitialFormData(
         payment_method: (order.payment_method as PaymentMethod) ?? 'cash',
         payment_status: 'pending',
         shirt_artwork_files: [],
+        shirt_artwork_scoped: {},
+        pants_artwork_scoped: {},
+        artwork_scopes: {},
         pants_artwork_files: [],
         removed_media_ids: [],
         transfer_slip_file: null,
@@ -1573,6 +2313,56 @@ function SavedArtworkCard({
                     onClick={() => onRemoveSaved(media.id)}
                 >
                     <X className={compact ? 'size-3.5' : 'size-4'} />
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * The way into a bill's Art Work on Forms 1 and 4, where artwork is arranged
+ * by the sheets the bill produces rather than by garment. It states what is
+ * attached and, when some sheet would print with nothing, says so here so the
+ * gap is noticed without opening the dialog.
+ */
+function ArtworkBatchButton({
+    attached,
+    missing,
+    onOpen,
+}: {
+    attached: number;
+    missing: number;
+    onOpen: () => void;
+}) {
+    return (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p className="text-xs font-semibold text-slate-700">
+                        Art Work ของใบงาน
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                        แนบแล้ว{' '}
+                        <span className="font-mono text-xs font-semibold text-slate-900">
+                            {attached}
+                        </span>{' '}
+                        รูป
+                        {missing > 0 ? (
+                            <span className="ml-2 font-semibold text-amber-700">
+                                · ยังไม่มีรูป {missing} ใบงาน
+                            </span>
+                        ) : null}
+                    </p>
+                </div>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant={missing > 0 ? 'default' : 'outline'}
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={onOpen}
+                >
+                    <ImagePlus className="size-3.5" />
+                    จัดการรูป Art Work
                 </Button>
             </div>
         </div>
@@ -1815,8 +2605,8 @@ export default function OrderCreatePage({
         )?.mode;
 
         // A saved bill reopens on the form it was written on. ชุดพละ used to
-        // fall through to Form 1 here, which hid its per-table artwork and
-        // would have saved the bill back as a plain size-table order.
+        // fall through to Form 1 here, which would have saved the bill back as
+        // a plain size-table order under a name nobody chose.
         return savedMode === 'individual' ||
             savedMode === 'sports_day' ||
             savedMode === 'pe_uniform'
@@ -2018,6 +2808,199 @@ export default function OrderCreatePage({
     const { data, setData, post, put, processing, errors, transform } =
         useForm<OrderCreateFormData>(initialFormData);
 
+    // ---- Art Work by production batch (Forms 1 and 4) ----
+
+    const [artworkDialogOpen, setArtworkDialogOpen] = useState(false);
+
+    /** The batches this bill will be split into — one printed sheet each. */
+    const artworkBatches = useMemo(() => {
+        if (usesSizeTables(sizeFormMode)) {
+            return resolveArtworkBatches(data.size_tables);
+        }
+
+        if (sizeFormMode === 'individual') {
+            return resolveIndividualArtworkBatches(
+                data.personalization_rows,
+                data.individual_include_pants,
+            );
+        }
+
+        if (sizeFormMode === 'sports_day') {
+            return resolveSportsDayArtworkBatches(data.sports_day_groups);
+        }
+
+        return [];
+    }, [
+        sizeFormMode,
+        data.size_tables,
+        data.personalization_rows,
+        data.individual_include_pants,
+        data.sports_day_groups,
+    ]);
+
+    const artworkSavedImages = useMemo(
+        () => ({
+            shirt: visibleSavedMedia(order?.shirt_artwork_media),
+            pants: visibleSavedMedia(order?.pants_artwork_media),
+        }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [order, data.removed_media_ids],
+    );
+
+    const artworkFiles = {
+        shirt: data.shirt_artwork_files,
+        pants: data.pants_artwork_files,
+    };
+
+    const artworkScopedFiles = {
+        shirt: data.shirt_artwork_scoped,
+        pants: data.pants_artwork_scoped,
+    };
+
+    /**
+     * A bill is pinning artwork to batches as soon as anything is pinned —
+     * a file dropped into a batch, or a saved image moved to one. Nothing
+     * extra is stored: the artwork itself says which way the bill is drawn up.
+     */
+    const artworkSplitByBatch =
+        Object.values(data.shirt_artwork_scoped).some(
+            (files) => files.length > 0,
+        ) ||
+        Object.values(data.pants_artwork_scoped).some(
+            (files) => files.length > 0,
+        ) ||
+        (['shirt', 'pants'] as const).some((garment) =>
+            artworkSavedImages[garment].some(
+                (image) =>
+                    savedImageScope(image, data.artwork_scopes) !==
+                    ARTWORK_SCOPE_ALL,
+            ),
+        );
+
+    const [artworkSplitRequested, setArtworkSplitRequested] = useState(false);
+    const showArtworkSplit = artworkSplitByBatch || artworkSplitRequested;
+
+    const scopedFileKey = (garment: ArtworkGarment) =>
+        garment === 'shirt'
+            ? ('shirt_artwork_scoped' as const)
+            : ('pants_artwork_scoped' as const);
+
+    const unscopedFileKey = (garment: ArtworkGarment) =>
+        garment === 'shirt'
+            ? ('shirt_artwork_files' as const)
+            : ('pants_artwork_files' as const);
+
+    const addArtworkFiles = (
+        garment: ArtworkGarment,
+        batchKey: string,
+        files: File[],
+    ) => {
+        if (batchKey === ARTWORK_SCOPE_ALL) {
+            const key = unscopedFileKey(garment);
+
+            setData(key, [...data[key], ...files]);
+
+            return;
+        }
+
+        const key = scopedFileKey(garment);
+
+        setData(key, {
+            ...data[key],
+            [batchKey]: [...(data[key][batchKey] ?? []), ...files],
+        });
+    };
+
+    const removeArtworkFile = (
+        garment: ArtworkGarment,
+        batchKey: string,
+        index: number,
+    ) => {
+        if (batchKey === ARTWORK_SCOPE_ALL) {
+            const key = unscopedFileKey(garment);
+
+            setData(
+                key,
+                data[key].filter((_, position) => position !== index),
+            );
+
+            return;
+        }
+
+        const key = scopedFileKey(garment);
+
+        setData(key, {
+            ...data[key],
+            [batchKey]: (data[key][batchKey] ?? []).filter(
+                (_, position) => position !== index,
+            ),
+        });
+    };
+
+    const moveSavedArtwork = (id: number, batchKey: string) => {
+        setData('artwork_scopes', {
+            ...data.artwork_scopes,
+            [String(id)]: batchKey,
+        });
+    };
+
+    /**
+     * Going back to one design for the whole bill unpins everything: the
+     * images stay, they simply go on every sheet of their garment again.
+     */
+    const setArtworkSplitByBatch = (split: boolean) => {
+        setArtworkSplitRequested(split);
+
+        if (split) {
+            return;
+        }
+
+        const movedBack: Record<string, string> = { ...data.artwork_scopes };
+
+        (['shirt', 'pants'] as const).forEach((garment) => {
+            artworkSavedImages[garment].forEach((image) => {
+                if (
+                    savedImageScope(image, data.artwork_scopes) !==
+                    ARTWORK_SCOPE_ALL
+                ) {
+                    movedBack[String(image.id)] = ARTWORK_SCOPE_ALL;
+                }
+            });
+        });
+
+        setData((previous) => ({
+            ...previous,
+            artwork_scopes: movedBack,
+            shirt_artwork_files: [
+                ...previous.shirt_artwork_files,
+                ...Object.values(previous.shirt_artwork_scoped).flat(),
+            ],
+            pants_artwork_files: [
+                ...previous.pants_artwork_files,
+                ...Object.values(previous.pants_artwork_scoped).flat(),
+            ],
+            shirt_artwork_scoped: {},
+            pants_artwork_scoped: {},
+        }));
+    };
+
+    const artworkBatchesMissing = batchesMissingArtwork(
+        artworkBatches,
+        artworkFiles,
+        artworkScopedFiles,
+        artworkSavedImages,
+        data.artwork_scopes,
+        showArtworkSplit,
+    );
+
+    const artworkAttachedCount =
+        data.shirt_artwork_files.length +
+        data.pants_artwork_files.length +
+        Object.values(data.shirt_artwork_scoped).flat().length +
+        Object.values(data.pants_artwork_scoped).flat().length +
+        artworkSavedImages.shirt.length +
+        artworkSavedImages.pants.length;
+
     const selectedBranch = useMemo(
         () =>
             resolvedBranches.find(
@@ -2075,12 +3058,27 @@ export default function OrderCreatePage({
         };
     }, [data.pants_artwork_files, order]);
 
+    /**
+     * True while the bill on screen was written on the retired set layout.
+     * A walk over a handful of rows, so it is read straight rather than
+     * memoised — one less hook in a component that already has many.
+     */
+    const editingLegacySizeRows = usesLegacySizeRows(data.size_tables);
+
     const matrixGrossAmount = useMemo(
         () =>
-            data.size_tables
-                .flatMap((table) => table.rows)
-                .reduce((total, row) => total + rowTotal(row), 0),
-        [data.size_tables],
+            editingLegacySizeRows
+                ? data.size_tables
+                      .flatMap((table) => table.rows)
+                      .reduce((total, row) => total + rowTotal(row), 0)
+                : data.size_tables.reduce(
+                      (total, table) =>
+                          total +
+                          garmentRowsTotals(table.shirt_rows).amount +
+                          garmentRowsTotals(table.pants_rows).amount,
+                      0,
+                  ),
+        [data.size_tables, editingLegacySizeRows],
     );
 
     const individualGrossAmount = useMemo(
@@ -2148,7 +3146,9 @@ export default function OrderCreatePage({
     const discountAmount = (grossAmount * discountPercent) / 100;
     const derivedLineItems = useMemo(() => {
         if (usesSizeTables(sizeFormMode)) {
-            return buildLineItemsFromMatrix(data.size_tables);
+            return usesLegacySizeRows(data.size_tables)
+                ? buildLineItemsFromMatrix(data.size_tables)
+                : buildLineItemsFromGarmentTables(data.size_tables);
         }
 
         if (sizeFormMode === 'sports_day') {
@@ -2317,88 +3317,6 @@ export default function OrderCreatePage({
         );
     };
 
-    const addPeUniformArtwork = (tableId: string, selectedFiles: File[]) => {
-        if (selectedFiles.length === 0) {
-            return;
-        }
-
-        void Promise.all(selectedFiles.map((file) => compressImage(file))).then(
-            (compressed) => {
-                setData((previous) => ({
-                    ...previous,
-                    size_tables: previous.size_tables.map((table) =>
-                        table.id === tableId
-                            ? {
-                                  ...table,
-                                  artwork_files: [
-                                      ...table.artwork_files,
-                                      ...compressed,
-                                  ],
-                              }
-                            : table,
-                    ),
-                }));
-            },
-        );
-    };
-
-    const removePeUniformArtwork = (tableId: string, fileIndex: number) => {
-        setData(
-            'size_tables',
-            data.size_tables.map((table) =>
-                table.id === tableId
-                    ? {
-                          ...table,
-                          artwork_files: table.artwork_files.filter(
-                              (_, index) => index !== fileIndex,
-                          ),
-                      }
-                    : table,
-            ),
-        );
-    };
-
-    const addSportsDayArtwork = (groupId: string, selectedFiles: File[]) => {
-        if (selectedFiles.length === 0) {
-            return;
-        }
-
-        void Promise.all(selectedFiles.map((file) => compressImage(file))).then(
-            (compressed) => {
-                setData((previous) => ({
-                    ...previous,
-                    sports_day_groups: previous.sports_day_groups.map(
-                        (group) =>
-                            group.id === groupId
-                                ? {
-                                      ...group,
-                                      artwork_files: [
-                                          ...group.artwork_files,
-                                          ...compressed,
-                                      ],
-                                  }
-                                : group,
-                    ),
-                }));
-            },
-        );
-    };
-
-    const removeSportsDayArtwork = (groupId: string, fileIndex: number) => {
-        updateSportsDayGroups(
-            data.sports_day_groups.map((group) =>
-                group.id === groupId
-                    ? {
-                          ...group,
-                          artwork_files: group.artwork_files.filter(
-                              (_, index) => index !== fileIndex,
-                          ),
-                      }
-                    : group,
-            ),
-        );
-    };
-
     /**
      * Colour houses in one sports day share the same size list and prices and
      * differ only in name, colour and quantities — so a new house starts as a
@@ -2501,6 +3419,122 @@ export default function OrderCreatePage({
                 return {
                     ...table,
                     rows: table.rows.filter((row) => row.id !== rowId),
+                };
+            }),
+        );
+    };
+
+    // ---- Form 1 / Form 4 garment tables ----
+
+    /**
+     * Garment lists whose price column is currently unlinked, keyed
+     * `${tableId}:${list}`. Linked is the default: a bill almost always
+     * charges one price for every size of a garment.
+     */
+    const [unlinkedGarmentPrices, setUnlinkedGarmentPrices] = useState<
+        string[]
+    >([]);
+
+    const garmentPriceKey = (tableId: string, list: GarmentList): string =>
+        `${tableId}:${list}`;
+
+    const isGarmentPriceLinked = (
+        tableId: string,
+        list: GarmentList,
+    ): boolean =>
+        !unlinkedGarmentPrices.includes(garmentPriceKey(tableId, list));
+
+    const toggleGarmentPriceLink = (tableId: string, list: GarmentList) => {
+        const key = garmentPriceKey(tableId, list);
+
+        setUnlinkedGarmentPrices((previous) =>
+            previous.includes(key)
+                ? previous.filter((item) => item !== key)
+                : [...previous, key],
+        );
+    };
+
+    const updateGarmentRow = <K extends keyof GarmentRowForm>(
+        tableId: string,
+        list: GarmentList,
+        rowId: string,
+        key: K,
+        value: GarmentRowForm[K],
+    ) => {
+        setData(
+            'size_tables',
+            data.size_tables.map((table) => {
+                if (table.id !== tableId) {
+                    return table;
+                }
+
+                const rows = table[list];
+                // While the price column is linked, typing a price on the first
+                // row sets it for the whole list; every other row still edits
+                // on its own, and the link stays on so the first row can sweep
+                // it again later.
+                const sweep =
+                    key === 'unit_price' &&
+                    isGarmentPriceLinked(tableId, list) &&
+                    rows[0]?.id === rowId;
+
+                return {
+                    ...table,
+                    [list]: rows.map((row) => {
+                        if (row.id === rowId) {
+                            return { ...row, [key]: value };
+                        }
+
+                        return sweep
+                            ? { ...row, unit_price: value as number }
+                            : row;
+                    }),
+                };
+            }),
+        );
+    };
+
+    const addGarmentRow = (tableId: string, list: GarmentList) => {
+        setData(
+            'size_tables',
+            data.size_tables.map((table) => {
+                if (table.id !== tableId) {
+                    return table;
+                }
+
+                const rows = table[list];
+                const nextRow = createGarmentRow();
+
+                return {
+                    ...table,
+                    // A linked price is the price of this list, so a row added
+                    // under it opens at that price instead of at zero.
+                    [list]: [
+                        ...rows,
+                        isGarmentPriceLinked(tableId, list) && rows[0]
+                            ? { ...nextRow, unit_price: rows[0].unit_price }
+                            : nextRow,
+                    ],
+                };
+            }),
+        );
+    };
+
+    const removeGarmentRow = (
+        tableId: string,
+        list: GarmentList,
+        rowId: string,
+    ) => {
+        setData(
+            'size_tables',
+            data.size_tables.map((table) => {
+                if (table.id !== tableId || table[list].length <= 1) {
+                    return table;
+                }
+
+                return {
+                    ...table,
+                    [list]: table[list].filter((row) => row.id !== rowId),
                 };
             }),
         );
@@ -2700,7 +3734,6 @@ export default function OrderCreatePage({
         'placket_outer_color_id',
         'placket_inner_color_id',
         'sleeve_cuff_id',
-        'panel_style_id',
         'screen_color_id',
         'embroidery_color_id',
         'sublimation_id',
@@ -2756,11 +3789,19 @@ export default function OrderCreatePage({
             );
         }
 
+        if (editingLegacySizeRows) {
+            return data.size_tables.some((table) =>
+                table.rows.some((row) =>
+                    garment === 'shirt'
+                        ? row.set_shirt_qty > 0 || row.separate_shirt_qty > 0
+                        : row.set_pants_qty > 0 || row.separate_pants_qty > 0,
+                ),
+            );
+        }
+
         return data.size_tables.some((table) =>
-            table.rows.some((row) =>
-                garment === 'shirt'
-                    ? row.set_shirt_qty > 0 || row.separate_shirt_qty > 0
-                    : row.set_pants_qty > 0 || row.separate_pants_qty > 0,
+            (garment === 'shirt' ? table.shirt_rows : table.pants_rows).some(
+                (row) => !isBlankGarmentRow(row),
             ),
         );
     };
@@ -2815,32 +3856,36 @@ export default function OrderCreatePage({
         if (usesSizeTables(sizeFormMode)) {
             // A blank row is just an unused slot; only a row someone actually
             // entered numbers on has to name its size.
-            const rowHasEntry = (row: SizeRowForm): boolean =>
-                row.set_shirt_qty > 0 ||
-                row.set_pants_qty > 0 ||
-                row.set_price > 0 ||
-                row.separate_shirt_qty > 0 ||
-                row.separate_pants_qty > 0 ||
-                row.separate_shirt_price > 0 ||
-                row.separate_pants_price > 0;
+            const garmentRows = data.size_tables.flatMap((table) => [
+                ...table.shirt_rows,
+                ...table.pants_rows,
+            ]);
+            const sizeIsMissing = editingLegacySizeRows
+                ? data.size_tables.some((table) =>
+                      table.rows.some(
+                          (row) => sizeRowHasEntry(row) && !row.size_label,
+                      ),
+                  )
+                : garmentRows.some(
+                      (row) => !isBlankGarmentRow(row) && !row.size_label,
+                  );
 
-            if (
-                data.size_tables.some((table) =>
-                    table.rows.some(
-                        (row) => rowHasEntry(row) && !row.size_label,
-                    ),
-                )
-            ) {
+            if (sizeIsMissing) {
                 missing.push('ไซส์ในตารางเลือกไซซ์');
             }
 
-            if (
-                data.size_tables.some((table) =>
-                    table.rows.some(
-                        (row) => row.size_label.length > SIZE_LABEL_MAX_LENGTH,
-                    ),
-                )
-            ) {
+            const sizeIsTooLong = editingLegacySizeRows
+                ? data.size_tables.some((table) =>
+                      table.rows.some(
+                          (row) =>
+                              row.size_label.length > SIZE_LABEL_MAX_LENGTH,
+                      ),
+                  )
+                : garmentRows.some(
+                      (row) => row.size_label.length > SIZE_LABEL_MAX_LENGTH,
+                  );
+
+            if (sizeIsTooLong) {
                 missing.push(
                     `ไซส์ต้องไม่เกิน ${SIZE_LABEL_MAX_LENGTH} ตัวอักษร`,
                 );
@@ -3097,40 +4142,16 @@ export default function OrderCreatePage({
         transform((payload) => ({
             shirt_artwork: payload.shirt_artwork_files,
             pants_artwork: payload.pants_artwork_files,
+            // Artwork pinned to one production batch, and the batches the user
+            // moved already-saved images to. Only Forms 1 and 4 ever fill these
+            // in; the server reads an unknown batch as "every sheet".
+            shirt_artwork_scoped: payload.shirt_artwork_scoped,
+            pants_artwork_scoped: payload.pants_artwork_scoped,
+            artwork_scopes: payload.artwork_scopes,
             duplicate_from_id: order?.duplicate_from_id ?? null,
             // Saved artwork the user removed. On an edit these media are deleted;
             // on a duplicate they are simply not copied onto the new bill.
             removed_media_ids: payload.removed_media_ids,
-            // Keyed by colour house index so the server can tag each file with
-            // the house it belongs to. Only Form 3 ever sends this.
-            sports_day_artwork:
-                sizeFormMode === 'sports_day'
-                    ? Object.fromEntries(
-                          data.sports_day_groups
-                              .map(
-                                  (group, index) =>
-                                      [index, group.artwork_files] as const,
-                              )
-                              .filter(([, files]) => files.length > 0),
-                      )
-                    : {},
-            // Keyed by the size table it belongs to, so each table gets its
-            // own gallery back when the bill is reopened. Only Form 4
-            // ever sends this.
-            pe_uniform_artwork:
-                sizeFormMode === 'pe_uniform'
-                    ? Object.fromEntries(
-                          data.size_tables
-                              .map(
-                                  (table) =>
-                                      [
-                                          table.table_type,
-                                          table.artwork_files,
-                                      ] as const,
-                              )
-                              .filter(([, files]) => files.length > 0),
-                      )
-                    : {},
             customer_id: payload.customer_id
                 ? Number(payload.customer_id)
                 : null,
@@ -3223,7 +4244,6 @@ export default function OrderCreatePage({
             source: 'placket_outer_colors',
         },
         { label: 'ปลายแขน', key: 'sleeve_cuff_id', source: 'sleeve_cuffs' },
-        { label: 'สาบนอก', key: 'panel_style_id', source: 'panel_styles' },
         { label: 'สีสกรีน', key: 'screen_color_id', source: 'screen_colors' },
         {
             label: 'สีงานปัก',
@@ -3318,6 +4338,22 @@ export default function OrderCreatePage({
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
+                <ArtworkBatchDialog
+                    open={artworkDialogOpen}
+                    onOpenChange={setArtworkDialogOpen}
+                    batches={artworkBatches}
+                    files={artworkFiles}
+                    scopedFiles={artworkScopedFiles}
+                    savedImages={artworkSavedImages}
+                    savedScopes={data.artwork_scopes}
+                    splitByBatch={showArtworkSplit}
+                    onSplitByBatchChange={setArtworkSplitByBatch}
+                    onAddFiles={addArtworkFiles}
+                    onRemoveFile={removeArtworkFile}
+                    onRemoveSaved={removeSavedMedia}
+                    onMoveSaved={moveSavedArtwork}
+                />
 
                 <Dialog
                     open={showConfirmModal}
@@ -3873,25 +4909,49 @@ export default function OrderCreatePage({
                                 {activeSpecTab === 'shirt' ? (
                                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                         <div className="md:col-span-2 xl:col-span-3">
-                                            <MultiArtworkUpload
-                                                title="Art Work เสื้อ"
-                                                inputId="shirt-artwork-upload"
-                                                files={data.shirt_artwork_files}
-                                                previewUrls={
-                                                    shirtArtworkPreviewUrls
-                                                }
-                                                savedMedia={visibleSavedMedia(
-                                                    order?.shirt_artwork_media,
-                                                )}
-                                                error={shirtArtworkError}
-                                                onSelect={(event) => {
-                                                    void handleShirtArtworkSelect(
-                                                        event,
-                                                    );
-                                                }}
-                                                onRemove={removeShirtArtworkAt}
-                                                onRemoveSaved={removeSavedMedia}
-                                            />
+                                            {usesArtworkBatches(
+                                                sizeFormMode,
+                                            ) ? (
+                                                <ArtworkBatchButton
+                                                    attached={
+                                                        artworkAttachedCount
+                                                    }
+                                                    missing={
+                                                        artworkBatchesMissing.length
+                                                    }
+                                                    onOpen={() =>
+                                                        setArtworkDialogOpen(
+                                                            true,
+                                                        )
+                                                    }
+                                                />
+                                            ) : (
+                                                <MultiArtworkUpload
+                                                    title="Art Work เสื้อ"
+                                                    inputId="shirt-artwork-upload"
+                                                    files={
+                                                        data.shirt_artwork_files
+                                                    }
+                                                    previewUrls={
+                                                        shirtArtworkPreviewUrls
+                                                    }
+                                                    savedMedia={visibleSavedMedia(
+                                                        order?.shirt_artwork_media,
+                                                    )}
+                                                    error={shirtArtworkError}
+                                                    onSelect={(event) => {
+                                                        void handleShirtArtworkSelect(
+                                                            event,
+                                                        );
+                                                    }}
+                                                    onRemove={
+                                                        removeShirtArtworkAt
+                                                    }
+                                                    onRemoveSaved={
+                                                        removeSavedMedia
+                                                    }
+                                                />
+                                            )}
                                         </div>
                                         <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                                             <span className="font-semibold text-slate-600">
@@ -4106,27 +5166,40 @@ export default function OrderCreatePage({
                                     </div>
                                 ) : (
                                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                                        <div className="md:col-span-2 xl:col-span-3">
-                                            <MultiArtworkUpload
-                                                title="Art Work กางเกง"
-                                                inputId="pants-artwork-upload"
-                                                files={data.pants_artwork_files}
-                                                previewUrls={
-                                                    pantsArtworkPreviewUrls
-                                                }
-                                                savedMedia={visibleSavedMedia(
-                                                    order?.pants_artwork_media,
-                                                )}
-                                                error={pantsArtworkError}
-                                                onSelect={(event) => {
-                                                    void handlePantsArtworkSelect(
-                                                        event,
-                                                    );
-                                                }}
-                                                onRemove={removePantsArtworkAt}
-                                                onRemoveSaved={removeSavedMedia}
-                                            />
-                                        </div>
+                                        {/* Artwork is taken through the Art Work dialog, which
+                                            already covers both garments, so this tab does not
+                                            ask for it a second time. */}
+                                        {usesArtworkBatches(
+                                            sizeFormMode,
+                                        ) ? null : (
+                                            <div className="md:col-span-2 xl:col-span-3">
+                                                <MultiArtworkUpload
+                                                    title="Art Work กางเกง"
+                                                    inputId="pants-artwork-upload"
+                                                    files={
+                                                        data.pants_artwork_files
+                                                    }
+                                                    previewUrls={
+                                                        pantsArtworkPreviewUrls
+                                                    }
+                                                    savedMedia={visibleSavedMedia(
+                                                        order?.pants_artwork_media,
+                                                    )}
+                                                    error={pantsArtworkError}
+                                                    onSelect={(event) => {
+                                                        void handlePantsArtworkSelect(
+                                                            event,
+                                                        );
+                                                    }}
+                                                    onRemove={
+                                                        removePantsArtworkAt
+                                                    }
+                                                    onRemoveSaved={
+                                                        removeSavedMedia
+                                                    }
+                                                />
+                                            </div>
+                                        )}
                                         {/*
                                             แบบกางเกง is not asked for any more: leg length now
                                             comes from the size table, one row at a time, and the
@@ -4420,11 +5493,6 @@ export default function OrderCreatePage({
                                                 table.table_type === 'kids'
                                                     ? resolvedKidsSizes
                                                     : resolvedAdultSizes;
-                                            // ชุดพละ: saved images the user has not asked to remove.
-                                            const savedTableArtwork =
-                                                visibleSavedMedia(
-                                                    table.saved_artwork,
-                                                );
                                             const tableTotals =
                                                 table.rows.reduce(
                                                     (acc, row) => ({
@@ -4477,20 +5545,24 @@ export default function OrderCreatePage({
                                                             </h3>
                                                         </div>
                                                         <div className="flex items-center gap-1.5">
-                                                            <Button
-                                                                type="button"
-                                                                size="sm"
-                                                                variant="ghost"
-                                                                className="h-7 px-2 text-xs"
-                                                                onClick={() =>
-                                                                    addSizeRow(
-                                                                        table.id,
-                                                                    )
-                                                                }
-                                                            >
-                                                                <Plus className="size-3.5" />
-                                                                เพิ่มแถว
-                                                            </Button>
+                                                            {/* The garment tables each add their own rows; only the
+                                                                retired layout needs a table-wide button. */}
+                                                            {editingLegacySizeRows ? (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    className="h-7 px-2 text-xs"
+                                                                    onClick={() =>
+                                                                        addSizeRow(
+                                                                            table.id,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <Plus className="size-3.5" />
+                                                                    เพิ่มแถว
+                                                                </Button>
+                                                            ) : null}
                                                             <Button
                                                                 type="button"
                                                                 size="sm"
@@ -4508,710 +5580,766 @@ export default function OrderCreatePage({
                                                         </div>
                                                     </div>
 
-                                                    <div className="overflow-x-auto">
-                                                        <table className="w-full min-w-[1480px] table-fixed border-collapse text-xs">
-                                                            <thead>
-                                                                <tr className="bg-slate-100 text-slate-700">
-                                                                    <th className="w-[6%] border border-slate-200 px-2 py-2">
-                                                                        ไซซ์
-                                                                    </th>
-                                                                    <th className="w-[11%] border border-slate-200 px-2 py-2">
-                                                                        เสื้อ
-                                                                    </th>
-                                                                    <th
-                                                                        className="w-[3%] border border-slate-200 px-1 py-2"
-                                                                        title="ล็อกจำนวนเสื้อ/กางเกงให้เท่ากันในแถวนั้น"
-                                                                    >
-                                                                        <Link2
-                                                                            className="mx-auto size-3.5 text-slate-400"
-                                                                            aria-hidden="true"
-                                                                        />
-                                                                        <span className="sr-only">
-                                                                            ล็อกจำนวนชุด
-                                                                        </span>
-                                                                    </th>
-                                                                    <th className="w-[11%] border border-slate-200 px-2 py-2">
-                                                                        กางเกง
-                                                                    </th>
-                                                                    <th className="w-[7%] border border-slate-200 px-2 py-2">
-                                                                        <PriceLinkHeader
-                                                                            label="ราคาต่อชุด"
-                                                                            linked={isPriceColumnLinked(
-                                                                                table.id,
-                                                                                'set_price',
-                                                                            )}
-                                                                            onToggle={() =>
-                                                                                togglePriceColumnLink(
+                                                    {editingLegacySizeRows ? (
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full min-w-[1480px] table-fixed border-collapse text-xs">
+                                                                <thead>
+                                                                    <tr className="bg-slate-100 text-slate-700">
+                                                                        <th className="w-[6%] border border-slate-200 px-2 py-2">
+                                                                            ไซซ์
+                                                                        </th>
+                                                                        <th className="w-[11%] border border-slate-200 px-2 py-2">
+                                                                            เสื้อ
+                                                                        </th>
+                                                                        <th
+                                                                            className="w-[3%] border border-slate-200 px-1 py-2"
+                                                                            title="ล็อกจำนวนเสื้อ/กางเกงให้เท่ากันในแถวนั้น"
+                                                                        >
+                                                                            <Link2
+                                                                                className="mx-auto size-3.5 text-slate-400"
+                                                                                aria-hidden="true"
+                                                                            />
+                                                                            <span className="sr-only">
+                                                                                ล็อกจำนวนชุด
+                                                                            </span>
+                                                                        </th>
+                                                                        <th className="w-[11%] border border-slate-200 px-2 py-2">
+                                                                            กางเกง
+                                                                        </th>
+                                                                        <th className="w-[7%] border border-slate-200 px-2 py-2">
+                                                                            <PriceLinkHeader
+                                                                                label="ราคาต่อชุด"
+                                                                                linked={isPriceColumnLinked(
                                                                                     table.id,
                                                                                     'set_price',
-                                                                                )
-                                                                            }
-                                                                        />
-                                                                    </th>
-                                                                    <th className="w-[7%] border border-slate-200 px-2 py-2">
-                                                                        รวมต่อชุด
-                                                                    </th>
-                                                                    <th className="w-[11%] border border-slate-200 px-2 py-2">
-                                                                        เสื้อแยก
-                                                                    </th>
-                                                                    <th className="w-[11%] border border-slate-200 px-2 py-2">
-                                                                        กางเกงแยก
-                                                                    </th>
-                                                                    <th className="w-[8%] border border-slate-200 px-2 py-2">
-                                                                        <PriceLinkHeader
-                                                                            label="ราคาเสื้อ"
-                                                                            linked={isPriceColumnLinked(
-                                                                                table.id,
-                                                                                'separate_shirt_price',
-                                                                            )}
-                                                                            onToggle={() =>
-                                                                                togglePriceColumnLink(
+                                                                                )}
+                                                                                onToggle={() =>
+                                                                                    togglePriceColumnLink(
+                                                                                        table.id,
+                                                                                        'set_price',
+                                                                                    )
+                                                                                }
+                                                                            />
+                                                                        </th>
+                                                                        <th className="w-[7%] border border-slate-200 px-2 py-2">
+                                                                            รวมต่อชุด
+                                                                        </th>
+                                                                        <th className="w-[11%] border border-slate-200 px-2 py-2">
+                                                                            เสื้อแยก
+                                                                        </th>
+                                                                        <th className="w-[11%] border border-slate-200 px-2 py-2">
+                                                                            กางเกงแยก
+                                                                        </th>
+                                                                        <th className="w-[8%] border border-slate-200 px-2 py-2">
+                                                                            <PriceLinkHeader
+                                                                                label="ราคาเสื้อ"
+                                                                                linked={isPriceColumnLinked(
                                                                                     table.id,
                                                                                     'separate_shirt_price',
-                                                                                )
-                                                                            }
-                                                                        />
-                                                                    </th>
-                                                                    <th className="w-[8%] border border-slate-200 px-2 py-2">
-                                                                        <PriceLinkHeader
-                                                                            label="ราคากางเกง"
-                                                                            linked={isPriceColumnLinked(
-                                                                                table.id,
-                                                                                'separate_pants_price',
-                                                                            )}
-                                                                            onToggle={() =>
-                                                                                togglePriceColumnLink(
+                                                                                )}
+                                                                                onToggle={() =>
+                                                                                    togglePriceColumnLink(
+                                                                                        table.id,
+                                                                                        'separate_shirt_price',
+                                                                                    )
+                                                                                }
+                                                                            />
+                                                                        </th>
+                                                                        <th className="w-[8%] border border-slate-200 px-2 py-2">
+                                                                            <PriceLinkHeader
+                                                                                label="ราคากางเกง"
+                                                                                linked={isPriceColumnLinked(
                                                                                     table.id,
                                                                                     'separate_pants_price',
-                                                                                )
-                                                                            }
-                                                                        />
-                                                                    </th>
-                                                                    <th className="w-[8%] border border-slate-200 px-2 py-2">
-                                                                        รวมราคาแยกชุด
-                                                                    </th>
-                                                                    <th className="w-[6%] border border-slate-200 px-2 py-2">
-                                                                        ราคารวมแถว
-                                                                    </th>
-                                                                    <th className="w-[3%] border border-slate-200 px-2 py-2 text-center">
-                                                                        ลบ
-                                                                    </th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {table.rows.map(
-                                                                    (
-                                                                        row,
-                                                                        rowIndex,
-                                                                    ) => (
-                                                                        <tr
-                                                                            key={
-                                                                                row.id
-                                                                            }
-                                                                            className="even:bg-slate-50/60"
-                                                                        >
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <Select
-                                                                                    value={
-                                                                                        row.size_label
-                                                                                    }
-                                                                                    onValueChange={(
-                                                                                        value,
-                                                                                    ) =>
-                                                                                        updateSizeRow(
-                                                                                            table.id,
-                                                                                            row.id,
-                                                                                            'size_label',
-                                                                                            value,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <SelectTrigger className="h-8 w-full bg-white text-xs">
-                                                                                        <SelectValue placeholder="ไม่ระบุ" />
-                                                                                    </SelectTrigger>
-                                                                                    {/* Opens downwards, and Radix flips it above the row on its own when
-                                                                            there is not enough room left below the fold. */}
-                                                                                    <SelectContent
-                                                                                        position="popper"
-                                                                                        side="bottom"
-                                                                                        sideOffset={
-                                                                                            4
-                                                                                        }
-                                                                                        avoidCollisions
-                                                                                        collisionPadding={
-                                                                                            12
-                                                                                        }
-                                                                                    >
-                                                                                        {tableSizeOptions.map(
-                                                                                            (
-                                                                                                sizeOption,
-                                                                                            ) => (
-                                                                                                <SelectItem
-                                                                                                    key={`${table.id}-${row.id}-${sizeOption}`}
-                                                                                                    value={
-                                                                                                        sizeOption
-                                                                                                    }
-                                                                                                >
-                                                                                                    {
-                                                                                                        sizeOption
-                                                                                                    }
-                                                                                                </SelectItem>
-                                                                                            ),
-                                                                                        )}
-                                                                                    </SelectContent>
-                                                                                </Select>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <Select
-                                                                                        value={
-                                                                                            row.shirt_style
-                                                                                        }
-                                                                                        onValueChange={(
-                                                                                            value,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'shirt_style',
-                                                                                                value as GarmentStyle,
-                                                                                            )
-                                                                                        }
-                                                                                    >
-                                                                                        <SelectTrigger className="h-8 w-[84px] shrink-0 bg-white px-1.5 text-[11px]">
-                                                                                            <SelectValue />
-                                                                                        </SelectTrigger>
-                                                                                        <SelectContent
-                                                                                            position="popper"
-                                                                                            side="bottom"
-                                                                                            sideOffset={
-                                                                                                4
-                                                                                            }
-                                                                                            avoidCollisions
-                                                                                            collisionPadding={
-                                                                                                12
-                                                                                            }
-                                                                                        >
-                                                                                            <SelectItem value="short">
-                                                                                                แขนสั้น
-                                                                                            </SelectItem>
-                                                                                            <SelectItem value="long">
-                                                                                                แขนยาว
-                                                                                            </SelectItem>
-                                                                                        </SelectContent>
-                                                                                    </Select>
-                                                                                    <Input
-                                                                                        type="number"
-                                                                                        min={
-                                                                                            0
-                                                                                        }
-                                                                                        value={numberFieldValue(
-                                                                                            row.set_shirt_qty,
-                                                                                        )}
-                                                                                        placeholder="0"
-                                                                                        onChange={(
-                                                                                            event,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'set_shirt_qty',
-                                                                                                toNumber(
-                                                                                                    event
-                                                                                                        .target
-                                                                                                        .value,
-                                                                                                ),
-                                                                                            )
-                                                                                        }
-                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
-                                                                                        aria-label={`จำนวนเสื้อชุด แถวที่ ${rowIndex + 1}`}
-                                                                                    />
-                                                                                </div>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1 py-1.5 text-center align-middle">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() =>
-                                                                                        toggleSetQtyLink(
-                                                                                            row.id,
-                                                                                        )
-                                                                                    }
-                                                                                    aria-pressed={isSetQtyLinked(
-                                                                                        row.id,
-                                                                                    )}
-                                                                                    title={
-                                                                                        isSetQtyLinked(
-                                                                                            row.id,
-                                                                                        )
-                                                                                            ? 'จำนวนเสื้อและกางเกงเท่ากัน (กดเพื่อแยก)'
-                                                                                            : 'กรอกจำนวนเสื้อและกางเกงแยกกัน (กดเพื่อล็อกให้เท่ากัน)'
-                                                                                    }
-                                                                                    aria-label={
-                                                                                        isSetQtyLinked(
-                                                                                            row.id,
-                                                                                        )
-                                                                                            ? 'แยกจำนวนเสื้อและกางเกง'
-                                                                                            : 'ล็อกจำนวนเสื้อและกางเกงให้เท่ากัน'
-                                                                                    }
-                                                                                    className={`rounded p-1 transition-colors ${
-                                                                                        isSetQtyLinked(
-                                                                                            row.id,
-                                                                                        )
-                                                                                            ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                                                                                            : 'text-slate-400 hover:text-slate-600'
-                                                                                    }`}
-                                                                                >
-                                                                                    {isSetQtyLinked(
-                                                                                        row.id,
-                                                                                    ) ? (
-                                                                                        <Link2 className="size-3.5" />
-                                                                                    ) : (
-                                                                                        <Link2Off className="size-3.5" />
-                                                                                    )}
-                                                                                </button>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <Select
-                                                                                        value={
-                                                                                            row.pants_style
-                                                                                        }
-                                                                                        onValueChange={(
-                                                                                            value,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'pants_style',
-                                                                                                value as GarmentStyle,
-                                                                                            )
-                                                                                        }
-                                                                                    >
-                                                                                        <SelectTrigger className="h-8 w-[84px] shrink-0 bg-white px-1.5 text-[11px]">
-                                                                                            <SelectValue />
-                                                                                        </SelectTrigger>
-                                                                                        <SelectContent
-                                                                                            position="popper"
-                                                                                            side="bottom"
-                                                                                            sideOffset={
-                                                                                                4
-                                                                                            }
-                                                                                            avoidCollisions
-                                                                                            collisionPadding={
-                                                                                                12
-                                                                                            }
-                                                                                        >
-                                                                                            <SelectItem value="short">
-                                                                                                ขาสั้น
-                                                                                            </SelectItem>
-                                                                                            <SelectItem value="long">
-                                                                                                ขายาว
-                                                                                            </SelectItem>
-                                                                                        </SelectContent>
-                                                                                    </Select>
-                                                                                    <Input
-                                                                                        type="number"
-                                                                                        min={
-                                                                                            0
-                                                                                        }
-                                                                                        value={numberFieldValue(
-                                                                                            row.set_pants_qty,
-                                                                                        )}
-                                                                                        placeholder="0"
-                                                                                        onChange={(
-                                                                                            event,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'set_pants_qty',
-                                                                                                toNumber(
-                                                                                                    event
-                                                                                                        .target
-                                                                                                        .value,
-                                                                                                ),
-                                                                                            )
-                                                                                        }
-                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
-                                                                                        aria-label={`จำนวนกางเกงชุด แถวที่ ${rowIndex + 1}`}
-                                                                                    />
-                                                                                </div>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    min={
-                                                                                        0
-                                                                                    }
-                                                                                    value={numberFieldValue(
-                                                                                        row.set_price,
-                                                                                    )}
-                                                                                    placeholder="0"
-                                                                                    onChange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        updateSizeRow(
-                                                                                            table.id,
-                                                                                            row.id,
-                                                                                            'set_price',
-                                                                                            toNumber(
-                                                                                                event
-                                                                                                    .target
-                                                                                                    .value,
-                                                                                            ),
-                                                                                        )
-                                                                                    }
-                                                                                    className="h-8 text-xs md:text-xs"
-                                                                                />
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
-                                                                                {formatMoney(
-                                                                                    rowSetTotal(
-                                                                                        row,
-                                                                                    ),
                                                                                 )}
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
-                                                                                        {
-                                                                                            SHIRT_STYLE_LABELS[
-                                                                                                row
-                                                                                                    .shirt_style
-                                                                                            ]
-                                                                                        }
-                                                                                    </div>
-                                                                                    <Input
-                                                                                        type="number"
-                                                                                        min={
-                                                                                            0
-                                                                                        }
-                                                                                        value={numberFieldValue(
-                                                                                            row.separate_shirt_qty,
-                                                                                        )}
-                                                                                        placeholder="0"
-                                                                                        onChange={(
-                                                                                            event,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'separate_shirt_qty',
-                                                                                                toNumber(
-                                                                                                    event
-                                                                                                        .target
-                                                                                                        .value,
-                                                                                                ),
-                                                                                            )
-                                                                                        }
-                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
-                                                                                        aria-label={`จำนวนเสื้อแยก แถวที่ ${rowIndex + 1}`}
-                                                                                    />
-                                                                                </div>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
-                                                                                        {
-                                                                                            PANTS_STYLE_LABELS[
-                                                                                                row
-                                                                                                    .pants_style
-                                                                                            ]
-                                                                                        }
-                                                                                    </div>
-                                                                                    <Input
-                                                                                        type="number"
-                                                                                        min={
-                                                                                            0
-                                                                                        }
-                                                                                        value={numberFieldValue(
-                                                                                            row.separate_pants_qty,
-                                                                                        )}
-                                                                                        placeholder="0"
-                                                                                        onChange={(
-                                                                                            event,
-                                                                                        ) =>
-                                                                                            updateSizeRow(
-                                                                                                table.id,
-                                                                                                row.id,
-                                                                                                'separate_pants_qty',
-                                                                                                toNumber(
-                                                                                                    event
-                                                                                                        .target
-                                                                                                        .value,
-                                                                                                ),
-                                                                                            )
-                                                                                        }
-                                                                                        className="h-8 w-full min-w-0 text-xs md:text-xs"
-                                                                                        aria-label={`จำนวนกางเกงแยก แถวที่ ${rowIndex + 1}`}
-                                                                                    />
-                                                                                </div>
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    min={
-                                                                                        0
-                                                                                    }
-                                                                                    value={numberFieldValue(
-                                                                                        row.separate_shirt_price,
-                                                                                    )}
-                                                                                    placeholder="0"
-                                                                                    onChange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        updateSizeRow(
-                                                                                            table.id,
-                                                                                            row.id,
-                                                                                            'separate_shirt_price',
-                                                                                            toNumber(
-                                                                                                event
-                                                                                                    .target
-                                                                                                    .value,
-                                                                                            ),
-                                                                                        )
-                                                                                    }
-                                                                                    className="h-8 text-xs md:text-xs"
-                                                                                />
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    min={
-                                                                                        0
-                                                                                    }
-                                                                                    value={numberFieldValue(
-                                                                                        row.separate_pants_price,
-                                                                                    )}
-                                                                                    placeholder="0"
-                                                                                    onChange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        updateSizeRow(
-                                                                                            table.id,
-                                                                                            row.id,
-                                                                                            'separate_pants_price',
-                                                                                            toNumber(
-                                                                                                event
-                                                                                                    .target
-                                                                                                    .value,
-                                                                                            ),
-                                                                                        )
-                                                                                    }
-                                                                                    className="h-8 text-xs md:text-xs"
-                                                                                />
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
-                                                                                {formatMoney(
-                                                                                    rowSeparateTotal(
-                                                                                        row,
-                                                                                    ),
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-bold text-slate-900">
-                                                                                {formatMoney(
-                                                                                    rowTotal(
-                                                                                        row,
-                                                                                    ),
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="border border-slate-200 px-1 py-1.5 text-center align-middle">
-                                                                                <Button
-                                                                                    type="button"
-                                                                                    size="icon"
-                                                                                    variant="ghost"
-                                                                                    className="size-7 text-rose-600 hover:text-rose-700"
-                                                                                    onClick={() =>
-                                                                                        removeSizeRow(
-                                                                                            table.id,
-                                                                                            row.id,
-                                                                                        )
-                                                                                    }
-                                                                                >
-                                                                                    <Trash2 className="size-3.5" />
-                                                                                </Button>
-                                                                            </td>
-                                                                        </tr>
-                                                                    ),
-                                                                )}
-                                                            </tbody>
-                                                            <tfoot>
-                                                                <tr className="bg-yellow-100 font-bold text-red-600">
-                                                                    <td className="border border-slate-200 px-2 py-2">
-                                                                        รวม
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {
-                                                                            tableTotals.setShirtQty
-                                                                        }
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-1 py-2" />
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {
-                                                                            tableTotals.setPantsQty
-                                                                        }
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        -
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {formatMoney(
-                                                                            tableTotals.setAmount,
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {
-                                                                            tableTotals.sepShirtQty
-                                                                        }
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {
-                                                                            tableTotals.sepPantsQty
-                                                                        }
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        -
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        -
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {formatMoney(
-                                                                            tableTotals.sepAmount,
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2 text-right">
-                                                                        {formatMoney(
-                                                                            tableTotals.totalAmount,
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="border border-slate-200 px-2 py-2">
-                                                                        -
-                                                                    </td>
-                                                                </tr>
-                                                            </tfoot>
-                                                        </table>
-                                                    </div>
-                                                    {sizeFormMode ===
-                                                    'pe_uniform' ? (
-                                                        <div className="border-t border-slate-200 bg-slate-50/60 p-3">
-                                                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                                                <span className="text-xs font-semibold text-slate-700">
-                                                                    Art Work ของ
-                                                                    {table.table_type ===
-                                                                    'kids'
-                                                                        ? 'ชุดเด็ก'
-                                                                        : 'ชุดผู้ใหญ่'}
-                                                                </span>
-                                                                <span className="text-xs text-slate-500">
-                                                                    แนบแล้ว{' '}
-                                                                    <span className="font-mono text-sm font-semibold text-slate-900">
-                                                                        {savedTableArtwork.length +
-                                                                            table
-                                                                                .artwork_files
-                                                                                .length}
-                                                                    </span>{' '}
-                                                                    รูป
-                                                                    {savedTableArtwork.length >
-                                                                    0
-                                                                        ? ` (บันทึกแล้ว ${savedTableArtwork.length})`
-                                                                        : ''}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex flex-wrap items-center gap-2">
-                                                                {savedTableArtwork.map(
-                                                                    (media) => (
-                                                                        <div
-                                                                            key={
-                                                                                media.id
-                                                                            }
-                                                                            className="relative size-16 overflow-hidden rounded-md border border-slate-300 bg-white"
-                                                                        >
-                                                                            <img
-                                                                                src={
-                                                                                    media.url
-                                                                                }
-                                                                                alt={`Art Work ${table.title}`}
-                                                                                className="size-full object-contain"
-                                                                            />
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() =>
-                                                                                    removeSavedMedia(
-                                                                                        media.id,
-                                                                                    )
-                                                                                }
-                                                                                aria-label={`ลบรูปที่บันทึกไว้ของ ${table.title}`}
-                                                                                className="absolute top-0 right-0 rounded-bl bg-rose-600 px-1 text-[10px] leading-4 text-white"
-                                                                            >
-                                                                                ลบ
-                                                                            </button>
-                                                                        </div>
-                                                                    ),
-                                                                )}
-                                                                {table.artwork_files.map(
-                                                                    (
-                                                                        file,
-                                                                        fileIndex,
-                                                                    ) => (
-                                                                        <div
-                                                                            key={`${file.name}-${file.lastModified}-${fileIndex}`}
-                                                                            className="relative size-16 overflow-hidden rounded-md border border-dashed border-slate-300 bg-slate-50"
-                                                                        >
-                                                                            <img
-                                                                                src={URL.createObjectURL(
-                                                                                    file,
-                                                                                )}
-                                                                                alt={
-                                                                                    file.name
-                                                                                }
-                                                                                className="size-full object-contain"
-                                                                            />
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() =>
-                                                                                    removePeUniformArtwork(
+                                                                                onToggle={() =>
+                                                                                    togglePriceColumnLink(
                                                                                         table.id,
-                                                                                        fileIndex,
+                                                                                        'separate_pants_price',
                                                                                     )
                                                                                 }
-                                                                                aria-label={`ลบรูปที่ ${fileIndex + 1} ของ ${table.title}`}
-                                                                                className="absolute top-0 right-0 rounded-bl bg-rose-600 px-1 text-[10px] leading-4 text-white"
+                                                                            />
+                                                                        </th>
+                                                                        <th className="w-[8%] border border-slate-200 px-2 py-2">
+                                                                            รวมราคาแยกชุด
+                                                                        </th>
+                                                                        <th className="w-[6%] border border-slate-200 px-2 py-2">
+                                                                            ราคารวมแถว
+                                                                        </th>
+                                                                        <th className="w-[3%] border border-slate-200 px-2 py-2 text-center">
+                                                                            ลบ
+                                                                        </th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {table.rows.map(
+                                                                        (
+                                                                            row,
+                                                                            rowIndex,
+                                                                        ) => (
+                                                                            <tr
+                                                                                key={
+                                                                                    row.id
+                                                                                }
+                                                                                className="even:bg-slate-50/60"
                                                                             >
-                                                                                ลบ
-                                                                            </button>
-                                                                        </div>
-                                                                    ),
-                                                                )}
-                                                                <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                                                                    <Plus className="size-3.5" />
-                                                                    เพิ่มรูป
-                                                                    <input
-                                                                        type="file"
-                                                                        accept="image/*"
-                                                                        multiple
-                                                                        className="hidden"
-                                                                        aria-label={`เลือกรูป Art Work ของ${table.table_type === 'kids' ? 'ชุดเด็ก' : 'ชุดผู้ใหญ่'}`}
-                                                                        onChange={(
-                                                                            event,
-                                                                        ) => {
-                                                                            addPeUniformArtwork(
-                                                                                table.id,
-                                                                                Array.from(
-                                                                                    event
-                                                                                        .target
-                                                                                        .files ??
-                                                                                        [],
-                                                                                ),
-                                                                            );
-                                                                            event.target.value =
-                                                                                '';
-                                                                        }}
-                                                                    />
-                                                                </label>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <Select
+                                                                                        value={
+                                                                                            row.size_label
+                                                                                        }
+                                                                                        onValueChange={(
+                                                                                            value,
+                                                                                        ) =>
+                                                                                            updateSizeRow(
+                                                                                                table.id,
+                                                                                                row.id,
+                                                                                                'size_label',
+                                                                                                value,
+                                                                                            )
+                                                                                        }
+                                                                                    >
+                                                                                        <SelectTrigger className="h-8 w-full bg-white text-xs">
+                                                                                            <SelectValue placeholder="ไม่ระบุ" />
+                                                                                        </SelectTrigger>
+                                                                                        {/* Opens downwards, and Radix flips it above the row on its own when
+                                                                            there is not enough room left below the fold. */}
+                                                                                        <SelectContent
+                                                                                            position="popper"
+                                                                                            side="bottom"
+                                                                                            sideOffset={
+                                                                                                4
+                                                                                            }
+                                                                                            avoidCollisions
+                                                                                            collisionPadding={
+                                                                                                12
+                                                                                            }
+                                                                                        >
+                                                                                            {tableSizeOptions.map(
+                                                                                                (
+                                                                                                    sizeOption,
+                                                                                                ) => (
+                                                                                                    <SelectItem
+                                                                                                        key={`${table.id}-${row.id}-${sizeOption}`}
+                                                                                                        value={
+                                                                                                            sizeOption
+                                                                                                        }
+                                                                                                    >
+                                                                                                        {
+                                                                                                            sizeOption
+                                                                                                        }
+                                                                                                    </SelectItem>
+                                                                                                ),
+                                                                                            )}
+                                                                                        </SelectContent>
+                                                                                    </Select>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <Select
+                                                                                            value={
+                                                                                                row.shirt_style
+                                                                                            }
+                                                                                            onValueChange={(
+                                                                                                value,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'shirt_style',
+                                                                                                    value as GarmentStyle,
+                                                                                                )
+                                                                                            }
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 w-[84px] shrink-0 bg-white px-1.5 text-[11px]">
+                                                                                                <SelectValue />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent
+                                                                                                position="popper"
+                                                                                                side="bottom"
+                                                                                                sideOffset={
+                                                                                                    4
+                                                                                                }
+                                                                                                avoidCollisions
+                                                                                                collisionPadding={
+                                                                                                    12
+                                                                                                }
+                                                                                            >
+                                                                                                {SHIRT_STYLES.map(
+                                                                                                    (
+                                                                                                        styleOption,
+                                                                                                    ) => (
+                                                                                                        <SelectItem
+                                                                                                            key={
+                                                                                                                styleOption
+                                                                                                            }
+                                                                                                            value={
+                                                                                                                styleOption
+                                                                                                            }
+                                                                                                        >
+                                                                                                            {
+                                                                                                                SHIRT_STYLE_LABELS[
+                                                                                                                    styleOption
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        </SelectItem>
+                                                                                                    ),
+                                                                                                )}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                        <Input
+                                                                                            type="number"
+                                                                                            min={
+                                                                                                0
+                                                                                            }
+                                                                                            value={numberFieldValue(
+                                                                                                row.set_shirt_qty,
+                                                                                            )}
+                                                                                            placeholder="0"
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'set_shirt_qty',
+                                                                                                    toNumber(
+                                                                                                        event
+                                                                                                            .target
+                                                                                                            .value,
+                                                                                                    ),
+                                                                                                )
+                                                                                            }
+                                                                                            className="h-8 w-full min-w-0 text-xs md:text-xs"
+                                                                                            aria-label={`จำนวนเสื้อชุด แถวที่ ${rowIndex + 1}`}
+                                                                                        />
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1 py-1.5 text-center align-middle">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            toggleSetQtyLink(
+                                                                                                row.id,
+                                                                                            )
+                                                                                        }
+                                                                                        aria-pressed={isSetQtyLinked(
+                                                                                            row.id,
+                                                                                        )}
+                                                                                        title={
+                                                                                            isSetQtyLinked(
+                                                                                                row.id,
+                                                                                            )
+                                                                                                ? 'จำนวนเสื้อและกางเกงเท่ากัน (กดเพื่อแยก)'
+                                                                                                : 'กรอกจำนวนเสื้อและกางเกงแยกกัน (กดเพื่อล็อกให้เท่ากัน)'
+                                                                                        }
+                                                                                        aria-label={
+                                                                                            isSetQtyLinked(
+                                                                                                row.id,
+                                                                                            )
+                                                                                                ? 'แยกจำนวนเสื้อและกางเกง'
+                                                                                                : 'ล็อกจำนวนเสื้อและกางเกงให้เท่ากัน'
+                                                                                        }
+                                                                                        className={`rounded p-1 transition-colors ${
+                                                                                            isSetQtyLinked(
+                                                                                                row.id,
+                                                                                            )
+                                                                                                ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                                                                                                : 'text-slate-400 hover:text-slate-600'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {isSetQtyLinked(
+                                                                                            row.id,
+                                                                                        ) ? (
+                                                                                            <Link2 className="size-3.5" />
+                                                                                        ) : (
+                                                                                            <Link2Off className="size-3.5" />
+                                                                                        )}
+                                                                                    </button>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <Select
+                                                                                            value={
+                                                                                                row.pants_style
+                                                                                            }
+                                                                                            onValueChange={(
+                                                                                                value,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'pants_style',
+                                                                                                    value as GarmentStyle,
+                                                                                                )
+                                                                                            }
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 w-[84px] shrink-0 bg-white px-1.5 text-[11px]">
+                                                                                                <SelectValue />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent
+                                                                                                position="popper"
+                                                                                                side="bottom"
+                                                                                                sideOffset={
+                                                                                                    4
+                                                                                                }
+                                                                                                avoidCollisions
+                                                                                                collisionPadding={
+                                                                                                    12
+                                                                                                }
+                                                                                            >
+                                                                                                <SelectItem value="short">
+                                                                                                    ขาสั้น
+                                                                                                </SelectItem>
+                                                                                                <SelectItem value="long">
+                                                                                                    ขายาว
+                                                                                                </SelectItem>
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                        <Input
+                                                                                            type="number"
+                                                                                            min={
+                                                                                                0
+                                                                                            }
+                                                                                            value={numberFieldValue(
+                                                                                                row.set_pants_qty,
+                                                                                            )}
+                                                                                            placeholder="0"
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'set_pants_qty',
+                                                                                                    toNumber(
+                                                                                                        event
+                                                                                                            .target
+                                                                                                            .value,
+                                                                                                    ),
+                                                                                                )
+                                                                                            }
+                                                                                            className="h-8 w-full min-w-0 text-xs md:text-xs"
+                                                                                            aria-label={`จำนวนกางเกงชุด แถวที่ ${rowIndex + 1}`}
+                                                                                        />
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <Input
+                                                                                        type="number"
+                                                                                        min={
+                                                                                            0
+                                                                                        }
+                                                                                        value={numberFieldValue(
+                                                                                            row.set_price,
+                                                                                        )}
+                                                                                        placeholder="0"
+                                                                                        onChange={(
+                                                                                            event,
+                                                                                        ) =>
+                                                                                            updateSizeRow(
+                                                                                                table.id,
+                                                                                                row.id,
+                                                                                                'set_price',
+                                                                                                toNumber(
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                                ),
+                                                                                            )
+                                                                                        }
+                                                                                        className="h-8 text-xs md:text-xs"
+                                                                                    />
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
+                                                                                    {formatMoney(
+                                                                                        rowSetTotal(
+                                                                                            row,
+                                                                                        ),
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
+                                                                                            {
+                                                                                                SHIRT_STYLE_LABELS[
+                                                                                                    row
+                                                                                                        .shirt_style
+                                                                                                ]
+                                                                                            }
+                                                                                        </div>
+                                                                                        <Input
+                                                                                            type="number"
+                                                                                            min={
+                                                                                                0
+                                                                                            }
+                                                                                            value={numberFieldValue(
+                                                                                                row.separate_shirt_qty,
+                                                                                            )}
+                                                                                            placeholder="0"
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'separate_shirt_qty',
+                                                                                                    toNumber(
+                                                                                                        event
+                                                                                                            .target
+                                                                                                            .value,
+                                                                                                    ),
+                                                                                                )
+                                                                                            }
+                                                                                            className="h-8 w-full min-w-0 text-xs md:text-xs"
+                                                                                            aria-label={`จำนวนเสื้อแยก แถวที่ ${rowIndex + 1}`}
+                                                                                        />
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
+                                                                                            {
+                                                                                                PANTS_STYLE_LABELS[
+                                                                                                    row
+                                                                                                        .pants_style
+                                                                                                ]
+                                                                                            }
+                                                                                        </div>
+                                                                                        <Input
+                                                                                            type="number"
+                                                                                            min={
+                                                                                                0
+                                                                                            }
+                                                                                            value={numberFieldValue(
+                                                                                                row.separate_pants_qty,
+                                                                                            )}
+                                                                                            placeholder="0"
+                                                                                            onChange={(
+                                                                                                event,
+                                                                                            ) =>
+                                                                                                updateSizeRow(
+                                                                                                    table.id,
+                                                                                                    row.id,
+                                                                                                    'separate_pants_qty',
+                                                                                                    toNumber(
+                                                                                                        event
+                                                                                                            .target
+                                                                                                            .value,
+                                                                                                    ),
+                                                                                                )
+                                                                                            }
+                                                                                            className="h-8 w-full min-w-0 text-xs md:text-xs"
+                                                                                            aria-label={`จำนวนกางเกงแยก แถวที่ ${rowIndex + 1}`}
+                                                                                        />
+                                                                                    </div>
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <Input
+                                                                                        type="number"
+                                                                                        min={
+                                                                                            0
+                                                                                        }
+                                                                                        value={numberFieldValue(
+                                                                                            row.separate_shirt_price,
+                                                                                        )}
+                                                                                        placeholder="0"
+                                                                                        onChange={(
+                                                                                            event,
+                                                                                        ) =>
+                                                                                            updateSizeRow(
+                                                                                                table.id,
+                                                                                                row.id,
+                                                                                                'separate_shirt_price',
+                                                                                                toNumber(
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                                ),
+                                                                                            )
+                                                                                        }
+                                                                                        className="h-8 text-xs md:text-xs"
+                                                                                    />
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
+                                                                                    <Input
+                                                                                        type="number"
+                                                                                        min={
+                                                                                            0
+                                                                                        }
+                                                                                        value={numberFieldValue(
+                                                                                            row.separate_pants_price,
+                                                                                        )}
+                                                                                        placeholder="0"
+                                                                                        onChange={(
+                                                                                            event,
+                                                                                        ) =>
+                                                                                            updateSizeRow(
+                                                                                                table.id,
+                                                                                                row.id,
+                                                                                                'separate_pants_price',
+                                                                                                toNumber(
+                                                                                                    event
+                                                                                                        .target
+                                                                                                        .value,
+                                                                                                ),
+                                                                                            )
+                                                                                        }
+                                                                                        className="h-8 text-xs md:text-xs"
+                                                                                    />
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-semibold text-slate-700">
+                                                                                    {formatMoney(
+                                                                                        rowSeparateTotal(
+                                                                                            row,
+                                                                                        ),
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-2 py-1.5 text-right align-middle font-bold text-slate-900">
+                                                                                    {formatMoney(
+                                                                                        rowTotal(
+                                                                                            row,
+                                                                                        ),
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="border border-slate-200 px-1 py-1.5 text-center align-middle">
+                                                                                    <Button
+                                                                                        type="button"
+                                                                                        size="icon"
+                                                                                        variant="ghost"
+                                                                                        className="size-7 text-rose-600 hover:text-rose-700"
+                                                                                        onClick={() =>
+                                                                                            removeSizeRow(
+                                                                                                table.id,
+                                                                                                row.id,
+                                                                                            )
+                                                                                        }
+                                                                                    >
+                                                                                        <Trash2 className="size-3.5" />
+                                                                                    </Button>
+                                                                                </td>
+                                                                            </tr>
+                                                                        ),
+                                                                    )}
+                                                                </tbody>
+                                                                <tfoot>
+                                                                    <tr className="bg-yellow-100 font-bold text-red-600">
+                                                                        <td className="border border-slate-200 px-2 py-2">
+                                                                            รวม
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {
+                                                                                tableTotals.setShirtQty
+                                                                            }
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-1 py-2" />
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {
+                                                                                tableTotals.setPantsQty
+                                                                            }
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            -
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {formatMoney(
+                                                                                tableTotals.setAmount,
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {
+                                                                                tableTotals.sepShirtQty
+                                                                            }
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {
+                                                                                tableTotals.sepPantsQty
+                                                                            }
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            -
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            -
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {formatMoney(
+                                                                                tableTotals.sepAmount,
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2 text-right">
+                                                                            {formatMoney(
+                                                                                tableTotals.totalAmount,
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="border border-slate-200 px-2 py-2">
+                                                                            -
+                                                                        </td>
+                                                                    </tr>
+                                                                </tfoot>
+                                                            </table>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2.5 p-2.5">
+                                                            <div className="grid gap-2.5 lg:grid-cols-2">
+                                                                <GarmentTable
+                                                                    title="เสื้อ"
+                                                                    garment="shirt"
+                                                                    rows={
+                                                                        table.shirt_rows
+                                                                    }
+                                                                    sizeOptions={
+                                                                        tableSizeOptions
+                                                                    }
+                                                                    priceLinked={isGarmentPriceLinked(
+                                                                        table.id,
+                                                                        'shirt_rows',
+                                                                    )}
+                                                                    onTogglePriceLink={() =>
+                                                                        toggleGarmentPriceLink(
+                                                                            table.id,
+                                                                            'shirt_rows',
+                                                                        )
+                                                                    }
+                                                                    onChange={(
+                                                                        rowId,
+                                                                        key,
+                                                                        value,
+                                                                    ) =>
+                                                                        updateGarmentRow(
+                                                                            table.id,
+                                                                            'shirt_rows',
+                                                                            rowId,
+                                                                            key,
+                                                                            value,
+                                                                        )
+                                                                    }
+                                                                    onAdd={() =>
+                                                                        addGarmentRow(
+                                                                            table.id,
+                                                                            'shirt_rows',
+                                                                        )
+                                                                    }
+                                                                    onRemove={(
+                                                                        rowId,
+                                                                    ) =>
+                                                                        removeGarmentRow(
+                                                                            table.id,
+                                                                            'shirt_rows',
+                                                                            rowId,
+                                                                        )
+                                                                    }
+                                                                />
+                                                                <GarmentTable
+                                                                    title="กางเกง"
+                                                                    garment="pants"
+                                                                    rows={
+                                                                        table.pants_rows
+                                                                    }
+                                                                    sizeOptions={
+                                                                        tableSizeOptions
+                                                                    }
+                                                                    priceLinked={isGarmentPriceLinked(
+                                                                        table.id,
+                                                                        'pants_rows',
+                                                                    )}
+                                                                    onTogglePriceLink={() =>
+                                                                        toggleGarmentPriceLink(
+                                                                            table.id,
+                                                                            'pants_rows',
+                                                                        )
+                                                                    }
+                                                                    onChange={(
+                                                                        rowId,
+                                                                        key,
+                                                                        value,
+                                                                    ) =>
+                                                                        updateGarmentRow(
+                                                                            table.id,
+                                                                            'pants_rows',
+                                                                            rowId,
+                                                                            key,
+                                                                            value,
+                                                                        )
+                                                                    }
+                                                                    onAdd={() =>
+                                                                        addGarmentRow(
+                                                                            table.id,
+                                                                            'pants_rows',
+                                                                        )
+                                                                    }
+                                                                    onRemove={(
+                                                                        rowId,
+                                                                    ) =>
+                                                                        removeGarmentRow(
+                                                                            table.id,
+                                                                            'pants_rows',
+                                                                            rowId,
+                                                                        )
+                                                                    }
+                                                                />
+                                                            </div>
+
+                                                            <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                                                                <span className="text-slate-600">
+                                                                    รวม เสื้อ{' '}
+                                                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                                                        {garmentRowsTotals(
+                                                                            table.shirt_rows,
+                                                                        ).quantity.toLocaleString(
+                                                                            'th-TH',
+                                                                        )}
+                                                                    </strong>{' '}
+                                                                    ตัว{' '}
+                                                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                                                        {formatMoney(
+                                                                            garmentRowsTotals(
+                                                                                table.shirt_rows,
+                                                                            )
+                                                                                .amount,
+                                                                        )}
+                                                                    </strong>{' '}
+                                                                    บ.
+                                                                </span>
+                                                                <span className="text-slate-600">
+                                                                    รวม กางเกง{' '}
+                                                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                                                        {garmentRowsTotals(
+                                                                            table.pants_rows,
+                                                                        ).quantity.toLocaleString(
+                                                                            'th-TH',
+                                                                        )}
+                                                                    </strong>{' '}
+                                                                    ตัว{' '}
+                                                                    <strong className="font-bold text-slate-900 tabular-nums">
+                                                                        {formatMoney(
+                                                                            garmentRowsTotals(
+                                                                                table.pants_rows,
+                                                                            )
+                                                                                .amount,
+                                                                        )}
+                                                                    </strong>{' '}
+                                                                    บ.
+                                                                </span>
+                                                                <span className="font-bold text-slate-900">
+                                                                    ราคารวม{' '}
+                                                                    <strong className="text-sm font-bold text-[#E21E26] tabular-nums">
+                                                                        {formatMoney(
+                                                                            garmentRowsTotals(
+                                                                                table.shirt_rows,
+                                                                            )
+                                                                                .amount +
+                                                                                garmentRowsTotals(
+                                                                                    table.pants_rows,
+                                                                                )
+                                                                                    .amount,
+                                                                        )}
+                                                                    </strong>{' '}
+                                                                    บาท
+                                                                </span>
                                                             </div>
                                                         </div>
-                                                    ) : null}
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -5800,123 +6928,60 @@ export default function OrderCreatePage({
                                                                 </Button>
                                                             </div>
 
-                                                            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-2.5">
-                                                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                                                    <span className="text-xs font-semibold text-slate-600">
+                                                            {/* Artwork saved when a กีฬาสี bill kept one pile of pictures
+                                                                per colour house, before artwork was pinned to the sheets
+                                                                it prints on. It stays removable so an old bill can be
+                                                                tidied up; new pictures go through the Art Work dialog
+                                                                like every other form. */}
+                                                            {savedGroupArtwork.length >
+                                                            0 ? (
+                                                                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
+                                                                    <p className="mb-1.5 text-xs font-semibold text-amber-900">
                                                                         Art Work
-                                                                        ของคณะนี้
-                                                                    </span>
-                                                                    <span className="text-xs text-slate-500">
-                                                                        แนบแล้ว{' '}
-                                                                        <span className="font-mono text-sm font-semibold text-slate-900">
-                                                                            {savedGroupArtwork.length +
-                                                                                group
-                                                                                    .artwork_files
-                                                                                    .length}
-                                                                        </span>{' '}
-                                                                        รูป
-                                                                        {savedGroupArtwork.length >
-                                                                        0
-                                                                            ? ` (บันทึกแล้ว ${savedGroupArtwork.length})`
-                                                                            : ''}
-                                                                    </span>
-                                                                </div>
-
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {savedGroupArtwork.map(
-                                                                        (
-                                                                            media,
-                                                                        ) => (
-                                                                            <div
-                                                                                key={
-                                                                                    media.id
-                                                                                }
-                                                                                className="relative size-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50"
-                                                                            >
-                                                                                <img
-                                                                                    src={
-                                                                                        media.url
+                                                                        เดิมของคณะนี้
+                                                                        <span className="ml-2 font-normal text-amber-700">
+                                                                            รูปใหม่ให้แนบที่ปุ่ม
+                                                                            Art
+                                                                            Work
+                                                                            ของใบงาน
+                                                                        </span>
+                                                                    </p>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {savedGroupArtwork.map(
+                                                                            (
+                                                                                media,
+                                                                            ) => (
+                                                                                <div
+                                                                                    key={
+                                                                                        media.id
                                                                                     }
-                                                                                    alt={`Art Work ${group.team_name}`}
-                                                                                    className="size-full object-contain"
-                                                                                />
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() =>
-                                                                                        removeSavedMedia(
-                                                                                            media.id,
-                                                                                        )
-                                                                                    }
-                                                                                    aria-label={`ลบรูปที่บันทึกไว้ของ ${group.team_name || 'คณะนี้'}`}
-                                                                                    className="absolute top-0 right-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white hover:bg-rose-600"
+                                                                                    className="relative size-16 overflow-hidden rounded-md border border-amber-200 bg-white"
                                                                                 >
-                                                                                    ✕
-                                                                                </button>
-                                                                            </div>
-                                                                        ),
-                                                                    )}
-                                                                    {group.artwork_files.map(
-                                                                        (
-                                                                            file,
-                                                                            fileIndex,
-                                                                        ) => (
-                                                                            <div
-                                                                                key={`${file.name}-${file.lastModified}-${fileIndex}`}
-                                                                                className="relative size-16 overflow-hidden rounded-md border border-dashed border-slate-300 bg-slate-50"
-                                                                            >
-                                                                                <img
-                                                                                    src={URL.createObjectURL(
-                                                                                        file,
-                                                                                    )}
-                                                                                    alt={
-                                                                                        file.name
-                                                                                    }
-                                                                                    className="size-full object-contain"
-                                                                                />
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() =>
-                                                                                        removeSportsDayArtwork(
-                                                                                            group.id,
-                                                                                            fileIndex,
-                                                                                        )
-                                                                                    }
-                                                                                    aria-label={`ลบรูปที่ ${fileIndex + 1} ของ ${group.team_name || 'คณะนี้'}`}
-                                                                                    className="absolute top-0 right-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white"
-                                                                                >
-                                                                                    ✕
-                                                                                </button>
-                                                                            </div>
-                                                                        ),
-                                                                    )}
-                                                                    <label className="flex size-16 cursor-pointer items-center justify-center rounded-md border border-dashed border-slate-300 text-xs text-slate-500 hover:border-[#174395] hover:text-[#174395]">
-                                                                        +
-                                                                        เพิ่มรูป
-                                                                        <input
-                                                                            type="file"
-                                                                            accept="image/*"
-                                                                            multiple
-                                                                            className="hidden"
-                                                                            aria-label={`เลือกรูป Art Work ของ ${group.team_name || 'คณะนี้'}`}
-                                                                            onChange={(
-                                                                                event,
-                                                                            ) => {
-                                                                                addSportsDayArtwork(
-                                                                                    group.id,
-                                                                                    Array.from(
-                                                                                        event
-                                                                                            .target
-                                                                                            .files ??
-                                                                                            [],
-                                                                                    ),
-                                                                                );
-                                                                                event.target.value =
-                                                                                    '';
-                                                                            }}
-                                                                        />
-                                                                    </label>
+                                                                                    <img
+                                                                                        src={
+                                                                                            media.url
+                                                                                        }
+                                                                                        alt={`Art Work ${group.team_name}`}
+                                                                                        className="size-full object-contain"
+                                                                                    />
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            removeSavedMedia(
+                                                                                                media.id,
+                                                                                            )
+                                                                                        }
+                                                                                        aria-label={`ลบรูปที่บันทึกไว้ของ ${group.team_name || 'คณะนี้'}`}
+                                                                                        className="absolute top-0 right-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white hover:bg-rose-600"
+                                                                                    >
+                                                                                        ✕
+                                                                                    </button>
+                                                                                </div>
+                                                                            ),
+                                                                        )}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                 );
@@ -6359,10 +7424,7 @@ export default function OrderCreatePage({
                                                                                 updatePersonalization(
                                                                                     row.id,
                                                                                     'shirt_style',
-                                                                                    value ===
-                                                                                        'long'
-                                                                                        ? 'long'
-                                                                                        : 'short',
+                                                                                    value as GarmentStyle,
                                                                                 )
                                                                             }
                                                                         >
@@ -6386,12 +7448,26 @@ export default function OrderCreatePage({
                                                                                     12
                                                                                 }
                                                                             >
-                                                                                <SelectItem value="short">
-                                                                                    แขนสั้น
-                                                                                </SelectItem>
-                                                                                <SelectItem value="long">
-                                                                                    แขนยาว
-                                                                                </SelectItem>
+                                                                                {SHIRT_STYLES.map(
+                                                                                    (
+                                                                                        styleOption,
+                                                                                    ) => (
+                                                                                        <SelectItem
+                                                                                            key={
+                                                                                                styleOption
+                                                                                            }
+                                                                                            value={
+                                                                                                styleOption
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                SHIRT_STYLE_LABELS[
+                                                                                                    styleOption
+                                                                                                ]
+                                                                                            }
+                                                                                        </SelectItem>
+                                                                                    ),
+                                                                                )}
                                                                             </SelectContent>
                                                                         </Select>
                                                                     </td>

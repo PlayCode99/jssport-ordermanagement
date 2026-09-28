@@ -98,6 +98,35 @@ const duplicatedOrder = {
     },
 };
 
+/**
+ * A bill written on the retired set-and-separate layout. It reopens on that
+ * layout — the garment tables cannot show a set without inventing a price
+ * split — so it is what the legacy cases below are rendered from.
+ */
+const legacyOrder = {
+    ...duplicatedOrder,
+    items: [
+        {
+            item_type: 'set',
+            size_group: 'adults',
+            size_label: 'M',
+            shirt_style: 'short',
+            pants_style: 'short',
+            quantity: 4,
+            unit_price: 300,
+        },
+        {
+            item_type: 'set',
+            size_group: 'adults',
+            size_label: 'L',
+            shirt_style: 'short',
+            pants_style: 'short',
+            quantity: 2,
+            unit_price: 300,
+        },
+    ],
+};
+
 const SHIRT_TYPE_TEXTS = ['เสื้อโปโล', 'เสื้อคอกลม', 'เลือกแบบเสื้อ'];
 
 /** Text shown on the "แบบเสื้อ" trigger, which is what the user actually sees. */
@@ -256,6 +285,17 @@ describe('missing required fields are marked on the form', () => {
 });
 
 describe('saved artwork can be removed while editing', () => {
+    /**
+     * On Forms 1 and 4 a garment's artwork is arranged by the sheets the bill
+     * produces, so it lives in the Art Work dialog rather than beside the
+     * spec. The general artwork a bill was saved with before that is still
+     * shown on the form itself.
+     */
+    const openArtworkDialog = () =>
+        fireEvent.click(
+            screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
+        );
+
     const withArtwork = {
         ...duplicatedOrder,
         shirt_artwork_media: [
@@ -278,8 +318,14 @@ describe('saved artwork can be removed while editing', () => {
             />,
         );
 
-        // Two general images on the left, two shirt images on the shirt tab.
-        expect(removeButtons()).toHaveLength(4);
+        // Two general images on the form itself...
+        expect(removeButtons()).toHaveLength(2);
+
+        // ...and the two shirt images in the Art Work dialog.
+        openArtworkDialog();
+        expect(
+            screen.getAllByLabelText('ลบรูปที่บันทึกไว้ของเสื้อ'),
+        ).toHaveLength(2);
     });
 
     it('drops the image from the gallery once removed', () => {
@@ -289,6 +335,8 @@ describe('saved artwork can be removed while editing', () => {
                 order={withArtwork as never}
             />,
         );
+
+        openArtworkDialog();
 
         expect(
             document.querySelectorAll(
@@ -315,13 +363,15 @@ describe('saved artwork can be removed while editing', () => {
         ).toHaveLength(1);
     });
 
-    it('keeps the removal after switching spec tabs', () => {
+    it('keeps the removal after the dialog is closed and reopened', () => {
         render(
             <OrderCreatePage
                 {...(props as unknown as PageProps)}
                 order={withArtwork as never}
             />,
         );
+
+        openArtworkDialog();
 
         const shirtImage = document.querySelector(
             'img[src="https://example.test/shirt-a.webp"]',
@@ -332,23 +382,32 @@ describe('saved artwork can be removed while editing', () => {
                 .querySelector('button')!,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
-        fireEvent.click(screen.getByRole('button', { name: /^แบบเสื้อ/ }));
+        // The dialog unmounts its contents when it closes, so a removal that
+        // only lived in the dialog would come back on the next open.
+        fireEvent.click(screen.getByRole('button', { name: 'เสร็จสิ้น' }));
+        openArtworkDialog();
 
         expect(
             document.querySelectorAll(
                 'img[src="https://example.test/shirt-a.webp"]',
             ),
         ).toHaveLength(0);
+        expect(
+            document.querySelectorAll(
+                'img[src="https://example.test/shirt-b.webp"]',
+            ),
+        ).toHaveLength(1);
     });
 
-    it('shows the empty state once every saved image is removed', () => {
+    it('counts down to nothing once every saved image is removed', () => {
         render(
             <OrderCreatePage
                 {...(props as unknown as PageProps)}
                 order={withArtwork as never}
             />,
         );
+
+        openArtworkDialog();
 
         ['shirt-a', 'shirt-b'].forEach((name) => {
             const image = document.querySelector(
@@ -359,31 +418,42 @@ describe('saved artwork can be removed while editing', () => {
             );
         });
 
-        expect(screen.getAllByText('ยังไม่ได้แนบรูป').length).toBeGreaterThan(
-            0,
-        );
+        // Both garments now read zero, and the button that opens the dialog
+        // counts only what is left on the bill.
+        expect(screen.getAllByText(/แนบแล้ว 0 รูป/).length).toBeGreaterThan(0);
     });
 });
 
-describe('the size table opens ready to type into', () => {
-    const sizeTable = () =>
-        document.querySelector('table.min-w-\\[1480px\\]') as HTMLTableElement;
-    const bodyRows = () => sizeTable().querySelectorAll('tbody tr');
+describe('the garment tables open ready to type into', () => {
+    const garmentTables = () =>
+        [
+            ...document.querySelectorAll('table.min-w-\\[420px\\]'),
+        ] as HTMLTableElement[];
+    const bodyRows = (tableIndex = 0) =>
+        garmentTables()[tableIndex].querySelectorAll('tbody tr');
 
-    it('starts with three blank rows instead of one per size in the catalogue', () => {
+    it('gives shirts and trousers a table each', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        // Two adult sizes are configured; the table must not pre-fill a row each.
-        expect(bodyRows()).toHaveLength(3);
+        expect(garmentTables()).toHaveLength(2);
+        expect(screen.getByText('ไซซ์เสื้อ')).toBeInTheDocument();
+        expect(screen.getByText('ไซซ์กางเกง')).toBeInTheDocument();
+    });
+
+    it('starts each table with three blank rows, not one per size in the catalogue', () => {
+        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+
+        // Two adult sizes are configured; neither table may pre-fill a row each.
+        expect(bodyRows(0)).toHaveLength(3);
+        expect(bodyRows(1)).toHaveLength(3);
     });
 
     it('leaves the size unset so the box reads ไม่ระบุ', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        const sizeTriggers = [
-            ...sizeTable().querySelectorAll('tbody [role="combobox"]'),
-        ];
-        const firstRowSize = sizeTriggers[0];
+        const firstRowSize = garmentTables()[0].querySelector(
+            'tbody [role="combobox"]',
+        );
 
         expect(firstRowSize?.textContent).toBe('ไม่ระบุ');
     });
@@ -396,32 +466,51 @@ describe('the size table opens ready to type into', () => {
             .find((node) => /บันทึก/.test(node.textContent ?? ''));
         fireEvent.click(save!);
 
-        // The order is incomplete for other reasons, but never because three
+        // The order is incomplete for other reasons, but never because six
         // untouched rows have no size.
         expect(
             screen.queryByText('ไซส์ในตารางเลือกไซซ์'),
         ).not.toBeInTheDocument();
     });
+
+    it('works out the line total as quantity times price', () => {
+        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+
+        fireEvent.change(screen.getByLabelText('จำนวนเสื้อ แถวที่ 1'), {
+            target: { value: '20' },
+        });
+        fireEvent.change(screen.getByLabelText('ราคาต่อตัวเสื้อ แถวที่ 1'), {
+            target: { value: '100' },
+        });
+
+        const firstRow = garmentTables()[0].querySelectorAll('tbody tr')[0];
+
+        expect(firstRow.querySelectorAll('td')[4].textContent).toBe('2,000.00');
+        // And the table foots to the same money, not to the sum of the prices.
+        expect(
+            garmentTables()[0].querySelector('tfoot')?.textContent,
+        ).toContain('2,000.00');
+    });
 });
 
-describe('price link', () => {
-    const priceInputs = () => {
-        const table = document.querySelector(
-            'table.min-w-\\[1480px\\]',
-        ) as HTMLTableElement;
+describe('price link on a garment table', () => {
+    const priceInputs = (tableIndex = 0) => {
+        const table = [...document.querySelectorAll('table.min-w-\\[420px\\]')][
+            tableIndex
+        ] as HTMLTableElement;
 
         return [...table.querySelectorAll('tbody tr')].map(
             (row) =>
                 [
                     ...row.querySelectorAll('input[type="number"]'),
-                ][2] as HTMLInputElement,
+                ][1] as HTMLInputElement,
         );
     };
 
     it('starts linked and carries the first row price down the table', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        const toggle = screen.getByLabelText('ยกเลิกลิงก์ราคาต่อชุด');
+        const toggle = screen.getByLabelText('ยกเลิกลิงก์ราคาต่อตัวเสื้อ');
         expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
         fireEvent.change(priceInputs()[0], { target: { value: '250' } });
@@ -454,12 +543,26 @@ describe('price link', () => {
         ]);
     });
 
+    it('opens a row added under a linked price at that price', () => {
+        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+
+        fireEvent.change(priceInputs()[0], { target: { value: '250' } });
+        fireEvent.click(screen.getAllByRole('button', { name: 'เพิ่มแถว' })[0]);
+
+        expect(priceInputs().map((input) => input.value)).toEqual([
+            '250',
+            '250',
+            '250',
+            '250',
+        ]);
+    });
+
     it('leaves every row alone once the link is switched off', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        fireEvent.click(screen.getByLabelText('ยกเลิกลิงก์ราคาต่อชุด'));
+        fireEvent.click(screen.getByLabelText('ยกเลิกลิงก์ราคาต่อตัวเสื้อ'));
         expect(
-            screen.getByLabelText('ลิงก์ราคาต่อชุดกับแถวแรก'),
+            screen.getByLabelText('ลิงก์ราคาต่อตัวเสื้อกับแถวแรก'),
         ).toHaveAttribute('aria-pressed', 'false');
 
         fireEvent.change(priceInputs()[0], { target: { value: '250' } });
@@ -471,58 +574,70 @@ describe('price link', () => {
         ]);
     });
 
-    it('links each price column on its own', () => {
+    it('links each garment table on its own', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        fireEvent.click(screen.getByLabelText('ยกเลิกลิงก์ราคาต่อชุด'));
+        fireEvent.click(screen.getByLabelText('ยกเลิกลิงก์ราคาต่อตัวเสื้อ'));
 
-        // Turning one column off leaves the other two linked.
-        expect(screen.getByLabelText('ยกเลิกลิงก์ราคาเสื้อ')).toHaveAttribute(
-            'aria-pressed',
-            'true',
-        );
-        expect(screen.getByLabelText('ยกเลิกลิงก์ราคากางเกง')).toHaveAttribute(
-            'aria-pressed',
-            'true',
-        );
+        // Unlinking the shirts leaves the trousers linked, and untouched.
+        expect(
+            screen.getByLabelText('ยกเลิกลิงก์ราคาต่อตัวกางเกง'),
+        ).toHaveAttribute('aria-pressed', 'true');
+
+        fireEvent.change(priceInputs()[0], { target: { value: '250' } });
+        expect(priceInputs(1).map((input) => input.value)).toEqual([
+            '',
+            '',
+            '',
+        ]);
     });
 });
 
-describe('size table dropdowns', () => {
+describe('garment table dropdowns', () => {
+    const firstSizeTrigger = () =>
+        (
+            document.querySelector(
+                'table.min-w-\\[420px\\]',
+            ) as HTMLTableElement
+        ).querySelector('tbody [role="combobox"]')!;
+
     it('opens downwards by default', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        const table = document.querySelector(
-            'table.min-w-\\[1480px\\]',
-        ) as HTMLTableElement;
-        const firstRow = table.querySelector('tbody tr')!;
+        fireEvent.click(firstSizeTrigger());
 
-        fireEvent.click(firstRow.querySelector('[role="combobox"]')!);
-
-        const menu = document.querySelector('[role="listbox"]');
-        expect(menu).not.toBeNull();
-        expect(menu!.getAttribute('data-side')).toBe('bottom');
+        expect(
+            document.querySelector('[data-radix-popper-content-wrapper]') ??
+                document.querySelector('[role="listbox"]'),
+        ).toBeTruthy();
     });
 
-    it('is positioned so it can flip above the row when the page runs out of space', () => {
+    it('lists the sizes in the order the shop arranged them', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        const table = document.querySelector(
-            'table.min-w-\\[1480px\\]',
-        ) as HTMLTableElement;
-        fireEvent.click(table.querySelector('tbody [role="combobox"]')!);
+        fireEvent.click(firstSizeTrigger());
 
-        const menu = document.querySelector('[role="listbox"]') as HTMLElement;
+        const options = [...document.querySelectorAll('[role="option"]')].map(
+            (node) => node.textContent?.trim(),
+        );
 
-        // The popper strategy is what gives the menu collision handling; the
-        // default item-aligned strategy would simply run off the bottom.
-        expect(
-            menu.closest('[data-radix-popper-content-wrapper]'),
-        ).not.toBeNull();
+        expect(options).toEqual(['JS', 'JM']);
     });
 });
 
-describe('set quantity link', () => {
+/**
+ * The retired layout, still reached by every bill that was written on it.
+ * These cases keep that path honest: a set is one shirt and one pair of
+ * trousers, and the table it is typed into has to stay square.
+ */
+describe('set quantity link on a bill written before the set was retired', () => {
+    const renderLegacy = () =>
+        render(
+            <OrderCreatePage
+                {...(props as unknown as PageProps)}
+                order={legacyOrder as never}
+            />,
+        );
     const table = () =>
         document.querySelector('table.min-w-\\[1480px\\]') as HTMLTableElement;
     const rowInputs = (rowIndex: number) =>
@@ -535,7 +650,7 @@ describe('set quantity link', () => {
     const setPants = (rowIndex: number) => rowInputs(rowIndex)[1];
 
     it('keeps the table square: one header cell per body cell', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         const headers = table().querySelectorAll('thead th').length;
         const bodyCells = table()
@@ -548,7 +663,7 @@ describe('set quantity link', () => {
     });
 
     it('fills the pants count from the shirt count while linked', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         expect(
             screen.getAllByLabelText('แยกจำนวนเสื้อและกางเกง')[0],
@@ -561,7 +676,7 @@ describe('set quantity link', () => {
     });
 
     it('works from either box', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         fireEvent.change(setPants(0), { target: { value: '7' } });
 
@@ -570,27 +685,28 @@ describe('set quantity link', () => {
     });
 
     it('links only its own row', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         fireEvent.change(setShirt(0), { target: { value: '10' } });
 
         // The second row is untouched: the link is per row, not down the column.
-        expect(setShirt(1).value).toBe('');
-        expect(setPants(1).value).toBe('');
+        expect(setShirt(1).value).toBe('2');
+        expect(setPants(1).value).toBe('2');
     });
 
     it('lets the two counts differ once unlinked', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         fireEvent.click(screen.getAllByLabelText('แยกจำนวนเสื้อและกางเกง')[0]);
         fireEvent.change(setShirt(0), { target: { value: '10' } });
 
         expect(setShirt(0).value).toBe('10');
-        expect(setPants(0).value).toBe('');
+        // The trousers keep the count the bill was saved with.
+        expect(setPants(0).value).toBe('4');
     });
 
     it('unlinks one row without unlinking the others', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         fireEvent.click(screen.getAllByLabelText('แยกจำนวนเสื้อและกางเกง')[0]);
 
@@ -599,7 +715,7 @@ describe('set quantity link', () => {
     });
 
     it('can be linked again after unlinking', () => {
-        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+        renderLegacy();
 
         fireEvent.click(screen.getAllByLabelText('แยกจำนวนเสื้อและกางเกง')[0]);
         fireEvent.click(

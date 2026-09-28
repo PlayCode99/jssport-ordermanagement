@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveRequestItems, usesSizeTables } from '@/pages/Orders/Create';
 
+/**
+ * A bill written on the retired set-and-separate layout, which Form 1 and
+ * Form 4 must keep billing identically for as long as such bills exist.
+ */
 const table = (tableType: 'kids' | 'adults', sizeLabel: string) => ({
     id: `t-${tableType}`,
     table_type: tableType,
     title: tableType === 'kids' ? 'ตารางไซส์เด็ก' : 'ตารางไซส์ผู้ใหญ่',
     artwork_files: [],
     saved_artwork: [],
+    shirt_rows: [],
+    pants_rows: [],
     rows: [
         {
             id: `r-${tableType}`,

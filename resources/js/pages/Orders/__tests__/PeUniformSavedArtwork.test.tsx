@@ -1,5 +1,5 @@
 import type * as InertiaModuleImport from '@inertiajs/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import OrderCreatePage from '@/pages/Orders/Create';
@@ -27,11 +27,11 @@ vi.mock('@inertiajs/react', async () => {
 });
 
 /**
- * A ชุดพละ bill keeps its artwork per size table (kids / adults). Like the
- * colour houses of a กีฬาสี bill, those images used to come back as bare URLs
- * with no way to take one off. The form now gets each with its media id, so
- * a table's image is removed the same way any other saved artwork is — when
- * the bill is edited and when it is opened again as a new one.
+ * ชุดพละ is Form 1's size-table form with a different name on the bill, so it
+ * takes its artwork the same way Form 1 does: through the one Art Work dialog,
+ * pinned to the sheets the bill will produce. It used to carry a second
+ * gallery per size table as well, which put the same picture on the bill twice
+ * and never reached a production sheet.
  */
 const catalogs = {
     patterns: [{ id: 1, name: 'แพทเทิร์นมาตรฐาน' }],
@@ -138,72 +138,30 @@ const renderForm = (mode: 'edit' | 'duplicate') =>
         />,
     );
 
-const kidsRemoveButtons = () =>
-    screen.queryAllByLabelText('ลบรูปที่บันทึกไว้ของ ตารางไซส์เด็ก');
-
-/** The "แนบแล้ว N รูป (บันทึกแล้ว M)" line of the table that owns the given remove button. */
-const attachedCountFor = (button: HTMLElement): string =>
-    (
-        button
-            .closest('.border-t.border-slate-200')
-            ?.querySelector('.text-xs.text-slate-500')?.textContent ?? ''
-    ).replace(/\s+/g, ' ');
+/** The mode buttons: the one the bill reopened on carries the filled style. */
+const modeButton = (name: RegExp): HTMLElement =>
+    screen.getByRole('button', { name });
 
 describe.each(['duplicate', 'edit'] as const)(
-    'saved ชุดพละ artwork when the bill is opened to %s',
+    'a saved ชุดพละ bill opened to %s',
     (mode) => {
-        it('reopens on Form 4, so the per-table artwork is there at all', () => {
+        it('reopens on Form 4 instead of falling through to Form 1', () => {
             renderForm(mode);
 
-            // The tables carry their artwork panels, which only Form 4 has;
-            // the bill used to fall through to Form 1 and lose them.
-            expect(screen.getByText(/Art Work ของชุดเด็ก/)).toBeInTheDocument();
+            expect(modeButton(/ชุดพละ \(Form 4\)/).className).toContain(
+                'bg-primary',
+            );
             expect(
-                screen.getByText(/Art Work ของชุดผู้ใหญ่/),
-            ).toBeInTheDocument();
+                modeButton(/แพทเทรินเสื้อเหมือนกัน \(Form 1\)/).className,
+            ).not.toContain('bg-primary');
         });
 
-        it('shows every saved image with a way to remove it', () => {
+        it('takes its artwork through the one dialog, not a gallery per table', () => {
             renderForm(mode);
 
-            expect(kidsRemoveButtons()).toHaveLength(2);
-            expect(
-                screen.getAllByLabelText(
-                    'ลบรูปที่บันทึกไว้ของ ตารางไซส์ผู้ใหญ่',
-                ),
-            ).toHaveLength(1);
-            expect(
-                screen.getAllByAltText('Art Work ตารางไซส์เด็ก'),
-            ).toHaveLength(2);
-        });
-
-        it('takes an image off the table and keeps the count honest', () => {
-            renderForm(mode);
-
-            expect(attachedCountFor(kidsRemoveButtons()[0])).toContain(
-                'แนบแล้ว 2 รูป (บันทึกแล้ว 2)',
-            );
-
-            fireEvent.click(kidsRemoveButtons()[0]);
-
-            expect(kidsRemoveButtons()).toHaveLength(1);
-            expect(
-                screen.getAllByAltText('Art Work ตารางไซส์เด็ก'),
-            ).toHaveLength(1);
-            expect(attachedCountFor(kidsRemoveButtons()[0])).toContain(
-                'แนบแล้ว 1 รูป (บันทึกแล้ว 1)',
-            );
-            // The other table is untouched.
-            expect(
-                screen.getAllByLabelText(
-                    'ลบรูปที่บันทึกไว้ของ ตารางไซส์ผู้ใหญ่',
-                ),
-            ).toHaveLength(1);
-
-            fireEvent.click(kidsRemoveButtons()[0]);
-
-            expect(kidsRemoveButtons()).toHaveLength(0);
-            expect(screen.queryByAltText('Art Work ตารางไซส์เด็ก')).toBeNull();
+            expect(screen.getByText(/Art Work ของใบงาน/)).toBeInTheDocument();
+            expect(screen.queryByText(/Art Work ของชุดเด็ก/)).toBeNull();
+            expect(screen.queryByText(/Art Work ของชุดผู้ใหญ่/)).toBeNull();
         });
     },
 );

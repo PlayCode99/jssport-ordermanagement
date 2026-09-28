@@ -31,6 +31,7 @@ class GarmentType extends Model
      */
     protected $fillable = [
         'category',
+        'style',
         'code',
         'name',
         'is_active',

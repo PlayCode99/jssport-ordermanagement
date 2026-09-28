@@ -1,5 +1,5 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,6 +55,8 @@ type PageProps = {
     rows: PriceRow[];
     selectedCategory?: GarmentCategory | null;
     selectedGarmentTypeId?: number | null;
+    selectedGarmentTypeStyle?: string | null;
+    selectedGarmentTypeCategory?: GarmentCategory | null;
     selectedGarmentTypeName?: string | null;
 };
 
@@ -104,6 +106,8 @@ export default function GarmentPricesPage() {
         rows: initialRows,
         selectedCategory,
         selectedGarmentTypeId,
+        selectedGarmentTypeStyle,
+        selectedGarmentTypeCategory,
         selectedGarmentTypeName,
     } = usePage<PageProps>().props;
     const [rows, setRows] = useState<PriceRow[]>(initialRows);
@@ -138,6 +142,40 @@ export default function GarmentPricesPage() {
                     a.id - b.id,
             );
     }, [garmentTypes, categoryFilter]);
+
+    /**
+     * The one garment this page was opened for, when it was opened from the
+     * list rather than reached on its own. Everything the reader already said
+     * on the way here — which category, which length, which garment — is shown
+     * back rather than asked again.
+     */
+    const focusedGarment = useMemo(() => {
+        if (!selectedGarmentTypeId || !selectedGarmentTypeName) {
+            return null;
+        }
+
+        const category = selectedGarmentTypeCategory ?? 'SHIRT';
+        const isPants = category === 'PANTS';
+        const labels: Record<string, string> = isPants
+            ? { short: 'ขาสั้น', long: 'ขายาว' }
+            : { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' };
+
+        return {
+            category,
+            word: isPants ? 'ขา' : 'แขน',
+            categoryLabel: isPants ? 'กางเกง' : 'เสื้อ',
+            styleLabel: labels[selectedGarmentTypeStyle ?? ''] ?? '—',
+        };
+    }, [
+        selectedGarmentTypeCategory,
+        selectedGarmentTypeId,
+        selectedGarmentTypeName,
+        selectedGarmentTypeStyle,
+    ]);
+
+    const backHref = focusedGarment
+        ? `/settings/data/garments/types?category=${focusedGarment.category}&style=${selectedGarmentTypeStyle ?? 'short'}`
+        : '/settings/data/garments/types';
 
     const filteredRows = useMemo(() => {
         const keyword = searchTerm.trim().toLowerCase();
@@ -390,29 +428,48 @@ export default function GarmentPricesPage() {
                 <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm md:p-6">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                         <div>
-                            <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
-                                Garment Pricing
-                            </p>
-                            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
-                                เซ็ทราคาเด็กและผู้ใหญ่
-                            </h1>
-                            <p className="mt-2 text-sm text-slate-600">
-                                ตัวอย่าง: กลับปก+ทับปกบน เด็ก 5.00 ผู้ใหญ่ 8.00
-                            </p>
-                            {selectedGarmentTypeName ? (
-                                <p className="mt-2 text-sm font-medium text-emerald-700">
-                                    กำลังตั้งราคาจากประเภทงาน:{' '}
-                                    {selectedGarmentTypeName}
-                                </p>
-                            ) : null}
+                            {focusedGarment ? (
+                                <>
+                                    <Link
+                                        href={backHref}
+                                        className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 transition hover:text-slate-900"
+                                    >
+                                        <ChevronLeft className="size-4" />
+                                        กลับไปเลือก
+                                        {focusedGarment.word}
+                                    </Link>
+                                    <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                        {selectedGarmentTypeName}
+                                    </h1>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {focusedGarment.categoryLabel} ·{' '}
+                                        {focusedGarment.styleLabel} · ราคาต่อตัว
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                                        Garment Pricing
+                                    </p>
+                                    <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+                                        เซ็ทราคาเด็กและผู้ใหญ่
+                                    </h1>
+                                    <p className="mt-2 text-sm text-slate-600">
+                                        ตัวอย่าง: กลับปก+ทับปกบน เด็ก 5.00
+                                        ผู้ใหญ่ 8.00
+                                    </p>
+                                </>
+                            )}
                         </div>
 
                         <div className="flex w-full flex-wrap justify-start gap-2 xl:w-auto xl:justify-end">
-                            <Button asChild variant="outline">
-                                <Link href="/settings/data/garments/types">
-                                    ไปหน้าแยกประเภท
-                                </Link>
-                            </Button>
+                            {focusedGarment ? null : (
+                                <Button asChild variant="outline">
+                                    <Link href="/settings/data/garments/types">
+                                        ไปหน้าแยกประเภท
+                                    </Link>
+                                </Button>
+                            )}
                             <Button
                                 onClick={openCreateModal}
                                 className="gap-2"
@@ -436,7 +493,9 @@ export default function GarmentPricesPage() {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                        <div
+                            className={`grid grid-cols-1 gap-3 ${focusedGarment ? 'md:grid-cols-2' : 'md:grid-cols-4'}`}
+                        >
                             <div className="relative min-w-0">
                                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
                                 <Input
@@ -449,52 +508,58 @@ export default function GarmentPricesPage() {
                                 />
                             </div>
 
-                            <Select
-                                value={categoryFilter}
-                                onValueChange={(
-                                    value: 'all' | GarmentCategory,
-                                ) => setCategoryFilter(value)}
-                            >
-                                <SelectTrigger className="bg-white">
-                                    <SelectValue placeholder="ประเภทสินค้า" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">
-                                        ทุกประเภท
-                                    </SelectItem>
-                                    <SelectItem value="SHIRT">เสื้อ</SelectItem>
-                                    <SelectItem value="PANTS">
-                                        กางเกง
-                                    </SelectItem>
-                                </SelectContent>
-                            </Select>
+                            {focusedGarment ? null : (
+                                <>
+                                    <Select
+                                        value={categoryFilter}
+                                        onValueChange={(
+                                            value: 'all' | GarmentCategory,
+                                        ) => setCategoryFilter(value)}
+                                    >
+                                        <SelectTrigger className="bg-white">
+                                            <SelectValue placeholder="ประเภทสินค้า" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">
+                                                ทุกประเภท
+                                            </SelectItem>
+                                            <SelectItem value="SHIRT">
+                                                เสื้อ
+                                            </SelectItem>
+                                            <SelectItem value="PANTS">
+                                                กางเกง
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
 
-                            <Select
-                                value={garmentTypeFilter}
-                                onValueChange={(value: 'all' | string) =>
-                                    setGarmentTypeFilter(value)
-                                }
-                            >
-                                <SelectTrigger className="bg-white">
-                                    <SelectValue placeholder="เลือกประเภท" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">
-                                        ทุกประเภท
-                                    </SelectItem>
-                                    {typeOptions.map((type) => (
-                                        <SelectItem
-                                            key={type.id}
-                                            value={String(type.id)}
-                                        >
-                                            {type.category === 'SHIRT'
-                                                ? 'เสื้อ'
-                                                : 'กางเกง'}{' '}
-                                            | {type.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                    <Select
+                                        value={garmentTypeFilter}
+                                        onValueChange={(
+                                            value: 'all' | string,
+                                        ) => setGarmentTypeFilter(value)}
+                                    >
+                                        <SelectTrigger className="bg-white">
+                                            <SelectValue placeholder="เลือกประเภท" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">
+                                                ทุกประเภท
+                                            </SelectItem>
+                                            {typeOptions.map((type) => (
+                                                <SelectItem
+                                                    key={type.id}
+                                                    value={String(type.id)}
+                                                >
+                                                    {type.category === 'SHIRT'
+                                                        ? 'เสื้อ'
+                                                        : 'กางเกง'}{' '}
+                                                    | {type.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </>
+                            )}
 
                             <Select
                                 value={statusFilter}

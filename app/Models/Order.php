@@ -64,6 +64,8 @@ class Order extends Model implements HasMedia
         'pants_artwork_url',
         'shirt_artwork_urls',
         'pants_artwork_urls',
+        'shirt_artwork_media',
+        'pants_artwork_media',
         'sports_day_artwork_urls',
         'pe_uniform_artwork_urls',
         'reference_designs',
@@ -119,9 +121,20 @@ class Order extends Model implements HasMedia
     /**
      * @return HasMany<OrderItem, $this>
      */
+    /**
+     * The order's lines, in the order the counter entered them.
+     *
+     * The ordering is stated rather than left to the database: order_items
+     * carries an (order_id, size_label) index, and without an ORDER BY MySQL
+     * is free to answer from it — which hands the rows back sorted by size
+     * name. Reopening a bill then showed its size rows shuffled out of the
+     * order they were typed in.
+     *
+     * @return HasMany<OrderItem, $this>
+     */
     public function items(): HasMany
     {
-        return $this->hasMany(OrderItem::class);
+        return $this->hasMany(OrderItem::class)->orderBy('id');
     }
 
     /**
@@ -283,12 +296,117 @@ class Order extends Model implements HasMedia
      *
      * @return array<int, array{id: int, url: string}>
      */
+    /**
+     * The custom property naming the one production batch an image belongs to,
+     * e.g. 'shirt_adults_long'. Absent means the image is used on every sheet
+     * of its garment, which is how every bill worked before batches could be
+     * told apart — and still how most are drawn up.
+     */
+    public const ARTWORK_BATCH_PROPERTY = 'artwork_batch';
+
+    /**
+     * The batch keys artwork of a collection may be limited to, in the same
+     * `{garment}_{sizeGroup}_{style}` shape the production sheets are keyed by.
+     * Anything outside this list is refused rather than stored, so an image can
+     * never be pinned to a sheet that cannot exist.
+     *
+     * @return list<string>
+     */
+    public static function artworkBatchKeys(string $collection): array
+    {
+        $garment = $collection === 'pants_artwork' ? 'pants' : 'shirt';
+        $keys = [];
+
+        // A shirt can be cut sleeveless and so prints a sheet of its own, which
+        // artwork has to be pinnable to. Trousers have no such cut.
+        $styles = $garment === 'pants'
+            ? ['short', 'long', 'unspecified']
+            : ['short', 'long', 'sleeveless', 'unspecified'];
+
+        foreach (['kids', 'adults'] as $sizeGroup) {
+            foreach ($styles as $style) {
+                $keys[] = $garment.'_'.$sizeGroup.'_'.$style;
+            }
+        }
+
+        return $keys;
+    }
+
+    /** The artwork collections a batch can be pinned to. */
+    public static function batchedArtworkCollections(): array
+    {
+        return ['shirt_artwork', 'pants_artwork'];
+    }
+
+    /**
+     * A colour house's sheet, which กีฬาสี bills are split into. The house is
+     * its position on the bill, and there is no sleeve length: one sheet per
+     * house, garment and size group, exactly as the board groups them. The
+     * index is bounded so the key space stays finite — no bill has a hundred
+     * colour houses.
+     */
+    private const SPORTS_DAY_BATCH_PATTERN = '/^sports_day_\d{1,2}_(shirt|pants)_(kids|adults)$/';
+
+    /**
+     * The batch an image may be pinned to, or null for "every sheet of this
+     * garment". A key that names no possible batch is read as null rather than
+     * stored: an image is better shown everywhere than pinned to nothing.
+     */
+    public static function normalizeArtworkBatch(mixed $batch, string $collection): ?string
+    {
+        $key = is_string($batch) ? trim($batch) : '';
+
+        if ($key === '') {
+            return null;
+        }
+
+        if (in_array($key, self::artworkBatchKeys($collection), true)) {
+            return $key;
+        }
+
+        $garment = $collection === 'pants_artwork' ? 'pants' : 'shirt';
+
+        // A house's sheet still belongs to one garment, so a shirt image may
+        // not be pinned to the trouser sheet by spelling the key by hand.
+        return preg_match(self::SPORTS_DAY_BATCH_PATTERN, $key) === 1
+            && str_contains($key, '_'.$garment.'_')
+            ? $key
+            : null;
+    }
+
     public function artworkMedia(string $collection): array
     {
         return $this->getMedia($collection)
-            ->map(fn (Media $media): array => ['id' => (int) $media->id, 'url' => $media->getUrl()])
+            ->map(function (Media $media): array {
+                $batch = $media->getCustomProperty(self::ARTWORK_BATCH_PROPERTY);
+
+                return [
+                    'id' => (int) $media->id,
+                    'url' => $media->getUrl(),
+                    'batch' => is_string($batch) && trim($batch) !== '' ? $batch : null,
+                ];
+            })
             ->values()
             ->all();
+    }
+
+    /**
+     * Shirt artwork with the batch each image is limited to, so the production
+     * sheet can take only the images its own batch is entitled to.
+     *
+     * @return array<int, array{id: int, url: string, batch: string|null}>
+     */
+    public function getShirtArtworkMediaAttribute(): array
+    {
+        return $this->artworkMedia('shirt_artwork');
+    }
+
+    /**
+     * @return array<int, array{id: int, url: string, batch: string|null}>
+     */
+    public function getPantsArtworkMediaAttribute(): array
+    {
+        return $this->artworkMedia('pants_artwork');
     }
 
     /**
