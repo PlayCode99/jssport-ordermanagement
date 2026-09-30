@@ -47,10 +47,17 @@ class ShirtCatalogController extends Controller
      */
     public const SORTABLE_STORAGE_KEYS = [
         self::SIZE_KIDS_STORAGE_KEY,
+        self::SIZE_JUNIOR_STORAGE_KEY,
         self::SIZE_ADULTS_STORAGE_KEY,
     ];
 
     public const SIZE_KIDS_STORAGE_KEY = 'jssport.size-kids';
+
+    /**
+     * ประถม - มัธยมต้น is cut to a pattern of its own and so keeps its own
+     * sizes, even though it is billed at the child's rate.
+     */
+    public const SIZE_JUNIOR_STORAGE_KEY = 'jssport.size-junior';
 
     public const SIZE_ADULTS_STORAGE_KEY = 'jssport.size-adults';
 
@@ -93,6 +100,19 @@ class ShirtCatalogController extends Controller
             parentTitle: 'ไซซ์เด็ก',
             parentPath: '/settings/data/size-kids',
             pagePrefix: 'ไซซ์เด็ก'
+        );
+    }
+
+    public function sizeJunior(Request $request): Response
+    {
+        return $this->renderSharedCatalog(
+            title: 'ไซซ์ประถม - มัธยมต้น',
+            routePath: '/settings/data/size-junior',
+            storageKey: self::SIZE_JUNIOR_STORAGE_KEY,
+            dataLabel: 'Size Data',
+            parentTitle: 'ไซซ์ประถม - มัธยมต้น',
+            parentPath: '/settings/data/size-junior',
+            pagePrefix: 'ไซซ์ประถม - มัธยมต้น'
         );
     }
 

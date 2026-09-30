@@ -262,6 +262,10 @@ export function AppSidebar() {
                     href: '/settings/data/size-kids',
                 },
                 {
+                    title: 'ไซซ์ประถม - มัธยมต้น',
+                    href: '/settings/data/size-junior',
+                },
+                {
                     title: 'ไซซ์ผู้ใหญ่',
                     href: '/settings/data/size-adults',
                 },

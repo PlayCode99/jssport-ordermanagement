@@ -112,6 +112,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('settings/data/catalog-items/hide', [ShirtCatalogController::class, 'hideCatalogItem'])
         ->name('settings.data.catalog-items.hide');
     Route::get('settings/data/size-kids', [ShirtCatalogController::class, 'sizeKids'])->name('settings.data.size-kids');
+    Route::get('settings/data/size-junior', [ShirtCatalogController::class, 'sizeJunior'])->name('settings.data.size-junior');
     Route::get('settings/data/size-adults', [ShirtCatalogController::class, 'sizeAdults'])->name('settings.data.size-adults');
 });
 
