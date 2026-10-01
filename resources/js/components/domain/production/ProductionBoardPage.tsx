@@ -75,6 +75,18 @@ type ProductionPricingSummary = {
     groups?: Array<{
         key: string;
         unit_total: number;
+        /**
+         * What this sheet is making. A bill can name a different garment type
+         * per sheet, so the name on the sheet is the one it is costed from,
+         * not whatever the rest of the bill happens to be.
+         */
+        garment_type_name?: string | null;
+        /**
+         * The steps this sheet is sewn from, which are the ones its total adds
+         * up. Reading the bill-wide list instead printed a costing table a
+         * worker could not get from the rows to the money on.
+         */
+        components?: ProductionPricingComponent[];
     }>;
 };
 
@@ -84,11 +96,11 @@ type ConfirmDialogState = {
     onConfirm: (() => void) | null;
 };
 type ProductionGroupGarment = 'shirt' | 'pants';
-type ProductionGroupSizeGroup = 'kids' | 'adults';
+type ProductionGroupSizeTier = 'kids' | 'junior' | 'adults';
 /** Sleeve or leg length. 'unspecified' is for rows saved before we recorded it. */
 type ProductionGroupStyle = 'short' | 'long' | 'sleeveless' | 'unspecified';
 type ProductionGroupBaseKey =
-    `${ProductionGroupGarment}_${ProductionGroupSizeGroup}`;
+    `${ProductionGroupGarment}_${ProductionGroupSizeTier}`;
 /** One batch, which is one printed sheet on the production floor. */
 type ProductionGroupKey = `${ProductionGroupBaseKey}_${ProductionGroupStyle}`;
 type ProductionGroupTheme = {
@@ -110,6 +122,11 @@ const PRODUCTION_GROUP_THEME_MAP: Record<
         long: { backgroundColor: '#134E4A', borderColor: '#0B3B38' },
         sleeveless: { backgroundColor: '#0E7490', borderColor: '#155E75' },
     },
+    shirt_junior: {
+        short: { backgroundColor: '#15803D', borderColor: '#166534' },
+        long: { backgroundColor: '#14532D', borderColor: '#0B3A1E' },
+        sleeveless: { backgroundColor: '#4D7C0F', borderColor: '#3F6212' },
+    },
     shirt_adults: {
         short: { backgroundColor: '#1D4ED8', borderColor: '#1E3A8A' },
         long: { backgroundColor: '#1E3A8A', borderColor: '#172554' },
@@ -123,12 +140,28 @@ const PRODUCTION_GROUP_THEME_MAP: Record<
         long: { backgroundColor: '#7C2D12', borderColor: '#5C2110' },
         sleeveless: { backgroundColor: '#B45309', borderColor: '#92400E' },
     },
+    pants_junior: {
+        short: { backgroundColor: '#BE123C', borderColor: '#9F1239' },
+        long: { backgroundColor: '#881337', borderColor: '#5F0D26' },
+        sleeveless: { backgroundColor: '#BE123C', borderColor: '#9F1239' },
+    },
     pants_adults: {
         short: { backgroundColor: '#7C3AED', borderColor: '#5B21B6' },
         long: { backgroundColor: '#5B21B6', borderColor: '#4C1D95' },
         sleeveless: { backgroundColor: '#7C3AED', borderColor: '#5B21B6' },
     },
 };
+
+/**
+ * The rate a tier is costed at. The shop keeps two, a child's and an adult's,
+ * so ประถม - มัธยมต้น is billed as a child although it is cut on a sheet of its
+ * own. Read the tier to decide what to print, and this to decide what to pay.
+ */
+function pricingGroupFor(
+    tier: ProductionGroupSizeTier,
+): Exclude<ProductionGroupSizeTier, 'junior'> {
+    return tier === 'adults' ? 'adults' : 'kids';
+}
 
 /** Neutral, so an unrecorded length never looks like a real batch to cut. */
 const PRODUCTION_UNSPECIFIED_THEME: ProductionGroupTheme = {
@@ -158,8 +191,10 @@ const PRODUCTION_STYLE_LABELS: Record<
 
 const PRODUCTION_GROUP_BASE_LABELS: Record<ProductionGroupBaseKey, string> = {
     shirt_kids: 'เสื้อไซต์เด็ก',
+    shirt_junior: 'เสื้อไซต์ประถม - มัธยมต้น',
     shirt_adults: 'เสื้อไซต์ผู้ใหญ่',
     pants_kids: 'กางเกงเด็ก',
+    pants_junior: 'กางเกงประถม - มัธยมต้น',
     pants_adults: 'กางเกงผู้ใหญ่',
 };
 
@@ -357,17 +392,30 @@ function resolveProductionGroupTheme(
     return PRODUCTION_GROUP_THEME_MAP[baseKey][style];
 }
 
+type SpecRowList = Array<{
+    label: string;
+    value: string | number | null | undefined;
+}>;
+
+/**
+ * The spec printed on one sheet.
+ *
+ * A sheet is one garment, cut at one size tier in one length, and it is sewn
+ * from a spec of its own — so the sheet's own spec wins. A bill written before
+ * specs were split carries one pair for the whole order, and every sheet falls
+ * back to it: that single spec is what the shop actually sewed the bill from,
+ * so printing it on each sheet is what the floor already worked to.
+ */
 function resolveProductionSpecRows(
     garment: ProductionGroupGarment,
-    shirtRows: Array<{
-        label: string;
-        value: string | number | null | undefined;
-    }>,
-    pantsRows: Array<{
-        label: string;
-        value: string | number | null | undefined;
-    }>,
-): Array<{ label: string; value: string | number | null | undefined }> {
+    shirtRows: SpecRowList,
+    pantsRows: SpecRowList,
+    batchRows?: SpecRowList,
+): SpecRowList {
+    if (batchRows && batchRows.length > 0) {
+        return batchRows;
+    }
+
     return garment === 'pants' ? pantsRows : shirtRows;
 }
 
@@ -446,7 +494,16 @@ type ProductionBoardPageProps = {
     specCatalogLookups?: Record<string, Record<string, string>>;
     specSectionsMap?: Record<
         string,
-        { shirt: SelectOption[]; pants: SelectOption[] }
+        {
+            shirt: SelectOption[];
+            pants: SelectOption[];
+            /**
+             * One spec per sheet, keyed the way the sheets are keyed. A bill
+             * written before each table carried its own spec has none of
+             * these, and every sheet reads the single pair above.
+             */
+            batches?: Record<string, SelectOption[]>;
+        }
     >;
     cuttingTeams?: CuttingTeam[];
     sewingTeams?: SewingTeam[];
@@ -3185,16 +3242,25 @@ export function ProductionBoardPage({
 
                                     return ['shirt'];
                                 };
-                                const resolveSizeGroup = (
+                                const resolveSizeTier = (
+                                    sizeTier: string,
                                     sizeGroup: string,
-                                ): 'kids' | 'adults' | null => {
-                                    if (sizeGroup === 'kids') {
-                                        return 'kids';
+                                ): ProductionGroupSizeTier | null => {
+                                    // A bill written before tiers existed
+                                    // carries only the rate it was billed at,
+                                    // which is the tier it was cut at.
+                                    const value = sizeTier || sizeGroup;
+
+                                    if (
+                                        value === 'kids' ||
+                                        value === 'junior'
+                                    ) {
+                                        return value;
                                     }
 
                                     if (
-                                        sizeGroup === 'adults' ||
-                                        sizeGroup === 'oversize'
+                                        value === 'adults' ||
+                                        value === 'oversize'
                                     ) {
                                         return 'adults';
                                     }
@@ -3208,28 +3274,35 @@ export function ProductionBoardPage({
                                 const groupDefinitions = (
                                     ['shirt', 'pants'] as const
                                 ).flatMap((garment) =>
-                                    (['kids', 'adults'] as const).flatMap(
-                                        (sizeGroup) =>
-                                            // A shirt can be cut sleeveless and
-                                            // so prints a sheet of its own. A
-                                            // pair of trousers cannot, and a
-                                            // sheet for one would be a page
-                                            // nobody can sew.
-                                            productionStylesFor(garment).map(
-                                                (style) => {
-                                                    const baseKey =
-                                                        `${garment}_${sizeGroup}` as ProductionGroupBaseKey;
+                                    (
+                                        ['kids', 'junior', 'adults'] as const
+                                    ).flatMap((sizeTier) =>
+                                        // A shirt can be cut sleeveless and
+                                        // so prints a sheet of its own. A
+                                        // pair of trousers cannot, and a
+                                        // sheet for one would be a page
+                                        // nobody can sew.
+                                        productionStylesFor(garment).map(
+                                            (style) => {
+                                                const baseKey =
+                                                    `${garment}_${sizeTier}` as ProductionGroupBaseKey;
 
-                                                    return {
-                                                        key: `${baseKey}_${style}` as ProductionGroupKey,
-                                                        baseKey,
-                                                        label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${PRODUCTION_STYLE_LABELS[garment][style]}`,
-                                                        garment,
-                                                        sizeGroup,
-                                                        style,
-                                                    };
-                                                },
-                                            ),
+                                                return {
+                                                    key: `${baseKey}_${style}` as ProductionGroupKey,
+                                                    baseKey,
+                                                    label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${PRODUCTION_STYLE_LABELS[garment][style]}`,
+                                                    garment,
+                                                    // Which sheet this prints...
+                                                    sizeTier,
+                                                    // ...and which rate pays for it.
+                                                    pricingGroup:
+                                                        pricingGroupFor(
+                                                            sizeTier,
+                                                        ),
+                                                    style,
+                                                };
+                                            },
+                                        ),
                                     ),
                                 );
                                 const groupData = groupDefinitions.reduce(
@@ -3251,7 +3324,8 @@ export function ProductionBoardPage({
                                 );
 
                                 for (const item of orderItems) {
-                                    const sizeGroup = resolveSizeGroup(
+                                    const sizeGroup = resolveSizeTier(
+                                        String(item.size_tier || ''),
                                         String(item.size_group || ''),
                                     );
 
@@ -3325,8 +3399,13 @@ export function ProductionBoardPage({
                                         return Number(priced.unit_total || 0);
                                     }
 
+                                    // These per-garment totals are kept per
+                                    // pricing group, of which there are two, so
+                                    // ประถม - มัธยมต้น falls back to the child's
+                                    // rate — the same rate it is billed at.
                                     switch (baseKey) {
                                         case 'shirt_kids':
+                                        case 'shirt_junior':
                                             return Number(
                                                 productionPricing.child_unit_total ||
                                                     0,
@@ -3337,6 +3416,7 @@ export function ProductionBoardPage({
                                                     0,
                                             );
                                         case 'pants_kids':
+                                        case 'pants_junior':
                                             return Number(
                                                 productionPricing.pants_child_unit_total ||
                                                     0,
@@ -3454,7 +3534,9 @@ export function ProductionBoardPage({
                                                             teamName:
                                                                 team.teamName,
                                                             garment,
-                                                            sizeGroup,
+                                                            sizeTier: sizeGroup,
+                                                            pricingGroup:
+                                                                sizeGroup,
                                                             quantity,
                                                             sizeRows:
                                                                 Array.from(
@@ -3565,6 +3647,16 @@ export function ProductionBoardPage({
                                           .map((group) => {
                                               const quantity =
                                                   groupData[group.key].quantity;
+                                              // What the server priced this
+                                              // sheet as, which carries the
+                                              // rate card it was costed from.
+                                              const pricedGroup = (
+                                                  productionPricing?.groups ??
+                                                  []
+                                              ).find(
+                                                  (priced) =>
+                                                      priced.key === group.key,
+                                              );
                                               const unitTotal =
                                                   resolveGroupUnitTotal(
                                                       group.key,
@@ -3704,12 +3796,17 @@ export function ProductionBoardPage({
                                                       resolveProductionSpecTitle(
                                                           group.garment,
                                                       ),
+                                                  // The sheet's own steps win:
+                                                  // it is costed from its own
+                                                  // rate card, so it has to be
+                                                  // read against the same one.
                                                   components:
-                                                      group.garment === 'pants'
+                                                      pricedGroup?.components ??
+                                                      (group.garment === 'pants'
                                                           ? (productionPricing?.pants_components ??
                                                             [])
                                                           : (productionPricing?.components ??
-                                                            []),
+                                                            [])),
                                               };
                                           })
                                           .filter((group) => {
@@ -5090,23 +5187,40 @@ export function ProductionBoardPage({
                                                 {productionGroups.length > 0
                                                     ? productionGroups.map(
                                                           (group) => {
+                                                              const batchTypeName =
+                                                                  (
+                                                                      productionPricing?.groups ??
+                                                                      []
+                                                                  ).find(
+                                                                      (
+                                                                          priced,
+                                                                      ) =>
+                                                                          priced.key ===
+                                                                          group.key,
+                                                                  )?.garment_type_name;
                                                               const formTitle =
-                                                                  group.garment ===
+                                                                  batchTypeName ||
+                                                                  (group.garment ===
                                                                   'pants'
                                                                       ? productionPricing?.pants_type_name ||
                                                                         detailOrder.job_type ||
                                                                         '-'
                                                                       : productionPricing?.shirt_type_name ||
                                                                         detailOrder.job_type ||
-                                                                        '-';
+                                                                        '-');
                                                               const groupSpecRows =
                                                                   resolveProductionSpecRows(
                                                                       group.garment,
                                                                       shirtRows,
                                                                       pantsRows,
+                                                                      mappedSections
+                                                                          ?.batches?.[
+                                                                          group
+                                                                              .key
+                                                                      ],
                                                                   );
                                                               const standardSizeHeaders =
-                                                                  group.sizeGroup ===
+                                                                  group.sizeTier ===
                                                                   'kids'
                                                                       ? [
                                                                             'JSS',
@@ -5209,7 +5323,7 @@ export function ProductionBoardPage({
                                                                         )
                                                                       : 0;
                                                               const pricingFormulaLabel =
-                                                                  group.sizeGroup ===
+                                                                  group.pricingGroup ===
                                                                   'kids'
                                                                       ? 'เด็ก'
                                                                       : 'ผู้ใหญ่';
@@ -5218,7 +5332,7 @@ export function ProductionBoardPage({
                                                                       ? `${group.quantity.toLocaleString('th-TH')} x — = —`
                                                                       : `${group.quantity.toLocaleString('th-TH')} x ${formatMoney(group.unitTotal)} = ${formatMoney(group.subtotal)}`;
                                                               const isKidsDocument =
-                                                                  group.sizeGroup ===
+                                                                  group.pricingGroup ===
                                                                   'kids';
                                                               const hasSizeCellValue =
                                                                   (
@@ -5307,14 +5421,23 @@ export function ProductionBoardPage({
                                                                                           </strong>
                                                                                       </p>
                                                                                   ) : null}
+                                                                                  {/*
+                                                                                      What this sheet is making, not what
+                                                                                      the rest of the bill is. A trouser
+                                                                                      sheet used to be headed with the
+                                                                                      bill's shirt type.
+                                                                                  */}
                                                                                   <p className="p-page-header-row">
                                                                                       <span className="p-page-header-label">
-                                                                                          ประเภทเสื้อ:
+                                                                                          {group.garment ===
+                                                                                          'pants'
+                                                                                              ? 'ประเภทกางเกง:'
+                                                                                              : 'ประเภทเสื้อ:'}
                                                                                       </span>{' '}
                                                                                       <strong>
-                                                                                          {productionPricing?.shirt_type_name ||
-                                                                                              detailOrder.job_type ||
-                                                                                              '-'}
+                                                                                          {
+                                                                                              formTitle
+                                                                                          }
                                                                                       </strong>
                                                                                   </p>
                                                                                   <p className="p-page-header-row">

@@ -867,12 +867,12 @@ describe('counter work-sheet PDF', () => {
     it('prints the artwork at one fixed height on every sheet', () => {
         const html = printedHtml();
 
+        // One height on every bill, never trimmed: a receipt that needs more
+        // room takes another page rather than shrinking its picture.
         expect(html).toContain('var FIXED = 58');
         expect(html).toContain('--artwork-h: 58mm');
-        // Still allowed to give ground, but only to keep a dense bill on one
-        // page rather than spilling onto a second.
-        expect(html).toContain('var MIN = 20');
-        expect(html).toContain('var MIN_SCALE = 0.72');
+        expect(html).not.toContain('var MIN =');
+        expect(html).not.toContain('var MIN_SCALE');
     });
 
     it('measures the same layout that comes out of the printer', () => {
@@ -883,7 +883,7 @@ describe('counter work-sheet PDF', () => {
         // block 46mm taller than the one that actually printed: the picture came
         // out trimmed with a band of empty paper below it.
         expect(html).toContain(
-            '.spec-sections.has-two { grid-template-columns: 1fr 1fr; gap: 5px; }',
+            '.spec-sections.has-two { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }',
         );
         expect(html).not.toMatch(
             /@media print \{[^}]*\.spec-sections\.has-two/s,
@@ -891,15 +891,17 @@ describe('counter work-sheet PDF', () => {
         expect(html).not.toMatch(/@media print \{[^}]*\.job-value/s);
     });
 
-    it('gives unused height back to the artwork, up to the fixed size', () => {
+    /**
+     * A bill names a spec for every garment type it sells and all of them
+     * belong on the receipt, so a long one is allowed the pages it needs.
+     * Nothing is trimmed and nothing is scaled to avoid a page break.
+     */
+    it('takes another page rather than shrinking anything to avoid one', () => {
         const html = printedHtml();
 
-        // A busy sheet trims the picture to fit. Once the figures have taken
-        // what they need, whatever is still unused goes back to the picture --
-        // never past the fixed height, so bills still match each other.
-        expect(html).toContain('while (height < FIXED)');
-        expect(html).toContain('height = Math.min(FIXED, height + STEP)');
-        expect(html).toContain('var STEP = 1');
+        expect(html).not.toContain('while (height < FIXED)');
+        expect(html).not.toContain('page.style.transform');
+        expect(html).not.toContain("document.body.style.overflow = 'hidden'");
     });
 
     const rosterRow = () =>
@@ -1418,7 +1420,7 @@ describe('counter work-sheet PDF', () => {
             }) as never,
         );
 
-        const shirt = screen.getByText('สเปกแบบเสื้อ').parentElement!;
+        const shirt = screen.getByText('สเปกเสื้อ').parentElement!;
         const tables = shirt.querySelectorAll('table');
 
         // A lone section splits into two tables instead of leaving half the
@@ -1434,7 +1436,7 @@ describe('counter work-sheet PDF', () => {
         );
 
         // The filler is decoration, never a fake setting.
-        expect(screen.queryByText('สเปกแบบกางเกง')).not.toBeInTheDocument();
+        expect(screen.queryByText('สเปกกางเกง')).not.toBeInTheDocument();
     });
 
     it('keeps one column per section when both shirt and pants have a spec', () => {
@@ -1454,8 +1456,8 @@ describe('counter work-sheet PDF', () => {
             }) as never,
         );
 
-        const shirt = screen.getByText('สเปกแบบเสื้อ').parentElement!;
-        const pants = screen.getByText('สเปกแบบกางเกง').parentElement!;
+        const shirt = screen.getByText('สเปกเสื้อ').parentElement!;
+        const pants = screen.getByText('สเปกกางเกง').parentElement!;
 
         // Side by side, so neither section splits and no filler rows appear.
         expect(shirt.querySelectorAll('table')).toHaveLength(1);
@@ -1482,7 +1484,7 @@ describe('counter work-sheet PDF', () => {
 
         expect(
             screen
-                .getByText('สเปกแบบเสื้อ')
+                .getByText('สเปกเสื้อ')
                 .parentElement!.querySelectorAll('table'),
         ).toHaveLength(1);
     });
@@ -1724,7 +1726,7 @@ describe('counter work-sheet PDF', () => {
     it('lays the spec out as a table with one row per setting', () => {
         openDetail(makeRow() as never);
 
-        const shirtHeading = screen.getByText('สเปกแบบเสื้อ');
+        const shirtHeading = screen.getByText('สเปกเสื้อ');
         const table = shirtHeading.parentElement?.querySelector('table');
 
         expect(table).not.toBeNull();
@@ -1794,20 +1796,13 @@ describe('counter work-sheet PDF', () => {
         });
     });
 
-    it('tightens the size table before scaling the whole sheet', () => {
+    it('never tightens the size table to buy room', () => {
         const html = printedHtml();
 
-        expect(html).toContain('var FONT_MIN = 8');
-        expect(html).toContain(
-            'while (page.scrollHeight > limit && tight > FONT_MIN)',
-        );
-        // Order matters: artwork floor, then table font, then the sheet scale.
-        expect(html.indexOf('height > MIN')).toBeLessThan(
-            html.indexOf('tight > FONT_MIN'),
-        );
-        expect(html.indexOf('tight > FONT_MIN')).toBeLessThan(
-            html.indexOf('MIN_SCALE, limit / natural'),
-        );
+        // Figures on a receipt are read by a customer. They keep one size
+        // however long the bill runs.
+        expect(html).not.toContain('var FONT_MIN');
+        expect(html).not.toContain('tight > FONT_MIN');
     });
 
     it('merges the job and payment details into one block', () => {
@@ -1850,13 +1845,9 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain(
             'if (page.scrollHeight > limit) { setFont(font - FONT_STEP); break; }',
         );
-        // The artwork is allowed back up to its fixed height and no further, so
-        // there is no cap above it to grow towards any more.
-        expect(html).not.toContain('GROW_MAX');
-        expect(html).toContain('while (height < FIXED)');
 
         // Growth is gated on the sheet already fitting, so it can never push a
-        // full order onto a second page.
+        // short order onto a second page.
         expect(html.indexOf('if (page.scrollHeight <= limit) {')).toBeLessThan(
             html.indexOf('while (font < FONT_MAX)'),
         );
@@ -2113,27 +2104,25 @@ describe('counter work-sheet PDF', () => {
         );
     });
 
-    it('scales the sheet without shrinking it twice', () => {
+    it('numbers the pages of a receipt that runs to more than one', () => {
         const html = printedHtml();
 
-        // The transform is visual only, so the page keeps its unscaled layout
-        // height. The clamp therefore belongs on the body -- clamping the scaled
-        // element itself would apply the reduction a second time.
-        expect(html).toContain(
-            "document.body.style.height = (natural * scale) + 'px'",
-        );
-        expect(html).not.toContain('page.style.height = (natural * scale)');
+        // Every page says which bill it belongs to; a receipt of several says
+        // which page of how many, so a customer can see none is missing. A
+        // single page needs no numbering and gets none.
+        expect(html).toContain('class="print-runner"');
+        expect(html).toContain("'หน้า ' + (i + 1) + '/' + total");
+        expect(html).toContain('total > 1');
+        // Out of flow, so placing them cannot itself add a page.
+        expect(html).toContain('position: absolute;');
     });
 
     it('never clips rows off an order too large to fit one page', () => {
         const html = printedHtml();
 
-        // overflow:hidden must be conditional. An order that still overflows at
-        // MIN_SCALE has to run onto a second sheet rather than lose its rows.
-        expect(html).toContain('if (natural * scale <= limit + 1)');
-        const clip = html.indexOf("document.body.style.overflow = 'hidden'");
-        const guard = html.indexOf('if (natural * scale <= limit + 1)');
-        expect(clip).toBeGreaterThan(guard);
+        // Nothing is hidden and nothing is scaled: the sheet runs on instead.
+        expect(html).not.toContain("style.overflow = 'hidden'");
+        expect(html).not.toContain('scale(');
     });
 
     it('prints once, from the fitter, with a fallback if it never runs', () => {

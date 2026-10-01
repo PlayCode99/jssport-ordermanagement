@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Production;
 
 use App\Enums\GarmentCategory;
+use App\Enums\SizeTier;
 use App\Models\GarmentOperation;
 use App\Models\GarmentType;
 use App\Models\Order;
@@ -212,7 +213,55 @@ trait ProductionCostCalculation
             'pants_type_name' => $pantsType?->name,
             'components' => $components($shirtType),
             'pants_components' => $components($pantsType),
+            // One rate card per sheet, because a bill names a garment type per
+            // table now: the same polo cut long and cut short is two things to
+            // make, with two rate cards. The single pair above stays for bills
+            // that name only one, and is what every sheet of such a bill is
+            // costed from.
+            'batches' => $this->buildBatchRateSnapshots($order, $garmentTypesByCategory),
         ];
+    }
+
+    /**
+     * The rate card each sheet is costed from, keyed the way the sheets are.
+     *
+     * @param  Collection<array-key, Collection<int, GarmentType>>  $garmentTypesByCategory
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildBatchRateSnapshots(Order $order, Collection $garmentTypesByCategory): array
+    {
+        $decoded = $this->decodeSpecPayload($order->specification?->toArray() ?? []);
+        $perBatch = is_array($decoded['garment_specs'] ?? null) ? $decoded['garment_specs'] : [];
+        $snapshots = [];
+
+        foreach ($perBatch as $key => $specs) {
+            if (! is_string($key) || ! is_array($specs)) {
+                continue;
+            }
+
+            $isPants = str_starts_with($key, 'pants_');
+            $typeId = (int) ($specs[$isPants ? 'pants_type_id' : 'shirt_type_id'] ?? 0);
+
+            if ($typeId <= 0) {
+                continue;
+            }
+
+            $type = $garmentTypesByCategory
+                ->get(($isPants ? GarmentCategory::Pants : GarmentCategory::Shirt)->value, collect())
+                ->first(fn (GarmentType $candidate): bool => (int) $candidate->id === $typeId);
+
+            if (! $type instanceof GarmentType) {
+                continue;
+            }
+
+            $snapshots[$key] = [
+                'type_id' => (int) $type->id,
+                'type_name' => (string) $type->name,
+                'components' => $this->rateComponents($type),
+            ];
+        }
+
+        return $snapshots;
     }
 
     /**
@@ -241,8 +290,10 @@ trait ProductionCostCalculation
     /** @var array<string, string> */
     private const PRODUCTION_GROUP_BASE_LABELS = [
         'shirt_kids' => 'เสื้อไซต์เด็ก',
+        'shirt_junior' => 'เสื้อไซต์ประถม - มัธยมต้น',
         'shirt_adults' => 'เสื้อไซต์ผู้ใหญ่',
         'pants_kids' => 'กางเกงเด็ก',
+        'pants_junior' => 'กางเกงประถม - มัธยมต้น',
         'pants_adults' => 'กางเกงผู้ใหญ่',
     ];
 
@@ -312,21 +363,6 @@ trait ProductionCostCalculation
         return in_array($normalized, ['short', 'long', 'sleeveless'], true) ? $normalized : 'unspecified';
     }
 
-    private function normalizePricingSizeGroup(string $sizeGroup): ?string
-    {
-        $normalized = mb_strtolower(trim($sizeGroup));
-
-        if ($normalized === 'kids') {
-            return 'kids';
-        }
-
-        if (in_array($normalized, ['adults', 'oversize'], true)) {
-            return 'adults';
-        }
-
-        return null;
-    }
-
     /**
      * Quantities per production batch: garment x size group x garment style.
      *
@@ -341,9 +377,9 @@ trait ProductionCostCalculation
         $totals = [];
 
         foreach (['shirt', 'pants'] as $garment) {
-            foreach (['kids', 'adults'] as $sizeGroup) {
+            foreach (SizeTier::values() as $tier) {
                 foreach ($this->productionStylesFor($garment) as $style) {
-                    $totals[$garment.'_'.$sizeGroup.'_'.$style] = 0;
+                    $totals[$garment.'_'.$tier.'_'.$style] = 0;
                 }
             }
         }
@@ -351,9 +387,11 @@ trait ProductionCostCalculation
         $garmentAvailability = $this->resolveSpecificationGarmentAvailability($order->specification?->toArray() ?? []);
 
         foreach ($order->items ?? collect() as $item) {
-            $sizeGroup = $this->normalizePricingSizeGroup((string) ($item->size_group ?? ''));
+            // The tier says which sheet the line is sewn on. What it costs is
+            // decided separately, from the pricing group the tier folds into.
+            $tier = SizeTier::forItem($item->size_tier ?? null, $item->size_group ?? null);
 
-            if ($sizeGroup === null) {
+            if ($tier === null) {
                 continue;
             }
 
@@ -368,7 +406,7 @@ trait ProductionCostCalculation
                     $garmentGroup === 'pants' ? $item->pants_style : $item->shirt_style,
                 );
 
-                $totals[$garmentGroup.'_'.$sizeGroup.'_'.$style] += (int) ($item->quantity ?? 0);
+                $totals[$garmentGroup.'_'.$tier->value.'_'.$style] += (int) ($item->quantity ?? 0);
             }
         }
 
@@ -391,8 +429,11 @@ trait ProductionCostCalculation
         ];
 
         foreach ($this->summarizeOrderQuantitiesByProductionGroup($order) as $key => $quantity) {
-            [$garment, $sizeGroup] = explode('_', $key);
-            $totals[$garment.'_'.$sizeGroup] += $quantity;
+            [$garment, $tier] = explode('_', $key);
+            // ประถม - มัธยมต้น is sewn apart but billed together, so it folds
+            // back into the child's rate here and nowhere else.
+            $pricingGroup = SizeTier::from($tier)->pricingGroup()->value;
+            $totals[$garment.'_'.$pricingGroup] += $quantity;
         }
 
         return $totals;
@@ -432,6 +473,13 @@ trait ProductionCostCalculation
         $shirtTypeName = $snapshot['shirt_type_name'] ?? $shirtType->name ?? null;
         $pantsTypeName = $snapshot['pants_type_name'] ?? $pantsType->name ?? null;
 
+        // The rate card each sheet is costed from. The order's own snapshot
+        // wins, so changing a rate never re-prices booked work; a bill taken
+        // before sheets had their own cards falls back to the garment's.
+        $batchRates = is_array($snapshot['batches'] ?? null)
+            ? $snapshot['batches']
+            : $this->buildBatchRateSnapshots($order, $garmentTypesByCategory);
+
         $shirtChildUnitTotal = (float) $shirtComponents->sum('child_price');
         $shirtAdultUnitTotal = (float) $shirtComponents->sum('adult_price');
         $pantsChildUnitTotal = (float) $pantsComponents->sum('child_price');
@@ -445,16 +493,24 @@ trait ProductionCostCalculation
         foreach (['shirt', 'pants'] as $garment) {
             $components = $garment === 'shirt' ? $shirtComponents : $pantsComponents;
 
-            foreach (['kids', 'adults'] as $sizeGroup) {
+            foreach (SizeTier::cases() as $tier) {
+                // The sheet is cut per tier; the rate is per pricing group.
+                $pricingGroup = $tier->pricingGroup()->value;
+
                 foreach ($this->productionStylesFor($garment) as $style) {
-                    $key = $garment.'_'.$sizeGroup.'_'.$style;
+                    $key = $garment.'_'.$tier->value.'_'.$style;
                     $quantity = (int) ($batchQuantities[$key] ?? 0);
 
                     if ($quantity <= 0) {
                         continue;
                     }
 
-                    $unitTotal = $this->unitTotalForBatch($components, $sizeGroup, $style);
+                    $batchRate = is_array($batchRates[$key] ?? null) ? $batchRates[$key] : null;
+                    $batchComponents = is_array($batchRate['components'] ?? null)
+                        ? collect($batchRate['components'])
+                        : $components;
+
+                    $unitTotal = $this->unitTotalForBatch($batchComponents, $pricingGroup, $style);
 
                     $groups[] = [
                         'key' => $key,
@@ -464,11 +520,19 @@ trait ProductionCostCalculation
                         // than sharing one per garment.
                         // The steps this sheet is made of, so a sheet's costing
                         // table is read against the work it actually names.
-                        'components' => $components->all(),
-                        'label' => self::PRODUCTION_GROUP_BASE_LABELS[$garment.'_'.$sizeGroup]
+                        'components' => $batchComponents->all(),
+                        // What the floor is making on this sheet, which is not
+                        // always what the rest of the bill is making.
+                        'garment_type_name' => $batchRate['type_name']
+                            ?? ($garment === 'pants' ? $pantsTypeName : $shirtTypeName),
+                        'label' => self::PRODUCTION_GROUP_BASE_LABELS[$garment.'_'.$tier->value]
                             .' '.self::PRODUCTION_STYLE_LABELS[$garment][$style],
                         'garment' => $garment,
-                        'size_group' => $sizeGroup,
+                        // Which sheet this batch prints on...
+                        'size_tier' => $tier->value,
+                        // ...and which rate it was costed at, which is what the
+                        // child/adult money split below sums by.
+                        'size_group' => $pricingGroup,
                         'style' => $style,
                         'quantity' => $quantity,
                         'unit_total' => $unitTotal,
