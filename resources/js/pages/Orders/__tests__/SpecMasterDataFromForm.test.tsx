@@ -108,13 +108,26 @@ const props = {
     defaultBranchId: 1,
 };
 
-const renderForm = (order?: Record<string, unknown>) =>
-    render(
+/**
+ * Rendered on Form 2, which is where the spec card with its แบบเสื้อ /
+ * แบบกางเกง tabs still lives. Forms 1 and 4 carry a spec under each table
+ * instead, with both garments on screen at once and no tab to switch. What is
+ * under test here — that every catalog field is a combobox the shop can add
+ * to, and that the two garments share their colour lists — holds wherever the
+ * spec is drawn, so the tabbed card is the simpler place to check it.
+ */
+const renderForm = (order?: Record<string, unknown>) => {
+    const view = render(
         <OrderCreatePage
             {...(props as unknown as PageProps)}
             {...(order ? { order } : {})}
         />,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: /รายตัว \(Form 2\)/ }));
+
+    return view;
+};
 
 const asOwner = () => {
     mockPage.props = {
@@ -267,12 +280,14 @@ describe('spec master data is managed from the form', () => {
         const pantsColour = screen.getByLabelText('สีผ้า');
         fireEvent.change(pantsColour, { target: { value: 'เขียวสะท้อนแสง' } });
 
-        // The add button that belongs to this field sits right after it.
+        // The add button that belongs to this field is the one inside the
+        // same combobox — found by the field it sits with, not by how many
+        // elements deep the tools happen to be wrapped.
         const addButtons = screen.getAllByRole('button', {
             name: 'เพิ่มเป็นมาสเตอร์',
         });
         const pantsColourAdd = addButtons.find((button) =>
-            button.parentElement?.contains(pantsColour),
+            button.closest('.group')?.contains(pantsColour),
         ) as HTMLElement;
         fireEvent.click(pantsColourAdd);
 

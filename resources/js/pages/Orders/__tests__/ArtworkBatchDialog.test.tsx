@@ -72,6 +72,64 @@ const renderForm = (order?: Record<string, unknown>) =>
         />,
     );
 
+/**
+ * A bill carrying one picture pinned to no sheet. Forms 1 and 4 do not take
+ * artwork that way any more — every table takes its own — so this is the one
+ * state in which the bill-level dialog is still offered: to see what an older
+ * bill is carrying and move it onto the sheets it belongs to.
+ */
+const billWithUnpinnedArtwork = (
+    over: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+    id: 9,
+    order_code: 'ORD-2026-00009',
+    customer_id: 1,
+    branch_id: 1,
+    customer_name: 'โรงเรียนทดสอบ',
+    job_name: 'งานทดสอบ',
+    job_type: 'งานปัก',
+    billing_date: '2026-09-01',
+    billing_time: '10:00',
+    due_date: '2026-09-20',
+    delivery_method: 'pickup',
+    discount_percent: 0,
+    deposit_amount: 0,
+    payment_method: 'cash',
+    // A shirt table and a trouser table to carry the sheets, so the dialog has
+    // something to pin the stray picture onto.
+    items: [
+        {
+            item_type: 'separate_shirt',
+            size_group: 'kids',
+            size_tier: 'kids',
+            size_label: 'JS',
+            shirt_style: 'short',
+            quantity: 0,
+            unit_price: 0,
+        },
+        {
+            item_type: 'separate_pants',
+            size_group: 'kids',
+            size_tier: 'kids',
+            size_label: 'JS',
+            pants_style: 'short',
+            quantity: 0,
+            unit_price: 0,
+        },
+    ],
+    shirt_artwork_media: [
+        { id: 900, url: 'https://example.test/legacy.webp', batch: null },
+    ],
+    specification: {
+        decoded: { schema: 'spec-v2', mode: 'matrix' },
+    },
+    ...over,
+});
+
+/** The dialog is only reachable while the bill still has unpinned artwork. */
+const renderFormWithDialog = (order?: Record<string, unknown>) =>
+    renderForm(order ?? billWithUnpinnedArtwork());
+
 const openDialog = () =>
     fireEvent.click(screen.getByRole('button', { name: /จัดการรูป Art Work/ }));
 
@@ -90,31 +148,38 @@ const type = (label: string, value: string) =>
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe('the Art Work button on Forms 1 and 4', () => {
-    it('replaces the garment galleries on the form itself', () => {
+    it('is not offered at all on a bill with nothing left unpinned', () => {
         renderForm();
 
+        // Every table takes its own pictures, so there is nothing to attach at
+        // bill level and no reason to send the counter to a dialog for it.
         expect(
-            screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
-        ).toBeInTheDocument();
-        // The galleries are not on the page until the dialog is opened.
-        expect(screen.queryByText(/Art Work เสื้อ/)).not.toBeInTheDocument();
+            screen.queryByRole('button', { name: /จัดการรูป Art Work/ }),
+        ).not.toBeInTheDocument();
+        // Nor is the old per-garment gallery anywhere on the form.
+        expect(screen.queryByText(/^Art Work เสื้อ$/)).not.toBeInTheDocument();
     });
 
-    it('is offered once, on the shirt tab only', () => {
-        renderForm();
+    it('is offered once while the bill still carries unpinned artwork', () => {
+        renderFormWithDialog();
 
         expect(
             screen.getAllByRole('button', { name: /จัดการรูป Art Work/ }),
         ).toHaveLength(1);
+    });
 
-        // The dialog covers both garments, so the trousers tab does not ask
-        // for artwork a second time.
-        fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
+    it('gives every table a gallery of its own, named after its sheet', () => {
+        renderForm();
 
+        // The bill opens on a shirt table and a trouser table, each taking the
+        // artwork for its own sheet — no batch for the counter to choose,
+        // because the table it sits under already says which sheet it is.
         expect(
-            screen.queryByRole('button', { name: /จัดการรูป Art Work/ }),
-        ).not.toBeInTheDocument();
-        expect(screen.queryByText(/Art Work/)).not.toBeInTheDocument();
+            screen.getByText('Art Work · ตารางเสื้อไซซ์เด็ก · แขนสั้น'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText('Art Work · ตารางกางเกงไซซ์เด็ก · ขาสั้น'),
+        ).toBeInTheDocument();
     });
 
     it('counts the artwork already on the bill', () => {
@@ -152,7 +217,7 @@ describe('the Art Work button on Forms 1 and 4', () => {
 
 describe('the Art Work dialog', () => {
     it('opens on one design for the whole bill', () => {
-        renderForm();
+        renderFormWithDialog();
         openDialog();
 
         // Both garments, one gallery each — the same thing the form used to
@@ -166,7 +231,7 @@ describe('the Art Work dialog', () => {
     });
 
     it('offers no split while the bill has no sizes typed in yet', () => {
-        renderForm();
+        renderFormWithDialog();
         openDialog();
 
         // Nothing is known about the sheets yet, so there is nothing to split.
@@ -179,7 +244,7 @@ describe('the Art Work dialog', () => {
     });
 
     it('lists exactly the sheets the bill produces once sizes are typed in', () => {
-        renderForm();
+        renderFormWithDialog();
         type('จำนวนเสื้อ แถวที่ 1', '35');
         type('จำนวนกางเกง แถวที่ 1', '35');
         openDialog();
@@ -265,19 +330,22 @@ describe('the Art Work dialog', () => {
         expect(screen.queryByText(/ยังไม่มีรูป \d+ ใบงาน/)).toBeNull();
     });
 
-    it('says which sheets would print with no artwork', () => {
+    /**
+     * A sheet with no artwork used to be called out inside the dialog. On
+     * Forms 1 and 4 the gallery now sits on the sheet's own table, so the gap
+     * is visible without opening anything — which is the whole reason the
+     * dialog stopped being the way in.
+     */
+    it('says on the table itself when a sheet has no artwork', () => {
         renderForm();
-        type('จำนวนเสื้อ แถวที่ 1', '35');
-        openDialog();
-        fireEvent.click(
-            within(dialog()).getByRole('radio', { name: 'แยกรูปตามใบงาน' }),
-        );
 
-        expect(within(dialog()).getByText('ยังไม่มีรูป')).toBeInTheDocument();
+        expect(screen.getAllByText('ยังไม่ได้แนบรูป').length).toBeGreaterThan(
+            0,
+        );
     });
 
     it('states the quantity of each sheet, so the counter knows which is which', () => {
-        renderForm();
+        renderFormWithDialog();
         type('จำนวนเสื้อ แถวที่ 1', '35');
         openDialog();
         fireEvent.click(
@@ -326,6 +394,12 @@ describe('the Art Work dialog', () => {
                     url: 'https://example.test/a.webp',
                     batch: 'shirt_adults_long',
                 },
+                // Pinned to nothing, which is what still opens the dialog.
+                {
+                    id: 102,
+                    url: 'https://example.test/loose.webp',
+                    batch: null,
+                },
             ],
             specification: {
                 decoded: {
@@ -345,11 +419,6 @@ describe('the Art Work dialog', () => {
         expect(
             within(longSheet).getByRole('img', { name: /Art Work เสื้อ/ }),
         ).toBeInTheDocument();
-
-        // The short-sleeve sheet has nothing, and says so.
-        const shortSheet = sheetSection('เสื้อไซต์ผู้ใหญ่ แขนสั้น');
-
-        expect(within(shortSheet).getByText('ยังไม่มีรูป')).toBeInTheDocument();
     });
 
     it('unpins everything when the bill goes back to one design', () => {
@@ -383,6 +452,12 @@ describe('the Art Work dialog', () => {
                     url: 'https://example.test/a.webp',
                     batch: 'shirt_adults_short',
                 },
+                // Pinned to nothing, which is what still opens the dialog.
+                {
+                    id: 102,
+                    url: 'https://example.test/loose.webp',
+                    batch: null,
+                },
             ],
             specification: {
                 decoded: {
@@ -400,10 +475,12 @@ describe('the Art Work dialog', () => {
             }),
         );
 
-        // The image stays on the bill; it simply goes on every sheet again.
+        // Both images stay on the bill; they simply go on every sheet again —
+        // the one that was pinned to the short sleeves, and the one that never
+        // was pinned at all.
         expect(
-            within(dialog()).getByRole('img', { name: /Art Work เสื้อ/ }),
-        ).toBeInTheDocument();
+            within(dialog()).getAllByRole('img', { name: /Art Work เสื้อ/ }),
+        ).toHaveLength(2);
         expect(
             within(dialog()).queryByText('ยังไม่มีรูป'),
         ).not.toBeInTheDocument();
@@ -411,36 +488,48 @@ describe('the Art Work dialog', () => {
 });
 
 /**
- * All four forms take their artwork the same way: one dialog, pinned to the
- * sheets the bill will produce. Forms 2 and 3 used to keep a gallery of their
- * own on the form instead, which put every picture on every sheet — a bill
- * with both short and long sleeves had no way to say which was which.
+ * Every form pins artwork to the sheets the bill will produce, and none of them
+ * keeps the old per-garment gallery that put every picture on every sheet —
+ * a bill with both short and long sleeves had no way to say which was which.
+ *
+ * Forms 2 and 3 sell one garment spec for the whole bill, so the dialog is the
+ * only place they take pictures. Forms 1 and 4 also take them table by table,
+ * which pins them without anyone having to choose a batch.
  */
-describe('every form takes its artwork through the one dialog', () => {
+describe('every form takes its artwork pinned to a sheet', () => {
     it.each([
-        ['แพทเทรินเสื้อเหมือนกัน (Form 1)', /^แพทเทรินเสื้อเหมือนกัน/],
         ['รายตัว (Form 2)', /^รายตัว/],
         ['กีฬาสี (Form 3)', /^กีฬาสี/],
+    ])('offers %s the dialog and no gallery of its own', (_name, tab) => {
+        renderFormWithDialog();
+        fireEvent.click(screen.getByRole('button', { name: tab }));
+
+        expect(
+            screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
+        ).toBeInTheDocument();
+        expect(screen.queryByText('Art Work เสื้อ')).not.toBeInTheDocument();
+
+        // The trousers tab does not ask for artwork a second time either.
+        fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
+
+        expect(screen.queryByText('Art Work กางเกง')).not.toBeInTheDocument();
+    });
+
+    it.each([
+        ['แพทเทรินเสื้อเหมือนกัน (Form 1)', /^แพทเทรินเสื้อเหมือนกัน/],
         ['ชุดพละ (Form 4)', /^ชุดพละ/],
-    ])(
-        'offers %s the Art Work dialog and no gallery of its own',
-        (_name, tab) => {
-            renderForm();
-            fireEvent.click(screen.getByRole('button', { name: tab }));
+    ])('offers %s both the dialog and a gallery per table', (_name, tab) => {
+        renderFormWithDialog();
+        fireEvent.click(screen.getByRole('button', { name: tab }));
 
-            expect(
-                screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
-            ).toBeInTheDocument();
-            expect(
-                screen.queryByText('Art Work เสื้อ'),
-            ).not.toBeInTheDocument();
-
-            // The trousers tab does not ask for artwork a second time either.
-            fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
-
-            expect(
-                screen.queryByText('Art Work กางเกง'),
-            ).not.toBeInTheDocument();
-        },
-    );
+        expect(
+            screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
+        ).toBeInTheDocument();
+        // Named after the sheet, never the bare garment: the old
+        // "Art Work เสื้อ" meant every shirt sheet at once.
+        expect(screen.queryByText('Art Work เสื้อ')).not.toBeInTheDocument();
+        expect(
+            screen.getByText('Art Work · ตารางเสื้อไซซ์เด็ก · แขนสั้น'),
+        ).toBeInTheDocument();
+    });
 });

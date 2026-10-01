@@ -7,6 +7,7 @@ namespace App\Domain\OrderManagement\Actions;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentType;
+use App\Enums\SizeTier;
 use App\Models\Order;
 use App\Models\Receipt;
 use Illuminate\Http\UploadedFile;
@@ -44,6 +45,7 @@ class UpdateOrderAction
                     $order->items()->create([
                         'item_type' => (string) ($item['item_type'] ?? 'garment'),
                         'size_group' => (string) ($item['size_group'] ?? 'adults'),
+                        'size_tier' => SizeTier::forItem($item['size_tier'] ?? null, $item['size_group'] ?? null)?->value,
                         'size_label' => (string) ($item['size_label'] ?? 'M'),
                         // Sleeveless is a shirt cut; trousers have only the two.
                         'shirt_style' => in_array($item['shirt_style'] ?? null, ['short', 'long', 'sleeveless'], true)

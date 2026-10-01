@@ -9,6 +9,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\PaymentType;
 use App\Enums\RoutingStationName;
 use App\Enums\RoutingStatus;
+use App\Enums\SizeTier;
 use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\Order;
@@ -55,6 +56,7 @@ class CreateOrderAction
                     $orderItemsPayload[] = [
                         'item_type' => (string) $item['item_type'],
                         'size_group' => (string) $item['size_group'],
+                        'size_tier' => SizeTier::forItem($item['size_tier'] ?? null, $item['size_group'] ?? null)?->value,
                         'size_label' => (string) $item['size_label'],
                         'shirt_style' => $this->garmentStyle($item['shirt_style'] ?? null),
                         'pants_style' => $this->garmentStyle($item['pants_style'] ?? null, 'pants'),

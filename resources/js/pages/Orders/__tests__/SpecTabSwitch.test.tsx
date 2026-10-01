@@ -162,8 +162,18 @@ const showPantsTab = () =>
  * Radix Select keeps a hidden native <select> whose remount fired a change with
  * an empty value, and the spec tabs unmount their side when switched, so every
  * round trip silently cleared the selection.
+ *
+ * The tabs only exist on Forms 2 and 3 now — Forms 1 and 4 draw a spec under
+ * each table, with nothing to switch between — so these are rendered on Form 2,
+ * which is where a spec can still be unmounted and remounted.
  */
 describe('spec tab switching keeps the saved dropdown choices', () => {
+    /** Form 2, where the spec card with its two tabs still lives. */
+    const showTabbedSpec = () =>
+        fireEvent.click(
+            screen.getByRole('button', { name: /รายตัว \(Form 2\)/ }),
+        );
+
     it('keeps the shirt type after switching to pants and back', () => {
         render(
             <OrderCreatePage
@@ -171,6 +181,8 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
                 order={duplicatedOrder as never}
             />,
         );
+
+        showTabbedSpec();
 
         expect(shirtTypeTriggerText()).toBe('เสื้อคอกลม');
 
@@ -180,10 +192,11 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
         expect(shirtTypeTriggerText()).toBe('เสื้อคอกลม');
     });
 
-    it('does not ask for the pants type any more', () => {
-        // Leg length is chosen per row in the size table, and the pants type
-        // only picks the labour rate, so asking for it here made the counter
-        // answer the same question twice and let the two answers disagree.
+    it('asks for the trouser type, and keeps the saved one', () => {
+        // It is what the labour rate is read from, so leaving it invisible
+        // meant a bill was costed from whichever type happened to be first.
+        // It cannot disagree with the leg length any more: on Forms 1 and 4
+        // the list only offers types cut in the table's own length.
         render(
             <OrderCreatePage
                 {...(props as unknown as PageProps)}
@@ -191,10 +204,10 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
             />,
         );
 
+        showTabbedSpec();
         showPantsTab();
 
-        expect(pantsTypeTriggerText()).toBe('(no pants type trigger)');
-        expect(screen.queryByText('เลือกแบบกางเกง')).toBeNull();
+        expect(pantsTypeTriggerText()).toBe('กางเกงขาสั้น');
     });
 
     it('survives repeated switching', () => {
@@ -204,6 +217,8 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
                 order={duplicatedOrder as never}
             />,
         );
+
+        showTabbedSpec();
 
         for (let round = 0; round < 3; round += 1) {
             showPantsTab();
@@ -220,6 +235,8 @@ describe('spec tab switching keeps the saved dropdown choices', () => {
                 order={duplicatedOrder as never}
             />,
         );
+
+        showTabbedSpec();
 
         showPantsTab();
         showShirtTab();
@@ -425,9 +442,10 @@ describe('saved artwork can be removed while editing', () => {
 });
 
 describe('the garment tables open ready to type into', () => {
+    // Selected by what the table is, not by how wide it is drawn.
     const garmentTables = () =>
         [
-            ...document.querySelectorAll('table.min-w-\\[420px\\]'),
+            ...document.querySelectorAll('table[data-slot="garment-table"]'),
         ] as HTMLTableElement[];
     const bodyRows = (tableIndex = 0) =>
         garmentTables()[tableIndex].querySelectorAll('tbody tr');
@@ -485,7 +503,7 @@ describe('the garment tables open ready to type into', () => {
 
         const firstRow = garmentTables()[0].querySelectorAll('tbody tr')[0];
 
-        expect(firstRow.querySelectorAll('td')[4].textContent).toBe('2,000.00');
+        expect(firstRow.querySelectorAll('td')[3].textContent).toBe('2,000.00');
         // And the table foots to the same money, not to the sum of the prices.
         expect(
             garmentTables()[0].querySelector('tfoot')?.textContent,
@@ -495,9 +513,9 @@ describe('the garment tables open ready to type into', () => {
 
 describe('price link on a garment table', () => {
     const priceInputs = (tableIndex = 0) => {
-        const table = [...document.querySelectorAll('table.min-w-\\[420px\\]')][
-            tableIndex
-        ] as HTMLTableElement;
+        const table = [
+            ...document.querySelectorAll('table[data-slot="garment-table"]'),
+        ][tableIndex] as HTMLTableElement;
 
         return [...table.querySelectorAll('tbody tr')].map(
             (row) =>
@@ -597,7 +615,7 @@ describe('garment table dropdowns', () => {
     const firstSizeTrigger = () =>
         (
             document.querySelector(
-                'table.min-w-\\[420px\\]',
+                'table[data-slot="garment-table"]',
             ) as HTMLTableElement
         ).querySelector('tbody [role="combobox"]')!;
 

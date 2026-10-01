@@ -84,9 +84,11 @@ describe('the spec a bill has to fill in', () => {
 
         const messages = missingMessages().join(' | ');
 
-        expect(messages).toContain('สเปกแบบเสื้อ');
-        // No pants were ordered, so nothing about pants may be demanded.
-        expect(messages).not.toContain('สเปกแบบกางเกง');
+        // Named by the table it belongs to, because a bill can carry several
+        // shirt specs and the counter has to know which one is short.
+        expect(messages).toContain('สเปกตารางเสื้อ');
+        // No trousers were ordered, so nothing about them may be demanded.
+        expect(messages).not.toContain('สเปกตารางกางเกง');
     });
 
     it('asks for the pants spec as soon as the table orders pants', () => {
@@ -95,7 +97,7 @@ describe('the spec a bill has to fill in', () => {
         typeInto('จำนวนกางเกง แถวที่ 1', '4');
         submit();
 
-        expect(missingMessages().join(' | ')).toContain('สเปกแบบกางเกง');
+        expect(missingMessages().join(' | ')).toContain('สเปกตารางกางเกง');
     });
 
     it('asks for both when the bill carries shirts and pants', () => {
@@ -107,8 +109,21 @@ describe('the spec a bill has to fill in', () => {
 
         const messages = missingMessages().join(' | ');
 
-        expect(messages).toContain('สเปกแบบเสื้อ');
-        expect(messages).toContain('สเปกแบบกางเกง');
+        expect(messages).toContain('สเปกตารางเสื้อ');
+        expect(messages).toContain('สเปกตารางกางเกง');
+    });
+
+    it('names the table that is short, not just the garment', () => {
+        render(<OrderCreatePage {...(props as unknown as PageProps)} />);
+
+        typeInto('จำนวนเสื้อ แถวที่ 1', '10');
+        submit();
+
+        // The bill opens on one kids short-sleeve table, and the complaint
+        // says so — a bill with three shirt tables would name each separately.
+        expect(missingMessages().join(' | ')).toContain(
+            'ตารางเสื้อไซซ์เด็ก · แขนสั้น',
+        );
     });
 
     it('counts every blank box, not just a handful of them', () => {
@@ -117,26 +132,34 @@ describe('the spec a bill has to fill in', () => {
         typeInto('จำนวนเสื้อ แถวที่ 1', '10');
         submit();
 
-        // 20 fields on the shirt tab now that สาบนอก is retired, of which the
-        // garment type arrives already chosen, so a blank form is short of 19.
+        // 20 fields on the shirt spec now that สาบนอก is retired, of which the
+        // garment type arrives already chosen, so a blank table is short of 19.
         expect(missingMessages().join(' | ')).toContain(
-            'สเปกแบบเสื้อ ยังไม่ได้กรอก 19 ช่อง',
+            'ยังไม่ได้กรอก 19 ช่อง',
         );
     });
 
-    it('opens the tab that is short of information', () => {
+    /**
+     * There is no tab to open any more: both specs are on screen at once, each
+     * under its own table. What has to be right instead is which boxes go red
+     * — marking the trouser spec because the shirts are short would send the
+     * counter to fill in the wrong table.
+     */
+    it('reddens the boxes of the table that is short, and only that one', () => {
         render(<OrderCreatePage {...(props as unknown as PageProps)} />);
 
-        // Start on the pants tab with only shirts ordered: the complaint is
-        // about the shirt spec, so that is the tab the counter must land on.
-        fireEvent.click(screen.getByRole('button', { name: 'แบบกางเกง' }));
+        const redBoxesIn = (garment: 'shirt' | 'pants') =>
+            (
+                document.querySelector(
+                    `[data-slot="garment-spec"][data-garment="${garment}"]`,
+                ) as HTMLElement
+            ).querySelectorAll('.border-red-500').length;
+
         typeInto('จำนวนเสื้อ แถวที่ 1', '10');
         submit();
 
-        expect(
-            document.querySelectorAll('input.border-red-500, .border-red-500')
-                .length,
-        ).toBeGreaterThan(0);
-        expect(screen.getAllByText('แบบเสื้อ').length).toBeGreaterThan(0);
+        expect(redBoxesIn('shirt')).toBeGreaterThan(0);
+        // No trousers were ordered, so its spec is not yet owed anything.
+        expect(redBoxesIn('pants')).toBe(0);
     });
 });

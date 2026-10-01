@@ -115,17 +115,17 @@ describe('general artwork on the order form', () => {
         expect(screen.queryByText('คอนเฟิร์มแบบ')).toBeNull();
     });
 
-    it('still takes artwork for each garment, now in the Art Work dialog', () => {
+    it('still takes artwork, now on the table of the sheet it belongs to', () => {
         renderForm();
 
-        // Forms 1 and 4 arrange artwork by the sheets the bill produces, so
-        // the garment galleries moved behind this button — they did not go.
-        fireEvent.click(
-            screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
-        );
-
-        expect(screen.getByText(/Art Work เสื้อ/)).toBeInTheDocument();
-        expect(screen.getByText(/Art Work กางเกง/)).toBeInTheDocument();
+        // The one bill-wide gallery became a gallery per sheet: artwork is
+        // attached where the sheet is, so it is pinned by where it sits.
+        expect(
+            screen.getByText('Art Work · ตารางเสื้อไซซ์เด็ก · แขนสั้น'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText('Art Work · ตารางกางเกงไซซ์เด็ก · ขาสั้น'),
+        ).toBeInTheDocument();
     });
 
     it('stays silent on a saved bill that never had any', () => {

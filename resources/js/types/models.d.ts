@@ -40,6 +40,12 @@ export type OrderStatus =
     | 'cancelled';
 
 export type SizeGroup = 'kids' | 'adults' | 'oversize';
+/**
+ * The tier a garment is cut and sewn at, which is what the production floor
+ * batches by. ประถม - มัธยมต้น has a pattern of its own but no rate of its own:
+ * it is charged at the child's rate, so it is a tier and not a SizeGroup.
+ */
+export type SizeTier = 'kids' | 'junior' | 'adults';
 
 export type SewingTargetGroup = 'ADULT' | 'CHILD';
 
@@ -200,6 +206,8 @@ export interface OrderItem {
     order_id: number;
     item_type: string;
     size_group: SizeGroup;
+    /** Null on rows saved before tiers existed; those were cut at size_group. */
+    size_tier?: SizeTier | null;
     size_label: string;
     /**
      * Sleeve and leg length, null on rows saved before the columns existed.

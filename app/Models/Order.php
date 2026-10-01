@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\OrderStatus;
+use App\Enums\SizeTier;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -323,9 +324,12 @@ class Order extends Model implements HasMedia
             ? ['short', 'long', 'unspecified']
             : ['short', 'long', 'sleeveless', 'unspecified'];
 
-        foreach (['kids', 'adults'] as $sizeGroup) {
+        // One key per tier, not per pricing group: ประถม - มัธยมต้น is sewn to
+        // its own pattern and so prints its own sheet, which artwork has to be
+        // pinnable to even though it is charged at the child's rate.
+        foreach (SizeTier::values() as $tier) {
             foreach ($styles as $style) {
-                $keys[] = $garment.'_'.$sizeGroup.'_'.$style;
+                $keys[] = $garment.'_'.$tier.'_'.$style;
             }
         }
 
