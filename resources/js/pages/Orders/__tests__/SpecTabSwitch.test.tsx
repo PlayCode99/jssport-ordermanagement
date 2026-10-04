@@ -152,10 +152,42 @@ const pantsTypeTriggerText = (): string => {
     return trigger?.textContent?.trim() ?? '(no pants type trigger)';
 };
 
-const showShirtTab = () =>
-    fireEvent.click(screen.getByRole('button', { name: /^แบบเสื้อ/ }));
-const showPantsTab = () =>
-    fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
+/**
+ * Opens one bill-wide spec and folds the other, so only one garment's boxes
+ * are on the page — which is also what unmounts and remounts their dropdowns,
+ * the thing these checks are about.
+ */
+const showSpec = (garment: 'เสื้อ' | 'กางเกง') => {
+    const toggle = (name: 'เสื้อ' | 'กางเกง') =>
+        screen.getByRole('button', { name: new RegExp(`^สเปก${name}`) });
+    const other = garment === 'เสื้อ' ? 'กางเกง' : 'เสื้อ';
+
+    if (toggle(other).getAttribute('aria-expanded') === 'true') {
+        fireEvent.click(toggle(other));
+    }
+
+    if (toggle(garment).getAttribute('aria-expanded') !== 'true') {
+        fireEvent.click(toggle(garment));
+    }
+};
+
+/**
+ * Form 2 carries a spec per sheet its people are cut on. One person in short
+ * sleeves and short trousers gives the bill one shirt sheet and one trousers
+ * sheet, each with its spec folded under its own heading.
+ */
+const giveFormTwoAShirtAndATrousersSheet = () => {
+    fireEvent.change(screen.getByLabelText('สกรีนชื่อคนที่ 1'), {
+        target: { value: 'สมชาย' },
+    });
+    fireEvent.click(screen.getByLabelText('สั่งกางเกงด้วย'));
+    fireEvent.change(screen.getByLabelText('จำนวนกางเกงคนที่ 1'), {
+        target: { value: '1' },
+    });
+};
+
+const showShirtTab = () => showSpec('เสื้อ');
+const showPantsTab = () => showSpec('กางเกง');
 
 /**
  * Regression tests for a reopened bill losing its saved dropdown choices.
@@ -167,12 +199,15 @@ const showPantsTab = () =>
  * each table, with nothing to switch between — so these are rendered on Form 2,
  * which is where a spec can still be unmounted and remounted.
  */
-describe('spec tab switching keeps the saved dropdown choices', () => {
-    /** Form 2, where the spec card with its two tabs still lives. */
-    const showTabbedSpec = () =>
+describe('folding a spec away and back keeps the saved dropdown choices', () => {
+    /** Form 2 with one shirt sheet and one trousers sheet. */
+    const showTabbedSpec = () => {
         fireEvent.click(
             screen.getByRole('button', { name: /รายตัว \(Form 2\)/ }),
         );
+        giveFormTwoAShirtAndATrousersSheet();
+        showShirtTab();
+    };
 
     it('keeps the shirt type after switching to pants and back', () => {
         render(

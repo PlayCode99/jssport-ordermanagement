@@ -105,6 +105,7 @@ describe('sports day → order_items', () => {
             {
                 item_type: 'shirt',
                 size_group: 'adults',
+                size_tier: 'adults',
                 size_label: 'M',
                 quantity: 35,
                 unit_price: 200,
@@ -112,9 +113,34 @@ describe('sports day → order_items', () => {
             {
                 item_type: 'pants',
                 size_group: 'adults',
+                size_tier: 'adults',
                 size_label: 'M',
                 quantity: 10,
                 unit_price: 150,
+            },
+        ]);
+    });
+
+    it('sends a ประถม - มัธยมต้น row as its own range, at the child’s rate', () => {
+        const items = buildRequestItemsFromSportsDay([
+            group([
+                row({
+                    size_group: 'junior',
+                    size_label: 'JL',
+                    shirt_qty: 12,
+                    shirt_price: 190,
+                }),
+            ]),
+        ]);
+
+        expect(items).toEqual([
+            {
+                item_type: 'shirt',
+                size_group: 'kids',
+                size_tier: 'junior',
+                size_label: 'JL',
+                quantity: 12,
+                unit_price: 190,
             },
         ]);
     });
