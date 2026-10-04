@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $order_id
  * @property string|null $item_type
  * @property string|null $size_group
+ * @property string|null $size_tier
  * @property string|null $size_label
  * @property string|null $shirt_style
  * @property string|null $pants_style

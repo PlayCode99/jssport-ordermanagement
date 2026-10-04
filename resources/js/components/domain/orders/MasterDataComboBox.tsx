@@ -288,7 +288,7 @@ export function MasterDataComboBox({
     };
 
     return (
-        <div ref={containerRef} className="relative">
+        <div ref={containerRef} className="group relative">
             <div className="flex items-center gap-1.5">
                 <div className="relative flex-1">
                     <Input
@@ -333,43 +333,45 @@ export function MasterDataComboBox({
                         </div>
                     )}
                 </div>
-                <button
-                    type="button"
-                    disabled={disabled || isSaving || query.trim() === ''}
-                    onClick={handleAdd}
-                    title="เพิ่มเป็นมาสเตอร์"
-                    aria-label="เพิ่มเป็นมาสเตอร์"
-                    className={cn(
-                        'inline-flex size-9 shrink-0 items-center justify-center rounded-md border transition-colors',
-                        justAdded
-                            ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-950'
-                            : 'border-input bg-background hover:bg-accent hover:text-accent-foreground',
-                        (disabled || query.trim() === '') &&
-                            'pointer-events-none opacity-50',
-                    )}
-                >
-                    {isSaving ? (
-                        <Loader2 className="size-4 animate-spin" />
-                    ) : justAdded ? (
-                        <Check className="size-4" />
-                    ) : (
-                        <Plus className="size-4" />
-                    )}
-                </button>
-                {canManage ? (
+                <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100">
                     <button
                         type="button"
-                        onClick={() => {
-                            setManageSession((session) => session + 1);
-                            setIsManageOpen(true);
-                        }}
-                        title={`จัดการรายการ${label ? ` ${label}` : ''}`}
-                        aria-label={`จัดการรายการ${label ? ` ${label}` : ''}`}
-                        className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-slate-600 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        disabled={disabled || isSaving || query.trim() === ''}
+                        onClick={handleAdd}
+                        title="เพิ่มเป็นมาสเตอร์"
+                        aria-label="เพิ่มเป็นมาสเตอร์"
+                        className={cn(
+                            'inline-flex size-9 shrink-0 items-center justify-center rounded-md border transition-colors',
+                            justAdded
+                                ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-950'
+                                : 'border-input bg-background hover:bg-accent hover:text-accent-foreground',
+                            (disabled || query.trim() === '') &&
+                                'pointer-events-none opacity-50',
+                        )}
                     >
-                        <Settings2 className="size-4" />
+                        {isSaving ? (
+                            <Loader2 className="size-4 animate-spin" />
+                        ) : justAdded ? (
+                            <Check className="size-4" />
+                        ) : (
+                            <Plus className="size-4" />
+                        )}
                     </button>
-                ) : null}
+                    {canManage ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setManageSession((session) => session + 1);
+                                setIsManageOpen(true);
+                            }}
+                            title={`จัดการรายการ${label ? ` ${label}` : ''}`}
+                            aria-label={`จัดการรายการ${label ? ` ${label}` : ''}`}
+                            className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-slate-600 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        >
+                            <Settings2 className="size-4" />
+                        </button>
+                    ) : null}
+                </div>
             </div>
             {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
             {canManage ? (

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\RoutingStationName;
+use App\Enums\SizeTier;
 use App\Models\Order;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -127,6 +128,10 @@ class StoreOrderRequest extends FormRequest
             'items' => ['required', 'array', 'min:1'],
             'items.*.item_type' => ['required', 'string'],
             'items.*.size_group' => ['required', 'string', Rule::in(['kids', 'adults', 'oversize'])],
+            // The tier the line is cut at, which is what the floor batches by.
+            // It is optional: a caller that names none is read as having been
+            // cut at the tier it is billed under.
+            'items.*.size_tier' => ['nullable', 'string', Rule::in(SizeTier::values())],
             'items.*.size_label' => ['required', 'string', 'max:50'],
             // A shirt can be cut sleeveless; a pair of trousers cannot.
             'items.*.shirt_style' => ['nullable', 'string', Rule::in(['short', 'long', 'sleeveless'])],

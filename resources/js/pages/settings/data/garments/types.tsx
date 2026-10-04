@@ -815,11 +815,19 @@ function StyleIndex({
     const title =
         category === 'PANTS' ? 'เซทราคาใบงานกางเกง' : 'เซทราคาใบงานเสื้อ';
 
-    const buckets = STYLE_OPTIONS[category].map((option) => ({
-        key: option.value as string,
-        label: option.label,
-        items: rows.filter((row) => row.style === option.value),
-    }));
+    const buckets = STYLE_OPTIONS[category].map((option) => {
+        const items = rows.filter((row) => row.style === option.value);
+
+        return {
+            key: option.value as string,
+            label: option.label,
+            items,
+            // Only a type that is switched on is offered when a bill is
+            // opened. Counting the switched-off ones in with the rest read as
+            // "this length is ready to sell" when it was not.
+            activeItems: items.filter((row) => row.is_active),
+        };
+    });
 
     const hits =
         keyword.trim().length === 0
@@ -879,14 +887,16 @@ function StyleIndex({
                                         {bucket.label}
                                     </span>
                                     <span className="mt-0.5 block text-xs text-slate-500">
-                                        {bucket.items.length > 0
-                                            ? `${bucket.items.length} ชิ้นงาน · ${bucket.items
+                                        {bucket.activeItems.length > 0
+                                            ? `${bucket.activeItems.length} ชิ้นงาน · ${bucket.activeItems
                                                   .map((row) => row.name)
                                                   .slice(0, 3)
                                                   .join(
                                                       ', ',
-                                                  )}${bucket.items.length > 3 ? ' …' : ''}`
-                                            : 'ยังไม่มีชิ้นงาน'}
+                                                  )}${bucket.activeItems.length > 3 ? ' …' : ''}`
+                                            : bucket.items.length > 0
+                                              ? `${bucket.items.length} ชิ้นงาน · ปิดใช้งานทั้งหมด`
+                                              : 'ยังไม่มีชิ้นงาน'}
                                     </span>
                                 </span>
                                 <ChevronRight className="size-4 shrink-0 text-slate-300" />

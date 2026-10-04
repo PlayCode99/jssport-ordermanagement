@@ -234,10 +234,13 @@ class OrderController extends Controller
             ->where('is_active', true)
             ->orderBy('display_order')
             ->orderBy('id')
-            ->get(['id', 'name'])
+            ->get(['id', 'name', 'style'])
             ->map(fn (GarmentType $type): array => [
                 'id' => (int) $type->id,
                 'name' => (string) $type->name,
+                // The length this type is cut in, so a table only offers the
+                // types it could actually be made from.
+                'style' => $type->style === null ? null : (string) $type->style,
             ])
             ->values()
             ->all();
@@ -420,6 +423,7 @@ class OrderController extends Controller
                     ->map(fn ($item): array => [
                         'item_type' => $item->item_type,
                         'size_group' => $item->size_group,
+                        'size_tier' => $item->size_tier,
                         'size_label' => $item->size_label,
                         'shirt_style' => $item->shirt_style,
                         'pants_style' => $item->pants_style,
@@ -474,6 +478,7 @@ class OrderController extends Controller
             'shirtTypes' => $this->garmentTypeOptions('SHIRT'),
             'pantsTypes' => $this->garmentTypeOptions('PANTS'),
             'kidsSizes' => $this->sizeOptionsFromStorageKey(ShirtCatalogController::SIZE_KIDS_STORAGE_KEY),
+            'juniorSizes' => $this->sizeOptionsFromStorageKey(ShirtCatalogController::SIZE_JUNIOR_STORAGE_KEY),
             'adultSizes' => $this->sizeOptionsFromStorageKey(ShirtCatalogController::SIZE_ADULTS_STORAGE_KEY),
             'defaultBranchId' => ($order === null || $isDuplicate) ? $actor->branch_id : null,
             'dailyProductionCapacity' => ProductionDailySetting::query()->first()->daily_capacity ?? 200,

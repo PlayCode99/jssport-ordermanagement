@@ -147,8 +147,61 @@ class ProductionKanbanController extends Controller
     }
 
     /**
+     * The shirt spec as the sheet prints it, in the order it is read.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function shirtSpecDefinitions(): array
+    {
+        return [
+            ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-patterns']],
+            ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
+            ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
+            ['key' => 'neck_style_id', 'label' => 'แบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
+            ['key' => 'neck_color_id', 'label' => 'สีแบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-neck-colors', 'jssport.shirt-colors']],
+            ['key' => 'collar_id', 'label' => 'ปก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
+            ['key' => 'placket_style_id', 'label' => 'แบบสาบ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-plackets']],
+            ['key' => 'placket_inner_color_id', 'label' => 'สีสาบ (ใน)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-inner-colors', 'jssport.shirt-colors']],
+            ['key' => 'sleeve_cuff_id', 'label' => 'ปลายแขน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-cuffs']],
+            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
+            ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
+            ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
+            ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
+            ['key' => 'sleeve_style_text', 'label' => 'แบบแขน', 'type' => 'text'],
+            ['key' => 'piping_style_text', 'label' => 'แบบกุ้น', 'type' => 'text'],
+            ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
+            ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
+            ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
+            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function pantsSpecDefinitions(): array
+    {
+        return [
+            ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-patterns']],
+            ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
+            ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
+            ['key' => 'leg_style_id', 'label' => 'แบบขา', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-leg-style']],
+            ['key' => 'leg_cuff_id', 'label' => 'ปลายขา', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-leg-hem']],
+            ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
+            ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
+            ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
+            ['key' => 'seat_style_text', 'label' => 'กุ้นกางเกง', 'type' => 'text'],
+            ['key' => 'panel_style_text', 'label' => 'แบบต่อ', 'type' => 'text'],
+            ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
+            ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
+            ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
+            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $specification
-     * @return array{shirt: array<int, array{label: string, value: string}>, pants: array<int, array{label: string, value: string}>}
+     * @return array{shirt: array<int, array{label: string, value: string}>, pants: array<int, array{label: string, value: string}>, batches: array<string, array<int, array{label: string, value: string}>>}
      */
     private function mapSpecificationSections(array $specification): array
     {
@@ -194,48 +247,38 @@ class ProductionKanbanController extends Controller
         $shirtLabels = is_array($savedLabels['shirt'] ?? null) ? $savedLabels['shirt'] : [];
         $pantsLabels = is_array($savedLabels['pants'] ?? null) ? $savedLabels['pants'] : [];
 
-        $shirtRows = $this->buildSpecificationRows($shirtSpecs, [
-            ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-patterns']],
-            ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
-            ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
-            ['key' => 'neck_style_id', 'label' => 'แบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
-            ['key' => 'neck_color_id', 'label' => 'สีแบบคอ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-neck-colors', 'jssport.shirt-colors']],
-            ['key' => 'collar_id', 'label' => 'ปก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-collars']],
-            ['key' => 'placket_style_id', 'label' => 'แบบสาบ', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-plackets']],
-            ['key' => 'placket_inner_color_id', 'label' => 'สีสาบ (ใน)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-inner-colors', 'jssport.shirt-colors']],
-            ['key' => 'sleeve_cuff_id', 'label' => 'ปลายแขน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-cuffs']],
-            ['key' => 'placket_outer_color_id', 'label' => 'สีสาบ (นอก)', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-placket-outer-colors', 'jssport.shirt-colors']],
-            ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
-            ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
-            ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
-            ['key' => 'sleeve_style_text', 'label' => 'แบบแขน', 'type' => 'text'],
-            ['key' => 'piping_style_text', 'label' => 'แบบกุ้น', 'type' => 'text'],
-            ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
-            ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
-            ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
-            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ], $shirtLabels);
+        $shirtRows = $this->buildSpecificationRows($shirtSpecs, self::shirtSpecDefinitions(), $shirtLabels);
 
-        $pantsRows = $this->buildSpecificationRows($pantsSpecs, [
-            ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-patterns']],
-            ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
-            ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
-            ['key' => 'leg_style_id', 'label' => 'แบบขา', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-leg-style']],
-            ['key' => 'leg_cuff_id', 'label' => 'ปลายขา', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-leg-hem']],
-            ['key' => 'screen_color_id', 'label' => 'สีสกรีน', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-screen-colors', 'jssport.shirt-colors']],
-            ['key' => 'embroidery_color_id', 'label' => 'สีงานปัก', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-embroidery-colors', 'jssport.shirt-colors']],
-            ['key' => 'sublimation_id', 'label' => 'ซับลิเมชั่น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-sublimation']],
-            ['key' => 'seat_style_text', 'label' => 'กุ้นกางเกง', 'type' => 'text'],
-            ['key' => 'panel_style_text', 'label' => 'แบบต่อ', 'type' => 'text'],
-            ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
-            ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
-            ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
-            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ], $pantsLabels);
+        $pantsRows = $this->buildSpecificationRows($pantsSpecs, self::pantsSpecDefinitions(), $pantsLabels);
+
+        // One entry per production sheet, because a bill now carries a spec
+        // per sheet: the same shirt cut long and short is two things to make,
+        // sewn from two sets of instructions. A bill written before that has
+        // none of these, and every sheet falls back to the single pair above —
+        // which is what the shop actually sewed it from.
+        $batches = [];
+        $perBatchSpecs = is_array($decoded['garment_specs'] ?? null) ? $decoded['garment_specs'] : [];
+        $perBatchLabels = is_array($decoded['garment_spec_labels'] ?? null) ? $decoded['garment_spec_labels'] : [];
+
+        foreach ($perBatchSpecs as $key => $specs) {
+            if (! is_string($key) || ! is_array($specs)) {
+                continue;
+            }
+
+            $isPants = str_starts_with($key, 'pants_');
+            $labels = is_array($perBatchLabels[$key] ?? null) ? $perBatchLabels[$key] : [];
+
+            $batches[$key] = $this->buildSpecificationRows(
+                $specs,
+                $isPants ? self::pantsSpecDefinitions() : self::shirtSpecDefinitions(),
+                $labels,
+            );
+        }
 
         return [
             'shirt' => $shirtRows,
             'pants' => $pantsRows,
+            'batches' => $batches,
         ];
     }
 

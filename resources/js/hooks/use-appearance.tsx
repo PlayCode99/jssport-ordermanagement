@@ -11,7 +11,14 @@ export type UseAppearanceReturn = {
 
 const listeners = new Set<() => void>();
 const APPEARANCE_STORAGE_KEY = 'jssport.appearance';
-let currentAppearance: Appearance = 'system';
+/**
+ * The app is drawn light: its pages set their own slate and white, and only the
+ * shared controls read the theme tokens. Following the machine therefore put
+ * black buttons on a white page and made every selected/unselected pair read
+ * backwards. So an account that has never chosen gets light, and 'system' is
+ * left for someone who asks for it on the appearance page.
+ */
+let currentAppearance: Appearance = 'light';
 
 const resolveAppearance = (mode: Appearance): ResolvedAppearance => {
     if (mode === 'system') {
@@ -56,7 +63,7 @@ export function initializeTheme(): void {
     if (saved === 'light' || saved === 'dark' || saved === 'system') {
         currentAppearance = saved;
     } else {
-        currentAppearance = 'system';
+        currentAppearance = 'light';
     }
 
     applyTheme();
@@ -75,7 +82,7 @@ export function useAppearance(): UseAppearanceReturn {
     const appearance: Appearance = useSyncExternalStore(
         subscribe,
         () => currentAppearance,
-        () => 'system',
+        () => 'light',
     );
 
     const resolvedAppearance: ResolvedAppearance =

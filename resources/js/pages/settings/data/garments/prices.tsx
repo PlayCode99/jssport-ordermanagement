@@ -877,6 +877,27 @@ export default function GarmentPricesPage() {
                             เว้นว่างไว้ระบบจะคิดเท่าราคาสั้นให้เอง
                         </p>
 
+                        {/*
+                            A zero in a long-sleeve field is read as "this step
+                            is free on a long garment", and the whole sheet then
+                            costs nothing — while its own list of steps still
+                            shows a price, so the sheet contradicts itself. It
+                            is almost always a blank field typed as 0.
+                        */}
+                        {[form.child_price_long, form.adult_price_long].some(
+                            (value) =>
+                                value.trim() !== '' &&
+                                Number.parseFloat(value) === 0,
+                        ) ? (
+                            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                                ใส่ 0 ในช่องแขนยาว/ขายาว
+                                หมายถึงขั้นตอนนี้ไม่คิดค่าแรงเลยเมื่อเป็นแบบยาว
+                                ใบงานจะคิดเป็น 0 บาท —
+                                ถ้าต้องการให้คิดเท่าแบบสั้น
+                                ให้เว้นช่องนี้ว่างไว้
+                            </p>
+                        ) : null}
+
                         <p className="text-xs text-slate-500">
                             ระบบจัดเรียงให้อัตโนมัติ
                         </p>

@@ -191,6 +191,8 @@ export interface OrderTableRow {
         spec_sections?: {
             shirt: Array<{ label: string; value: string }>;
             pants: Array<{ label: string; value: string }>;
+            /** One spec per production sheet, keyed the way the sheets are. */
+            batches?: Record<string, Array<{ label: string; value: string }>>;
         };
         items: Array<{
             item_type: string;
@@ -635,38 +637,29 @@ const PRINT_PAGE_MARGIN_MM = 7;
  * across, which is the size the shop settled on.
  */
 const PRINT_ARTWORK_FIXED_MM = 58;
-/** Only reached when a dense bill would otherwise spill onto a second page. */
-const PRINT_ARTWORK_MIN_MM = 20;
-/** 1mm at a time: the artwork is the last thing trimmed and the first thing
- *  given back, so a coarse step leaves millimetres of paper unused. */
-const PRINT_ARTWORK_STEP_MM = 1;
 const PRINT_SIZE_FONT_PX = 11;
 const PRINT_SIZE_FONT_MAX_PX = 15;
-/** Dense orders may tighten the table before the whole sheet gets scaled. */
-const PRINT_SIZE_FONT_MIN_PX = 8;
 const PRINT_SIZE_FONT_STEP_PX = 0.5;
-/** Last resort once the artwork is already at its smallest. */
-const PRINT_MIN_SCALE = 0.72;
 
 /**
- * Runs inside the print window: waits for the artwork to load, then sizes the
- * sheet to exactly one A4 page. Too much content trims the artwork, and scales
- * the whole sheet as a last resort rather than spilling onto a second page.
- * Too little content grows the size-table text and then the artwork, so a short
- * order fills the page instead of stopping halfway down it.
+ * Runs inside the print window: waits for the artwork to load, then decides how
+ * the sheet is laid out.
+ *
+ * A bill carries a spec for every garment type it sells and all of them belong
+ * on the receipt, so a long bill is allowed the pages it needs. Nothing is
+ * shrunk to avoid a page and nothing is scaled — the stylesheet says where the
+ * paper may end, and the sheet reads at one size throughout. What is still
+ * worth doing is filling a short bill's page, and numbering the pages of a long
+ * one so a customer can see none is missing.
  */
 export function buildPrintFitScript(): string {
     return `
         (function () {
             var PAGE_MM = ${PRINT_PAGE_HEIGHT_MM} - (${PRINT_PAGE_MARGIN_MM} * 2);
             var FIXED = ${PRINT_ARTWORK_FIXED_MM};
-            var MIN = ${PRINT_ARTWORK_MIN_MM};
-            var STEP = ${PRINT_ARTWORK_STEP_MM};
             var FONT = ${PRINT_SIZE_FONT_PX};
             var FONT_MAX = ${PRINT_SIZE_FONT_MAX_PX};
-            var FONT_MIN = ${PRINT_SIZE_FONT_MIN_PX};
             var FONT_STEP = ${PRINT_SIZE_FONT_STEP_PX};
-            var MIN_SCALE = ${PRINT_MIN_SCALE};
 
             function whenImagesSettled(done) {
                 var images = Array.prototype.slice.call(document.images);
@@ -693,16 +686,12 @@ export function buildPrintFitScript(): string {
                 var pxPerMm = probe.offsetHeight / 100;
                 probe.remove();
 
-                if (!pxPerMm) { window.__printFitted = true; window.print(); return; }
-
                 var page = document.querySelector('.page');
                 if (!page) { window.__printFitted = true; window.print(); return; }
 
                 var limit = PAGE_MM * pxPerMm;
-                var height = FIXED;
 
                 function setArtwork(mm) {
-                    height = mm;
                     document.documentElement.style.setProperty('--artwork-h', mm + 'mm');
                 }
 
@@ -710,30 +699,23 @@ export function buildPrintFitScript(): string {
                     document.documentElement.style.setProperty('--size-font', px + 'px');
                 }
 
-                setArtwork(height);
+                setArtwork(FIXED);
                 setFont(FONT);
 
-                // The artwork holds its fixed height unless the sheet would not
-                // fit at all. Losing a millimetre of picture beats printing the
-                // work sheet on two pages.
-                while (page.scrollHeight > limit && height > MIN) {
-                    setArtwork(Math.max(MIN, height - STEP));
-                }
-
-                // Still too tall with the artwork at its floor: tighten the size
-                // table next. Smaller figures on one page beat a scaled sheet, and
-                // beat spilling onto a second page.
-                var tight = FONT;
-
-                while (page.scrollHeight > limit && tight > FONT_MIN) {
-                    tight = Math.max(FONT_MIN, tight - FONT_STEP);
-                    setFont(tight);
-                }
-
+                // A bill carries a spec for every garment type it sells, and all
+                // of them belong on the receipt — so a long bill is allowed the
+                // second and third page it needs. Nothing is shrunk to avoid
+                // one, and nothing is scaled: the stylesheet decides where the
+                // paper may end, and the sheet reads at one size throughout
+                // however many pages it runs to.
+                //
+                // What is still worth doing is filling a short bill's page.
+                // Room to spare goes to the size table first, because readable
+                // figures matter more than a big picture, and then to the
+                // artwork — but only while the sheet is still inside one page,
+                // so growth never causes the break it is trying to avoid.
                 if (page.scrollHeight <= limit) {
-                    // Room to spare goes to the size table first: readable figures
-                    // matter more than a big picture.
-                    var font = tight;
+                    var font = FONT;
 
                     while (font < FONT_MAX) {
                         font = Math.min(FONT_MAX, font + FONT_STEP);
@@ -741,37 +723,33 @@ export function buildPrintFitScript(): string {
 
                         if (page.scrollHeight > limit) { setFont(font - FONT_STEP); break; }
                     }
-
-                    // Then hand whatever is still unused back to the artwork, up to
-                    // the fixed height and never past it. Without this a sheet that
-                    // had to trim the picture kept it trimmed even once the trim was
-                    // no longer needed, printing a small picture above a band of
-                    // empty paper.
-                    while (height < FIXED) {
-                        height = Math.min(FIXED, height + STEP);
-                        setArtwork(height);
-
-                        if (page.scrollHeight > limit) { setArtwork(height - STEP); break; }
-                    }
                 }
 
-                if (page.scrollHeight > limit) {
-                    var natural = page.scrollHeight;
-                    var scale = Math.max(MIN_SCALE, limit / natural);
+                // One runner per page, each at the foot of its own page, so a
+                // receipt that runs to three sheets says so on every one of
+                // them. The runners are out of flow, so placing them cannot
+                // push the sheet onto another page.
+                var template = document.querySelector('.print-runner');
 
-                    page.style.transformOrigin = 'top center';
-                    page.style.transform = 'scale(' + scale + ')';
-                    // The transform is visual only, so the document still reserves
-                    // the unscaled height. Shrink the body instead of the scaled
-                    // element, or the sheet ends up scaled twice.
-                    document.body.style.height = (natural * scale) + 'px';
+                if (template) {
+                    var runnerHeight = template.offsetHeight;
+                    var total = Math.max(1, Math.ceil(page.scrollHeight / limit));
+                    template.remove();
 
-                    // Only clip once the sheet genuinely fits. When the order is so
-                    // large that even MIN_SCALE cannot squeeze it onto one page we
-                    // must let the remainder flow onto a second sheet -- printing a
-                    // receipt with rows silently cut off would be far worse.
-                    if (natural * scale <= limit + 1) {
-                        document.body.style.overflow = 'hidden';
+                    for (var i = 0; i < total; i += 1) {
+                        var copy = template.cloneNode(true);
+                        copy.style.top = ((i + 1) * limit - runnerHeight) + 'px';
+                        var slot = copy.querySelector('.print-runner-page');
+
+                        if (slot) {
+                            // A single page needs no numbering; more than one
+                            // does, so the customer can see none is missing.
+                            slot.textContent = total > 1
+                                ? ('หน้า ' + (i + 1) + '/' + total)
+                                : '';
+                        }
+
+                        page.appendChild(copy);
                     }
                 }
 
@@ -1104,6 +1082,88 @@ export function buildSportsDayMatrices(
 
 // Short forms for reading next to a garment that is already named; the column
 // headings on the printed sheet spell the garment out in full.
+/** The tiers a sheet can be cut at, as the bill names them. */
+const SPEC_BATCH_TIER_LABELS: Record<string, string> = {
+    kids: 'เด็ก',
+    junior: 'ประถม - มัธยมต้น',
+    adults: 'ผู้ใหญ่',
+};
+
+const SPEC_BATCH_STYLE_LABELS: Record<string, Record<string, string>> = {
+    shirt: { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' },
+    pants: { short: 'ขาสั้น', long: 'ขายาว' },
+};
+
+/** What a sheet is called, read back from the key the bill stores it under. */
+function specBatchLabel(key: string): string {
+    const [garment, tier, style] = key.split('_');
+    const garmentLabel = garment === 'pants' ? 'กางเกง' : 'เสื้อ';
+    const tierLabel = SPEC_BATCH_TIER_LABELS[tier] ?? '';
+    const styleLabel = SPEC_BATCH_STYLE_LABELS[garment]?.[style] ?? '';
+
+    return [garmentLabel + (tierLabel ? ` ${tierLabel}` : ''), styleLabel]
+        .filter((part) => part !== '')
+        .join(' · ');
+}
+
+export type SpecBlock = {
+    title: string;
+    rows: Array<{ label: string; value: string }>;
+};
+
+/**
+ * The spec blocks a receipt has to show.
+ *
+ * A bill names a spec per sheet now, but nearly every bill sews all its sheets
+ * from the same instructions — the counter fills one in and copies it across.
+ * So identical specs are shown once, titled with every sheet they cover,
+ * rather than repeating the same twenty rows for each. A bill written before
+ * specs were split has no per-sheet ones and shows the single pair it carries,
+ * which is exactly what it always printed.
+ */
+export function buildSpecBlocks(
+    batches:
+        Record<string, Array<{ label: string; value: string }>> | undefined,
+    fallbackShirt: Array<{ label: string; value: string }>,
+    fallbackPants: Array<{ label: string; value: string }>,
+): SpecBlock[] {
+    const entries = Object.entries(batches ?? {}).filter(
+        ([, rows]) => rows.length > 0,
+    );
+
+    if (entries.length === 0) {
+        return [
+            { title: 'สเปกเสื้อ', rows: fallbackShirt },
+            { title: 'สเปกกางเกง', rows: fallbackPants },
+        ].filter((block) => block.rows.length > 0);
+    }
+
+    const grouped = new Map<
+        string,
+        { keys: string[]; rows: SpecBlock['rows'] }
+    >();
+
+    for (const [key, rows] of entries) {
+        const fingerprint = `${key.startsWith('pants_') ? 'pants' : 'shirt'}|${JSON.stringify(rows)}`;
+        const found = grouped.get(fingerprint);
+
+        if (found) {
+            found.keys.push(key);
+
+            continue;
+        }
+
+        grouped.set(fingerprint, { keys: [key], rows });
+    }
+
+    return [...grouped.values()].map(({ keys, rows }) => ({
+        title: `สเปก${keys[0].startsWith('pants_') ? 'กางเกง' : 'เสื้อ'} · ${keys
+            .map(specBatchLabel)
+            .join(', ')}`,
+        rows,
+    }));
+}
+
 const SHIRT_STYLE_PRINT_LABELS: Record<string, string> = {
     short: 'แขนสั้น',
     long: 'แขนยาว',
@@ -2907,6 +2967,17 @@ export default function Counter({
         );
     }, [selectedOrder, specificationRows, pantsLabels]);
 
+    /** What the receipt shows, and what it prints — the same blocks either way. */
+    const specBlocks = useMemo(
+        () =>
+            buildSpecBlocks(
+                selectedOrder?.details?.spec_sections?.batches,
+                shirtSpecificationRows,
+                pantsSpecificationRows,
+            ),
+        [selectedOrder, shirtSpecificationRows, pantsSpecificationRows],
+    );
+
     /**
      * The order's line items rebuilt the way the order form recorded them:
      * grouped per size group, then per size and garment length, and split into
@@ -3925,7 +3996,17 @@ export default function Counter({
                         .filter((markup) => markup !== '')
                         .join('');
 
-        const specTablesMarkup = `<div class="spec-sections${pantsRows.length > 0 ? ' has-two' : ''}">${renderSpecSection('สเปกเสื้อ', shirtRows)}${pantsRows.length > 0 ? renderSpecSection('สเปกกางเกง', pantsRows) : ''}</div>`;
+        // One block per distinct spec. A bill whose sheets are all sewn the
+        // same way still prints a single block, so the sheet it fits on is
+        // unchanged; only a bill that really does differ prints more.
+        const specBlocks = buildSpecBlocks(
+            order.spec_sections?.batches,
+            shirtRows,
+            pantsRows,
+        );
+        const specTablesMarkup = `<div class="spec-sections${specBlocks.length === 2 ? ' has-two' : ''}">${specBlocks
+            .map((block) => renderSpecSection(block.title, block.rows))
+            .join('')}</div>`;
         const totalQuantity = sizeRows.reduce(
             (sum, row) => sum + Number(row.quantity || 0),
             0,
@@ -4047,8 +4128,15 @@ export default function Counter({
                         .detail-list .green { color: #16a34a; font-weight: 700; }
                         .detail-list .blue { color: #174395; font-weight: 700; }
                         .detail-list .balance { color: #E21E26; font-weight: 800; font-size: 12px; }
-                        .spec-sections { margin-top: 4px; display: grid; grid-template-columns: 1fr; gap: 4px; }
+                        /* Block flow, not a one-column grid: a grid cannot be
+                           split across pages in any browser worth printing
+                           from, so a sheet that ran past one page pushed the
+                           whole run of specs onto the next one and left the
+                           first half empty. Laid out in normal flow they break
+                           between blocks, which is where a break belongs. */
+                        .spec-sections { margin-top: 4px; }
                         .spec-section { min-width: 0; }
+                        .spec-sections > .spec-section + .spec-section { margin-top: 4px; }
                         .spec-table { width: 100%; border-collapse: collapse; margin-top: 2px; font-size: 12px; table-layout: fixed; }
                         .spec-table td { border: 1px solid #000000; padding: 2px 3px; vertical-align: middle; line-height: 1.1; }
                         .spec-row td { text-align: center; }
@@ -4062,7 +4150,11 @@ export default function Counter({
                            one that actually prints: the artwork was trimmed to fit a
                            height the sheet never had, and the paper came out with a
                            band of white at the bottom under a shrunken picture. */
-                        .spec-sections.has-two { grid-template-columns: 1fr 1fr; gap: 5px; }
+                        /* Two specs still sit side by side: a pair fits across
+                           the sheet and reads as one comparison. Three or more
+                           run down the page so they can break between blocks. */
+                        .spec-sections.has-two { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+                        .spec-sections.has-two > .spec-section + .spec-section { margin-top: 0; }
                         .size-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: var(--size-font, ${PRINT_SIZE_FONT_PX}px); }
                         .size-table th, .size-table td { border: 1px solid #000000; padding: 3px 4px; text-align: center; }
                         .size-table th { background: var(--tbl-head, #e0f2fe); font-weight: 700; }
@@ -4122,7 +4214,7 @@ export default function Counter({
                         .g-sum-grand .g-sum-key,
                         .g-sum-grand .g-sum-money { font-size: calc(var(--size-font, 11px) + 2px); }
                         .g-sum-grand .g-sum-money { color: var(--tbl-strong, #c2410c); }
-                        .size-block, .g-pair, .g-summary { page-break-inside: avoid; break-inside: avoid; }
+                        .g-pair, .g-summary { page-break-inside: avoid; break-inside: avoid; }
                         .footer-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10px; }
                         .footer-table td { border: 1px solid #000000; padding: 4px; vertical-align: top; }
                         .footer-table .section-title { margin-bottom: 2px; font-size: 11px; }
@@ -4131,10 +4223,57 @@ export default function Counter({
                         .signature-line { width: 58%; border-bottom: 1px solid #000000; }
                         .warning-banner { margin-top: 5px; background: #E21E26; color: #ffffff; text-align: center; padding: 4px 5px; font-size: 10px; font-weight: 700; line-height: 1.15; }
                         .small { font-size: 10px; }
-                        tr, td, th, .detail-grid, .info-box, .size-block, .size-table, .spec-table, .footer-table, .banner-box { page-break-inside: avoid; }
+                        tr, td, th, .detail-grid, .info-box, .size-table, .spec-table, .footer-table, .banner-box { page-break-inside: avoid; }
+                        /* The run of size tables is free to break between them.
+                           Held together it was one tall block, so a sheet that
+                           needed a second page moved the whole run there and
+                           left the first half empty — the individual tables and
+                           their totals still never split. */
+                        .size-block { break-inside: auto; page-break-inside: auto; }
                         /* Same reason: what the fitter measures has to be what
                            comes out of the printer. */
                         .job-value { font-size: 14px; }
+
+                        /* ---- Sheets that run past one page ----
+                           A bill names a spec per garment type and every one of
+                           them belongs on the receipt, so a long bill is now
+                           allowed a second and a third page rather than being
+                           squeezed onto one. What that asks for is discipline
+                           about where the paper is allowed to end. */
+
+                        /* A spec is read as a whole: its heading must not sit at
+                           the foot of one page with its rows on the next. */
+                        .spec-section { break-inside: avoid; page-break-inside: avoid; }
+                        /* A block that does have to break repeats its heading
+                           row, so the second page is not a column of figures
+                           under nothing. */
+                        .size-table thead { display: table-header-group; }
+                        .size-table tfoot { display: table-footer-group; }
+                        /* Never leave a heading stranded at the bottom. */
+                        .section-title, .table-title { break-after: avoid; page-break-after: avoid; }
+                        /* The signatures and the warning close the document;
+                           they belong together wherever they land. */
+                        .footer-table, .warning-banner { break-inside: avoid; page-break-inside: avoid; }
+                        /* Every page says which bill it belongs to, so a sheet
+                           that gets separated from the rest can be put back. */
+                        .page { position: relative; }
+                        .print-runner {
+                            position: absolute;
+                            left: 0;
+                            right: 0;
+                            display: flex;
+                            justify-content: space-between;
+                            gap: 8px;
+                            border-top: 1px solid ${branchHeaderColor};
+                            padding: 2px 1px 0;
+                            font-size: 9px;
+                            color: #4b5563;
+                            background: #ffffff;
+                        }
+                        .print-runner strong { color: #111827; }
+                        /* Room for the runner at the foot of every page. */
+                        .page { padding-bottom: 6mm; }
+                        .print-runner-page { font-weight: 700; color: #111827; }
                     </style>
                 </head>
                 <body>
@@ -4200,8 +4339,6 @@ export default function Counter({
                             </div>
                         </div>
 
-                        ${specTablesMarkup}
-
                         ${
                             sizeGroupTablesMarkup ||
                             `
@@ -4216,6 +4353,8 @@ export default function Counter({
                             </tbody>
                         </table>`
                         }
+
+                        ${specTablesMarkup}
 
                         <table class="footer-table">
                             <tr>
@@ -4233,6 +4372,11 @@ export default function Counter({
                         </table>
 
                         <div class="warning-banner">*** หมายเหตุ งานเพิ่มจำนวนไม่ถึง 20 ตัว ไม่ลด % และต้องชำระค่าชุด ที่เพิ่มเติมทั้งหมดก่อนเปิดออเดอร์ ***</div>
+                        <div class="print-runner">
+                            <span>ใบรับงาน <strong>${escapeHtml(order.order_code)}</strong></span>
+                            <span>${escapeHtml(order.job_name || '-')}</span>
+                            <span class="print-runner-page"></span>
+                        </div>
                     </div>
                     <script>${buildPrintFitScript()}<\u002Fscript>
                 </body>
@@ -5381,21 +5525,21 @@ export default function Counter({
                             </section>
 
                             <div
-                                className={`grid items-stretch gap-3 ${pantsSpecificationRows.length > 0 ? 'lg:grid-cols-2' : ''}`}
+                                className={`grid items-stretch gap-3 ${specBlocks.length > 1 ? 'lg:grid-cols-2' : ''}`}
                             >
-                                <SpecTable
-                                    title="สเปกแบบเสื้อ"
-                                    rows={shirtSpecificationRows}
-                                    accent="blue"
-                                    split={pantsSpecificationRows.length === 0}
-                                />
-                                {pantsSpecificationRows.length > 0 ? (
+                                {specBlocks.map((block) => (
                                     <SpecTable
-                                        title="สเปกแบบกางเกง"
-                                        rows={pantsSpecificationRows}
-                                        accent="red"
+                                        key={block.title}
+                                        title={block.title}
+                                        rows={block.rows}
+                                        accent={
+                                            block.title.includes('กางเกง')
+                                                ? 'red'
+                                                : 'blue'
+                                        }
+                                        split={specBlocks.length === 1}
                                     />
-                                ) : null}
+                                ))}
                             </div>
                         </div>
                     </div>

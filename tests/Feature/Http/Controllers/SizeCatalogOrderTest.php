@@ -22,6 +22,8 @@ class SizeCatalogOrderTest extends TestCase
 
     private const KIDS = 'jssport.size-kids';
 
+    private const JUNIOR = 'jssport.size-junior';
+
     private const ADULTS = 'jssport.size-adults';
 
     private function owner(): User
@@ -79,6 +81,35 @@ class SizeCatalogOrderTest extends TestCase
 
         $this->actingAs($this->owner())->get('/settings/data/size-adults')
             ->assertInertia(fn (Assert $page) => $page->where('catalog.sortable', true)->etc());
+    }
+
+    /**
+     * ประถม - มัธยมต้น is cut to a pattern of its own, so it keeps a size list of
+     * its own, arranged by hand like the other two.
+     */
+    public function test_the_junior_sizes_have_a_page_of_their_own(): void
+    {
+        $this->seedSizes(self::JUNIOR, 'S', 'M', 'L');
+
+        $this->actingAs($this->owner())->get('/settings/data/size-junior')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('catalog.sortable', true)
+                ->where('rows.0.name', 'S')
+                ->where('rows.1.name', 'M')
+                ->where('rows.2.name', 'L')
+                ->etc());
+    }
+
+    public function test_the_junior_sizes_are_a_list_apart_from_the_children_s(): void
+    {
+        $this->seedSizes(self::KIDS, 'JS', 'JM');
+        $this->seedSizes(self::JUNIOR, 'S', 'M');
+
+        $this->actingAs($this->owner())->get('/settings/data/size-kids')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('rows.0.name', 'JS')
+                ->count('rows', 2)
+                ->etc());
     }
 
     public function test_the_job_names_page_is_not_sortable(): void

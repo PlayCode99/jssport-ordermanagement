@@ -219,20 +219,13 @@ class DashboardController extends Controller
     }
 
     /**
-     * @param  array<string, mixed>  $specification
-     * @return array{shirt: array<int, array{label: string, value: string}>, pants: array<int, array{label: string, value: string}>}
+     * The shirt spec as the counter reads it, in the order it is printed.
+     *
+     * @return list<array<string, mixed>>
      */
-    private function mapSpecificationSections(array $specification): array
+    private static function shirtSpecDefinitions(): array
     {
-        $payload = $this->decodeSpecificationPayload($specification);
-
-        $shirtSpecs = is_array($payload['shirt_specs'] ?? null) ? $payload['shirt_specs'] : [];
-        $pantsSpecs = is_array($payload['pants_specs'] ?? null) ? $payload['pants_specs'] : [];
-        $savedLabels = is_array($payload['spec_labels'] ?? null) ? $payload['spec_labels'] : [];
-        $shirtLabels = is_array($savedLabels['shirt'] ?? null) ? $savedLabels['shirt'] : [];
-        $pantsLabels = is_array($savedLabels['pants'] ?? null) ? $savedLabels['pants'] : [];
-
-        $shirtRows = $this->buildSpecificationRows($shirtSpecs, [
+        return [
             ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-patterns']],
             ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
             ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
@@ -252,9 +245,15 @@ class DashboardController extends Controller
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
             ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ], $shirtLabels);
+        ];
+    }
 
-        $pantsRows = $this->buildSpecificationRows($pantsSpecs, [
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function pantsSpecDefinitions(): array
+    {
+        return [
             ['key' => 'pattern_id', 'label' => 'แพทเทิร์น', 'type' => 'catalog', 'storage_keys' => ['jssport.pants-patterns']],
             ['key' => 'fabric_id', 'label' => 'เนื้อผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabrics']],
             ['key' => 'fabric_color_id', 'label' => 'สีผ้า', 'type' => 'catalog', 'storage_keys' => ['jssport.shirt-fabric-colors', 'jssport.shirt-colors']],
@@ -269,11 +268,52 @@ class DashboardController extends Controller
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
             ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
-        ], $pantsLabels);
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $specification
+     * @return array{shirt: array<int, array{label: string, value: string}>, pants: array<int, array{label: string, value: string}>, batches: array<string, array<int, array{label: string, value: string}>>}
+     */
+    private function mapSpecificationSections(array $specification): array
+    {
+        $payload = $this->decodeSpecificationPayload($specification);
+
+        $shirtSpecs = is_array($payload['shirt_specs'] ?? null) ? $payload['shirt_specs'] : [];
+        $pantsSpecs = is_array($payload['pants_specs'] ?? null) ? $payload['pants_specs'] : [];
+        $savedLabels = is_array($payload['spec_labels'] ?? null) ? $payload['spec_labels'] : [];
+        $shirtLabels = is_array($savedLabels['shirt'] ?? null) ? $savedLabels['shirt'] : [];
+        $pantsLabels = is_array($savedLabels['pants'] ?? null) ? $savedLabels['pants'] : [];
+
+        $shirtRows = $this->buildSpecificationRows($shirtSpecs, self::shirtSpecDefinitions(), $shirtLabels);
+
+        $pantsRows = $this->buildSpecificationRows($pantsSpecs, self::pantsSpecDefinitions(), $pantsLabels);
+
+        // A spec per sheet, when the bill names them. Counter and production
+        // read the same keys, so a spec shown here is the one that sheet is
+        // sewn from. A bill with none falls back to the single pair above.
+        $batches = [];
+        $perBatchSpecs = is_array($payload['garment_specs'] ?? null) ? $payload['garment_specs'] : [];
+        $perBatchLabels = is_array($payload['garment_spec_labels'] ?? null) ? $payload['garment_spec_labels'] : [];
+
+        foreach ($perBatchSpecs as $key => $specs) {
+            if (! is_string($key) || ! is_array($specs)) {
+                continue;
+            }
+
+            $isPants = str_starts_with($key, 'pants_');
+
+            $batches[$key] = $this->buildSpecificationRows(
+                $specs,
+                $isPants ? self::pantsSpecDefinitions() : self::shirtSpecDefinitions(),
+                is_array($perBatchLabels[$key] ?? null) ? $perBatchLabels[$key] : [],
+            );
+        }
 
         return [
             'shirt' => $shirtRows,
             'pants' => $pantsRows,
+            'batches' => $batches,
         ];
     }
 
@@ -1051,6 +1091,7 @@ class DashboardController extends Controller
                         ->map(fn ($item): array => [
                             'item_type' => $item->item_type,
                             'size_group' => $item->size_group,
+                            'size_tier' => $item->size_tier,
                             'size_label' => $item->size_label,
                             'shirt_style' => $item->shirt_style,
                             'pants_style' => $item->pants_style,
