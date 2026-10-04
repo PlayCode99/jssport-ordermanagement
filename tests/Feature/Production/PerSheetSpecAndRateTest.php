@@ -6,6 +6,7 @@ use App\Domain\OrderManagement\Actions\CreateOrderAction;
 use App\Enums\AccessRole;
 use App\Enums\StationDepartment;
 use App\Enums\UserRole;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Production\ProductionKanbanController;
 use App\Models\Branch;
 use App\Models\Customer;
@@ -259,5 +260,95 @@ class PerSheetSpecAndRateTest extends TestCase
         $groups = $this->groupsByKey($order->fresh());
         $this->assertSame(20.0, $groups['shirt_adults_short']['unit_total']);
         $this->assertSame(20.0, $groups['shirt_adults_long']['unit_total']);
+    }
+
+    /**
+     * The counter receipt reads the same specs from the dashboard. Each one
+     * leads with the garment type it is sewn as — the thing that tells a
+     * long-sleeved sheet from a short one and costs it.
+     *
+     * @return array<string, mixed>
+     */
+    private function counterSpecSections(Order $order): array
+    {
+        $controller = app(DashboardController::class);
+        $method = (new \ReflectionClass($controller))->getMethod('mapSpecificationSections');
+        $method->setAccessible(true);
+
+        return (array) $method->invoke($controller, $order->fresh('specification')->specification?->toArray() ?? []);
+    }
+
+    public function test_the_counter_receipt_names_each_sheets_garment_type_first(): void
+    {
+        $sections = $this->counterSpecSections($this->makeSplitBill());
+
+        $this->assertSame(
+            ['label' => 'แบบเสื้อ', 'value' => 'โปโลแขนสั้น'],
+            $sections['batches']['shirt_adults_short'][0],
+        );
+        $this->assertSame(
+            ['label' => 'แบบเสื้อ', 'value' => 'โปโลแขนยาว'],
+            $sections['batches']['shirt_adults_long'][0],
+        );
+    }
+
+    public function test_the_counter_receipt_leaves_a_spec_with_no_type_as_it_was(): void
+    {
+        $order = $this->makeSplitBill();
+
+        DB::table('order_specifications')
+            ->where('order_id', $order->id)
+            ->update(['screen_print_detail' => json_encode([
+                'schema' => 'spec-v2',
+                'mode' => 'matrix',
+                'shirt_specs' => ['screen_text' => 'ไม่มีแบบ'],
+            ], JSON_THROW_ON_ERROR)]);
+
+        $sections = $this->counterSpecSections($order->fresh());
+
+        $this->assertSame(
+            [['label' => 'ข้อความสกรีน', 'value' => 'ไม่มีแบบ']],
+            $sections['shirt'],
+        );
+    }
+
+    public function test_the_counter_roster_knows_who_ordered_trousers(): void
+    {
+        $controller = app(DashboardController::class);
+        $method = (new \ReflectionClass($controller))->getMethod('mapPersonalizationRows');
+        $method->setAccessible(true);
+
+        $rows = (array) $method->invoke($controller, [
+            'screen_print_detail' => json_encode([
+                'mode' => 'individual',
+                'personalization_rows' => [
+                    ['name' => 'A', 'size' => 'M', 'number' => '1', 'pants_quantity' => 1],
+                    ['name' => 'B', 'size' => 'L', 'number' => '2', 'pants_quantity' => 0],
+                ],
+            ], JSON_THROW_ON_ERROR),
+        ]);
+
+        $this->assertSame([1, 0], array_column($rows, 'pants_quantity'));
+    }
+
+    public function test_an_empty_spec_does_not_grow_a_type_row_of_its_own(): void
+    {
+        // The form fills in a default trousers type on every bill; a bill that
+        // sold no trousers must not print a trousers spec for it.
+        $order = $this->makeSplitBill();
+
+        DB::table('order_specifications')
+            ->where('order_id', $order->id)
+            ->update(['screen_print_detail' => json_encode([
+                'schema' => 'spec-v3',
+                'mode' => 'sports_day',
+                'shirt_specs' => ['shirt_type_id' => (string) $this->shortType->id, 'screen_text' => 'ลาย'],
+                'pants_specs' => ['pants_type_id' => (string) $this->longType->id],
+            ], JSON_THROW_ON_ERROR)]);
+
+        $sections = $this->counterSpecSections($order->fresh());
+
+        $this->assertSame([], $sections['pants']);
+        $this->assertSame('แบบเสื้อ', $sections['shirt'][0]['label']);
     }
 }

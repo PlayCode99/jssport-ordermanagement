@@ -9,6 +9,7 @@ use App\Enums\RoutingStationName;
 use App\Enums\RoutingStatus;
 use App\Models\Branch;
 use App\Models\CatalogItem;
+use App\Models\GarmentType;
 use App\Models\Order;
 use App\Models\OrderRouting;
 use App\Models\TeamInvitation;
@@ -271,6 +272,44 @@ class DashboardController extends Controller
         ];
     }
 
+    /** @var array<int, string>|null Garment type names by id, read once per request. */
+    private ?array $garmentTypeNames = null;
+
+    /**
+     * A spec's garment type leads its rows, as it leads the form: it is what
+     * tells a long-sleeved sheet from a short one, and what its labour is
+     * costed from, so the receipt names it. A spec with no type, one whose
+     * type is gone, or one with nothing else filled in, is left as it was.
+     *
+     * @param  array<int, array{label: string, value: string}>  $rows
+     * @param  array<string, mixed>  $specs
+     * @return array<int, array{label: string, value: string}>
+     */
+    private function withGarmentTypeRow(array $rows, array $specs, bool $isPants): array
+    {
+        // A spec nobody filled in still carries the form's default type, so a
+        // type alone says nothing was ordered: a shirts-only bill must not grow
+        // a trousers block just because the empty trousers spec has a type.
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $typeId = (int) ($specs[$isPants ? 'pants_type_id' : 'shirt_type_id'] ?? 0);
+
+        if ($typeId <= 0) {
+            return $rows;
+        }
+
+        $this->garmentTypeNames ??= GarmentType::query()->pluck('name', 'id')->all();
+        $name = trim((string) ($this->garmentTypeNames[$typeId] ?? ''));
+
+        if ($name === '') {
+            return $rows;
+        }
+
+        return [['label' => $isPants ? 'แบบกางเกง' : 'แบบเสื้อ', 'value' => $name], ...$rows];
+    }
+
     /**
      * @param  array<string, mixed>  $specification
      * @return array{shirt: array<int, array{label: string, value: string}>, pants: array<int, array{label: string, value: string}>, batches: array<string, array<int, array{label: string, value: string}>>}
@@ -285,9 +324,17 @@ class DashboardController extends Controller
         $shirtLabels = is_array($savedLabels['shirt'] ?? null) ? $savedLabels['shirt'] : [];
         $pantsLabels = is_array($savedLabels['pants'] ?? null) ? $savedLabels['pants'] : [];
 
-        $shirtRows = $this->buildSpecificationRows($shirtSpecs, self::shirtSpecDefinitions(), $shirtLabels);
+        $shirtRows = $this->withGarmentTypeRow(
+            $this->buildSpecificationRows($shirtSpecs, self::shirtSpecDefinitions(), $shirtLabels),
+            $shirtSpecs,
+            false,
+        );
 
-        $pantsRows = $this->buildSpecificationRows($pantsSpecs, self::pantsSpecDefinitions(), $pantsLabels);
+        $pantsRows = $this->withGarmentTypeRow(
+            $this->buildSpecificationRows($pantsSpecs, self::pantsSpecDefinitions(), $pantsLabels),
+            $pantsSpecs,
+            true,
+        );
 
         // A spec per sheet, when the bill names them. Counter and production
         // read the same keys, so a spec shown here is the one that sheet is
@@ -303,10 +350,14 @@ class DashboardController extends Controller
 
             $isPants = str_starts_with($key, 'pants_');
 
-            $batches[$key] = $this->buildSpecificationRows(
+            $batches[$key] = $this->withGarmentTypeRow(
+                $this->buildSpecificationRows(
+                    $specs,
+                    $isPants ? self::pantsSpecDefinitions() : self::shirtSpecDefinitions(),
+                    is_array($perBatchLabels[$key] ?? null) ? $perBatchLabels[$key] : [],
+                ),
                 $specs,
-                $isPants ? self::pantsSpecDefinitions() : self::shirtSpecDefinitions(),
-                is_array($perBatchLabels[$key] ?? null) ? $perBatchLabels[$key] : [],
+                $isPants,
             );
         }
 
@@ -368,6 +419,9 @@ class DashboardController extends Controller
                     'number' => $number !== '' ? $number : '-',
                     'pants_size' => $pantsSize,
                     'pants_number' => $pantsNumber,
+                    // How many trousers this person ordered, so the roster can
+                    // tell who has trousers from who merely has a size typed.
+                    'pants_quantity' => max(0, (int) ($row['pants_quantity'] ?? 0)),
                     // Bills written before lengths existed carry none, and stay
                     // that way: the sheets read '' as "this bill never said" and
                     // print exactly as they always did.
@@ -427,7 +481,9 @@ class DashboardController extends Controller
                         }
 
                         return [
-                            'size_group' => ($row['size_group'] ?? '') === 'kids' ? 'kids' : 'adults',
+                            // ประถม - มัธยมต้น is a range of its own; rows saved
+                            // before it existed say kids or adults.
+                            'size_group' => in_array($row['size_group'] ?? '', ['kids', 'junior'], true) ? $row['size_group'] : 'adults',
                             'size_label' => trim((string) ($row['size_label'] ?? '')),
                             'shirt_qty' => $shirtQty,
                             'shirt_price' => max(0.0, (float) ($row['shirt_price'] ?? 0)),

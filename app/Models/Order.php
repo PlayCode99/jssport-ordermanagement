@@ -345,11 +345,11 @@ class Order extends Model implements HasMedia
     /**
      * A colour house's sheet, which กีฬาสี bills are split into. The house is
      * its position on the bill, and there is no sleeve length: one sheet per
-     * house, garment and size group, exactly as the board groups them. The
+     * house, garment and size range, exactly as the board groups them. The
      * index is bounded so the key space stays finite — no bill has a hundred
      * colour houses.
      */
-    private const SPORTS_DAY_BATCH_PATTERN = '/^sports_day_\d{1,2}_(shirt|pants)_(kids|adults)$/';
+    private const SPORTS_DAY_BATCH_PATTERN = '/^sports_day_\d{1,2}_(shirt|pants)_(kids|junior|adults)$/';
 
     /**
      * The batch an image may be pinned to, or null for "every sheet of this

@@ -1103,6 +1103,29 @@ describe('counter work-sheet PDF', () => {
         expect(html).not.toContain('<th>แขน</th>');
     });
 
+    it('counts the legs of the people who ordered trousers, and no one else', () => {
+        // A keeper in a shirt alone is not one more pair of shorts.
+        const html = rosterHtml(
+            lengthRow(
+                {
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    pants_quantity: 1,
+                },
+                {
+                    shirt_style: 'short',
+                    pants_style: 'short',
+                    pants_quantity: 0,
+                    pants_size: '',
+                    pants_number: '',
+                },
+            ),
+        );
+
+        expect(html).toContain('ขาสั้น 1 คน');
+        expect(html).not.toContain('ขาสั้น 2 คน');
+    });
+
     it('leaves a bill saved before lengths existed exactly as it was', () => {
         const html = rosterHtml(lengthRow({}, {}));
 

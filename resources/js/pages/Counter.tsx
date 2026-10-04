@@ -17,7 +17,7 @@ import {
     Search,
     Trash2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import DeliveryCalendarDialog from '@/components/domain/counter/DeliveryCalendarDialog';
 import type { DeliveryCalendar } from '@/components/domain/counter/DeliveryCalendarDialog';
 import {
@@ -54,6 +54,13 @@ import {
     resolveBranchHeaderColor,
 } from '@/lib/branchHeaderColor';
 import type { DashboardInvitation } from '@/types';
+import {
+    buildGarmentSheets,
+    groupSpecRows,
+    sheetSizeSummary,
+    specDifferences,
+} from './counterGarmentSheets';
+import type { GarmentSheet } from './counterGarmentSheets';
 
 export interface FloorStats {
     print_room: {
@@ -235,6 +242,8 @@ export interface OrderTableRow {
             number: string;
             pants_size?: string;
             pants_number?: string;
+            /** Trousers this person ordered; absent on older payloads. */
+            pants_quantity?: number;
             /** The length, or '' on a bill saved before lengths existed. */
             shirt_style?: string;
             pants_style?: string;
@@ -776,6 +785,54 @@ const ADULT_SIZE_ORDER = [
 ];
 const KID_SIZE_ORDER = ['JSS', 'JS', 'JM', 'JL', 'JXL'];
 
+/**
+ * The three size ranges a bill is cut in. ประถม - มัธยมต้น is sewn to a
+ * pattern of its own, so it reads as a table of its own — not folded in with
+ * the children it is costed beside.
+ */
+type SizeTierKey = 'kids' | 'junior' | 'adults';
+
+const SIZE_TIER_KEYS: readonly SizeTierKey[] = ['kids', 'junior', 'adults'];
+
+const SIZE_TIER_TITLES: Record<SizeTierKey, string> = {
+    kids: 'ขนาดเด็ก',
+    junior: 'ขนาดประถม - มัธยมต้น',
+    adults: 'ขนาดผู้ใหญ่',
+};
+
+/** The range a saved line was cut in; a line saved before ranges had none. */
+function sizeTierOf(
+    sizeTier: string | null | undefined,
+    sizeGroup: string | null | undefined,
+): SizeTierKey {
+    if (sizeTier === 'kids' || sizeTier === 'junior' || sizeTier === 'adults') {
+        return sizeTier;
+    }
+
+    return sizeGroup === 'kids' ? 'kids' : 'adults';
+}
+
+/** Kids' sizes before adults', so a ประถม table using both reads in order. */
+function sizeOrderFor(tier: SizeTierKey): string[] {
+    return tier === 'kids'
+        ? KID_SIZE_ORDER
+        : tier === 'adults'
+          ? ADULT_SIZE_ORDER
+          : [...KID_SIZE_ORDER, ...ADULT_SIZE_ORDER];
+}
+
+/** One colour per range, the whole block in it: border and heading. */
+const SIZE_TIER_CARD_CLASSES: Record<SizeTierKey, string> = {
+    kids: 'border-emerald-200',
+    junior: 'border-sky-200',
+    adults: 'border-orange-200',
+};
+const SIZE_TIER_HEAD_CLASSES: Record<SizeTierKey, string> = {
+    kids: 'bg-emerald-700',
+    junior: 'bg-sky-700',
+    adults: 'bg-orange-700',
+};
+
 type SpecPrintRow = { label: string; value: string };
 
 /**
@@ -833,7 +890,8 @@ export type SportsDayGroupPayload = {
     team_name: string;
     color_name: string;
     rows: Array<{
-        size_group: 'kids' | 'adults';
+        /** The range the row is cut in; older bills say kids or adults. */
+        size_group: 'kids' | 'junior' | 'adults';
         size_label: string;
         shirt_qty: number;
         shirt_price: number;
@@ -893,7 +951,7 @@ export function resolveSportsDaySwatch(name: string): {
 }
 
 export type SportsDayMatrix = {
-    sizeGroup: 'kids' | 'adults';
+    sizeGroup: SizeTierKey;
     garment: 'shirt' | 'pants';
     title: string;
     houses: Array<{ name: string; background: string; text: string }>;
@@ -930,7 +988,7 @@ export function buildSportsDayMatrices(
 
     const matrices: SportsDayMatrix[] = [];
 
-    for (const sizeGroup of ['kids', 'adults'] as const) {
+    for (const sizeGroup of SIZE_TIER_KEYS) {
         for (const garment of ['shirt', 'pants'] as const) {
             const quantityOf = (row: SportsDayGroupPayload['rows'][number]) =>
                 garment === 'shirt' ? row.shirt_qty : row.pants_qty;
@@ -959,8 +1017,7 @@ export function buildSportsDayMatrices(
                 continue;
             }
 
-            const order =
-                sizeGroup === 'kids' ? KID_SIZE_ORDER : ADULT_SIZE_ORDER;
+            const order = sizeOrderFor(sizeGroup);
             const rank = (label: string): number => {
                 const found = order.indexOf(label.toUpperCase());
 
@@ -1060,7 +1117,7 @@ export function buildSportsDayMatrices(
             matrices.push({
                 sizeGroup,
                 garment,
-                title: `${sizeGroup === 'kids' ? 'ขนาดเด็ก · อนุบาล/ประถม' : 'ขนาดผู้ใหญ่ · มัธยมต้น/มัธยมปลาย'} · ${garment === 'shirt' ? 'เสื้อ' : 'กางเกง'}`,
+                title: `${SIZE_TIER_TITLES[sizeGroup]} · ${garment === 'shirt' ? 'เสื้อ' : 'กางเกง'}`,
                 houses,
                 rows,
                 houseTotals,
@@ -1278,6 +1335,7 @@ const GARMENT_TABLE_ITEM_TYPES = [
 type CounterOrderItem = {
     item_type?: string;
     size_group?: string;
+    size_tier?: string | null;
     size_label?: string;
     shirt_style?: string | null;
     pants_style?: string | null;
@@ -1325,7 +1383,7 @@ type GarmentPrintLine = {
 };
 
 type GarmentSizeGroup = {
-    sizeGroup: 'kids' | 'adults';
+    sizeGroup: SizeTierKey;
     title: string;
     shirt: GarmentPrintLine[];
     pants: GarmentPrintLine[];
@@ -1343,7 +1401,7 @@ type GarmentSizeGroup = {
  */
 function buildGarmentLines(
     items: CounterOrderItem[],
-    sizeGroup: 'kids' | 'adults',
+    sizeGroup: SizeTierKey,
     garment: 'shirt' | 'pants',
 ): GarmentPrintLine[] {
     const wanted =
@@ -1354,7 +1412,7 @@ function buildGarmentLines(
         garment === 'shirt'
             ? SHIRT_STYLE_PRINT_LABELS
             : PANTS_STYLE_PRINT_LABELS;
-    const sizeOrder = sizeGroup === 'kids' ? KID_SIZE_ORDER : ADULT_SIZE_ORDER;
+    const sizeOrder = sizeOrderFor(sizeGroup);
     const rankOf = (label: string): number => {
         const rank = sizeOrder.indexOf(label.trim().toUpperCase());
 
@@ -1366,9 +1424,7 @@ function buildGarmentLines(
     items
         .filter(
             (item) =>
-                ((item.size_group ?? 'adults') === 'kids'
-                    ? 'kids'
-                    : 'adults') === sizeGroup &&
+                sizeTierOf(item.size_tier, item.size_group) === sizeGroup &&
                 wanted.includes((item.item_type ?? '').toLowerCase()),
         )
         .forEach((item) => {
@@ -1423,17 +1479,12 @@ function garmentLineTotals(lines: GarmentPrintLine[]): {
 }
 
 function buildGarmentSizeGroups(items: CounterOrderItem[]): GarmentSizeGroup[] {
-    return (['kids', 'adults'] as const)
-        .map((sizeGroup) => ({
-            sizeGroup,
-            title:
-                sizeGroup === 'kids'
-                    ? 'ขนาดเด็ก · อนุบาล/ประถม'
-                    : 'ขนาดผู้ใหญ่ · มัธยมต้น/มัธยมปลาย',
-            shirt: buildGarmentLines(items, sizeGroup, 'shirt'),
-            pants: buildGarmentLines(items, sizeGroup, 'pants'),
-        }))
-        .filter((group) => group.shirt.length > 0 || group.pants.length > 0);
+    return SIZE_TIER_KEYS.map((sizeGroup) => ({
+        sizeGroup,
+        title: SIZE_TIER_TITLES[sizeGroup],
+        shirt: buildGarmentLines(items, sizeGroup, 'shirt'),
+        pants: buildGarmentLines(items, sizeGroup, 'pants'),
+    })).filter((group) => group.shirt.length > 0 || group.pants.length > 0);
 }
 
 /**
@@ -1447,17 +1498,14 @@ function GarmentSizeGroupCards({ groups }: { groups: GarmentSizeGroup[] }) {
             {groups.map((group) => {
                 const shirtTotals = garmentLineTotals(group.shirt);
                 const pantsTotals = garmentLineTotals(group.pants);
-                const isKids = group.sizeGroup === 'kids';
 
                 return (
                     <div
                         key={group.sizeGroup}
-                        className={`overflow-hidden rounded-lg border ${isKids ? 'border-emerald-200' : 'border-orange-200'}`}
+                        className={`overflow-hidden rounded-lg border ${SIZE_TIER_CARD_CLASSES[group.sizeGroup]}`}
                     >
                         <div
-                            className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-bold text-white ${
-                                isKids ? 'bg-emerald-700' : 'bg-orange-700'
-                            }`}
+                            className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-bold text-white ${SIZE_TIER_HEAD_CLASSES[group.sizeGroup]}`}
                         >
                             <span>{group.title}</span>
                             <span className="font-semibold">
@@ -1625,6 +1673,129 @@ function GarmentPreviewTable({
                 </tfoot>
             </table>
         </div>
+    );
+}
+
+/**
+ * The spec of a bill sold as separate pieces, one card per sheet the floor
+ * sews — เสื้อเด็ก · แขนสั้น, กางเกงผู้ใหญ่ · ขายาว — shirts first, then
+ * trousers. Each card says what it covers and how many, then reads like a spec
+ * a person writes out: fabric, shape, then what goes on it. A setting that is
+ * not the same on every sheet of that garment is marked, because that is the
+ * one the floor must not sew from habit.
+ */
+function GarmentSpecCards({ sheets }: { sheets: GarmentSheet[] }) {
+    const differences = specDifferences(sheets);
+
+    return (
+        <section className="rounded-lg border border-slate-300 bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-xs font-bold text-slate-700">
+                    สเปกการผลิต แยกตามประเภท
+                </h3>
+                {differences.size > 0 ? (
+                    <p className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-900 ring-1 ring-amber-300">
+                            ▲ ค่าที่ไฮไลต์
+                        </span>
+                        ไม่เหมือนกันทุกตาราง ตรวจก่อนผลิต
+                    </p>
+                ) : null}
+            </div>
+
+            <div className="space-y-3">
+                {sheets.map((sheet) => {
+                    const isPants = sheet.garment === 'pants';
+                    const groups = groupSpecRows(sheet.spec, sheet.garment);
+
+                    return (
+                        <article
+                            key={sheet.key}
+                            aria-label={`สเปก${sheet.title}`}
+                            className={`overflow-hidden rounded-lg border border-l-4 border-slate-200 ${
+                                isPants
+                                    ? 'border-l-[#E21E26]'
+                                    : 'border-l-[#174395]'
+                            }`}
+                        >
+                            <header
+                                className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2 ${
+                                    isPants ? 'bg-rose-50' : 'bg-blue-50'
+                                }`}
+                            >
+                                <h4
+                                    className={`text-sm font-bold ${
+                                        isPants
+                                            ? 'text-[#B3151C]'
+                                            : 'text-[#174395]'
+                                    }`}
+                                >
+                                    {sheet.title}
+                                </h4>
+                                <p className="text-xs text-slate-600">
+                                    <span className="font-bold text-slate-900 tabular-nums">
+                                        {sheet.quantity.toLocaleString('th-TH')}{' '}
+                                        ตัว
+                                    </span>
+                                    <span className="mx-1.5 text-slate-300">
+                                        |
+                                    </span>
+                                    ไซซ์ {sheetSizeSummary(sheet)}
+                                </p>
+                            </header>
+
+                            {groups.length === 0 ? (
+                                <p className="px-3 py-4 text-center text-xs text-slate-500">
+                                    ยังไม่มีข้อมูลสเปกที่บันทึก
+                                </p>
+                            ) : (
+                                <div className="grid gap-x-6 gap-y-3 px-3 py-2.5 md:grid-cols-3">
+                                    {groups.map((group) => (
+                                        <div
+                                            key={group.title}
+                                            className="min-w-0"
+                                        >
+                                            <p className="mb-1 border-b border-slate-200 pb-0.5 text-[11px] font-bold tracking-wide text-slate-500">
+                                                {group.title}
+                                            </p>
+                                            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+                                                {group.rows.map((row) => {
+                                                    const differs =
+                                                        differences.has(
+                                                            `${sheet.key}|${row.label}`,
+                                                        );
+
+                                                    return (
+                                                        <Fragment
+                                                            key={row.label}
+                                                        >
+                                                            <dt className="text-slate-500">
+                                                                {row.label}
+                                                            </dt>
+                                                            <dd
+                                                                className={
+                                                                    differs
+                                                                        ? 'rounded bg-amber-100 px-1 font-bold break-words text-amber-950 ring-1 ring-amber-300'
+                                                                        : 'font-semibold break-words text-slate-900'
+                                                                }
+                                                            >
+                                                                {differs
+                                                                    ? `▲ ${row.value}`
+                                                                    : row.value}
+                                                            </dd>
+                                                        </Fragment>
+                                                    );
+                                                })}
+                                            </dl>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </article>
+                    );
+                })}
+            </div>
+        </section>
     );
 }
 
@@ -2936,10 +3107,15 @@ export default function Counter({
             return [] as string[];
         }
 
+        // The same pictures the printed receipt carries: a colour house's and
+        // a ชุดพละ table's are kept apart from the shirt and trouser ones, and
+        // were left off the screen while the paper had them.
         const list = [
             selectedOrder.details.artwork_url,
             ...selectedOrder.details.shirt_artwork_urls,
             ...selectedOrder.details.pants_artwork_urls,
+            ...(selectedOrder.details.sports_day_artwork_urls ?? []),
+            ...(selectedOrder.details.pe_uniform_artwork_urls ?? []),
             ...selectedOrder.details.reference_designs,
         ].filter((url): url is string => Boolean(url));
 
@@ -3012,6 +3188,25 @@ export default function Counter({
             ? buildGarmentSizeGroups(items)
             : null;
     }, [selectedOrder]);
+
+    /**
+     * The spec of a Forms 1, 2 and 4 bill, one card per garment, tier and
+     * length. null leaves a colour-house or set bill on the spec blocks it
+     * has always shown.
+     */
+    const dialogSpecSheets = useMemo(() => {
+        const details = selectedOrder?.details;
+        const items = details?.items ?? [];
+
+        return billUsesGarmentTables(items, details?.form_mode)
+            ? buildGarmentSheets(
+                  items,
+                  details?.spec_sections?.batches,
+                  shirtSpecificationRows,
+                  pantsSpecificationRows,
+              )
+            : null;
+    }, [selectedOrder, shirtSpecificationRows, pantsSpecificationRows]);
 
     const dialogSizeGroups = useMemo(() => {
         const items = selectedOrder?.details?.items ?? [];
@@ -3325,8 +3520,17 @@ export default function Counter({
             people.map((person) => person.shirt_style),
             SHIRT_STYLE_PERSON_LABELS,
         );
+        // Only people who ordered trousers have a leg length to count: a
+        // keeper in a shirt alone is not one more pair of shorts.
+        const wearsPants = (person: (typeof people)[number]): boolean =>
+            person.pants_quantity !== undefined
+                ? person.pants_quantity > 0
+                : (person.pants_size ?? '').trim() !== '' ||
+                  (person.pants_number ?? '').trim() !== '';
         const legs = summarizePersonLengths(
-            hasPants ? people.map((person) => person.pants_style) : [],
+            hasPants
+                ? people.filter(wearsPants).map((person) => person.pants_style)
+                : [],
             PANTS_STYLE_PERSON_LABELS,
         );
         // Only a mixed list earns a column; a whole team in one length is said
@@ -3359,7 +3563,7 @@ export default function Counter({
                     <td class="r-num">${cell(person.number)}</td>
                     ${showSleeveColumn ? `<td class="r-len${person.shirt_style === 'long' ? ' is-long' : ''}">${escapeHtml(sleeves.labelOf(person.shirt_style))}</td>` : ''}
                     ${hasPants ? `<td class="r-size">${cell(person.pants_size)}</td><td class="r-num">${cell(person.pants_number)}</td>` : ''}
-                    ${showLegColumn ? `<td class="r-len${person.pants_style === 'long' ? ' is-long' : ''}">${escapeHtml(legs.labelOf(person.pants_style))}</td>` : ''}
+                    ${showLegColumn ? `<td class="r-len${wearsPants(person) && person.pants_style === 'long' ? ' is-long' : ''}">${escapeHtml(wearsPants(person) ? legs.labelOf(person.pants_style) : '-')}</td>` : ''}
                     <td class="r-check"></td>
                 </tr>`;
             })
@@ -3829,8 +4033,7 @@ export default function Counter({
          * finds its column without reading it.
          */
         const renderSportsDayMatrix = (matrix: SportsDayMatrix): string => {
-            const themeClass =
-                matrix.sizeGroup === 'kids' ? 'theme-kids' : 'theme-adults';
+            const themeClass = `theme-${matrix.sizeGroup}`;
             const headCells = matrix.houses
                 .map(
                     (house) =>
@@ -3888,8 +4091,7 @@ export default function Counter({
          * for.
          */
         const renderGarmentGroup = (group: GarmentSizeGroup): string => {
-            const themeClass =
-                group.sizeGroup === 'kids' ? 'theme-kids' : 'theme-adults';
+            const themeClass = `theme-${group.sizeGroup}`;
             // A dash reads as "nothing here" in a cell, the way the rest of the
             // sheet writes an empty figure; the totals underneath are always a
             // number, because a total of nothing is still nothing owed.
@@ -3996,6 +4198,61 @@ export default function Counter({
                         .filter((markup) => markup !== '')
                         .join('');
 
+        /**
+         * The spec of a bill sold as separate pieces, one card per sheet the
+         * floor sews, written out the way a person would: what it covers and
+         * how many, then pattern and fabric, shape, and what goes on it, label beside value.
+         * A setting that differs between sheets of one garment is marked with
+         * a ▲ as well as a tint, so it still shows on a black-and-white
+         * printer.
+         */
+        const renderGarmentSpecCards = (sheets: GarmentSheet[]): string => {
+            const differences = specDifferences(sheets);
+            const cards = sheets
+                .map((sheet) => {
+                    const groups = groupSpecRows(sheet.spec, sheet.garment);
+                    const body =
+                        groups.length === 0
+                            ? '<div class="spec-card-empty">ยังไม่มีข้อมูลสเปกที่บันทึก</div>'
+                            : `<div class="spec-card-body">${groups
+                                  .map(
+                                      (group) => `
+                            <div class="spec-group">
+                                <div class="spec-group-title">${escapeHtml(group.title)}</div>
+                                <table class="spec-list"><tbody>${group.rows
+                                    .map((row) =>
+                                        differences.has(
+                                            `${sheet.key}|${row.label}`,
+                                        )
+                                            ? `<tr><th>${escapeHtml(row.label)}</th><td class="is-diff">▲ ${escapeHtml(row.value)}</td></tr>`
+                                            : `<tr><th>${escapeHtml(row.label)}</th><td>${escapeHtml(row.value)}</td></tr>`,
+                                    )
+                                    .join('')}</tbody></table>
+                            </div>`,
+                                  )
+                                  .join('')}</div>`;
+
+                    return `
+                    <div class="spec-card ${sheet.garment === 'pants' ? 'theme-pants' : 'theme-shirt'}" data-sheet="${escapeHtml(sheet.key)}">
+                        <div class="spec-card-head">
+                            <span class="spec-card-title">${escapeHtml(sheet.title)}</span>
+                            <span class="spec-card-meta"><b>${sheet.quantity.toLocaleString('th-TH')} ตัว</b> &nbsp;|&nbsp; ไซซ์ ${escapeHtml(sheetSizeSummary(sheet))}</span>
+                        </div>
+                        ${body}
+                    </div>`;
+                })
+                .join('');
+
+            return `
+                <div class="spec-sheets">
+                    <div class="spec-sheets-head">
+                        <span>สเปกการผลิต แยกตามประเภท</span>
+                        ${differences.size > 0 ? '<span class="spec-sheets-legend"><span class="is-diff">▲ ค่าที่ไฮไลต์</span> ไม่เหมือนกันทุกตาราง ตรวจก่อนผลิต</span>' : ''}
+                    </div>
+                    ${cards}
+                </div>`;
+        };
+
         // One block per distinct spec. A bill whose sheets are all sewn the
         // same way still prints a single block, so the sheet it fits on is
         // unchanged; only a bill that really does differ prints more.
@@ -4004,9 +4261,24 @@ export default function Counter({
             shirtRows,
             pantsRows,
         );
-        const specTablesMarkup = `<div class="spec-sections${specBlocks.length === 2 ? ' has-two' : ''}">${specBlocks
-            .map((block) => renderSpecSection(block.title, block.rows))
-            .join('')}</div>`;
+        // Forms 1, 2 and 4 print a spec per sheet; every other bill keeps
+        // the blocks it has always printed.
+        const specTablesMarkup =
+            sportsDayMatrices.length === 0 &&
+            billUsesGarmentTables(sizeRows, order.form_mode)
+                ? renderGarmentSpecCards(
+                      buildGarmentSheets(
+                          sizeRows,
+                          order.spec_sections?.batches,
+                          shirtRows,
+                          pantsRows,
+                      ),
+                  )
+                : `<div class="spec-sections${specBlocks.length === 2 ? ' has-two' : ''}">${specBlocks
+                      .map((block) =>
+                          renderSpecSection(block.title, block.rows),
+                      )
+                      .join('')}</div>`;
         const totalQuantity = sizeRows.reduce(
             (sum, row) => sum + Number(row.quantity || 0),
             0,
@@ -4189,8 +4461,39 @@ export default function Counter({
                         /* One accent per size group so the whole block -- title bar,
                            header row, subtotals and totals -- reads as a single theme. */
                         .size-block.theme-kids { --tbl-strong: #15803d; --tbl-head: #dcfce7; --tbl-soft: #f0fdf4; }
+                        .size-block.theme-junior { --tbl-strong: #0369a1; --tbl-head: #e0f2fe; --tbl-soft: #f0f9ff; }
                         .size-block.theme-adults { --tbl-strong: #c2410c; --tbl-head: #ffedd5; --tbl-soft: #fff7ed; }
                         .size-block .table-title { background: var(--tbl-strong); }
+
+                        /* ---- Spec per sheet ----
+                           Written the way a person writes a spec out: one card
+                           per thing the floor sews, its name and count in the
+                           heading, then fabric / shape / decoration side by
+                           side, label beside value on dotted rule lines. Values
+                           are left-aligned and set heavier than their labels so
+                           the eye runs down what to make, not what it is called.
+                           A card is never split across pages. */
+                        .spec-sheets { margin-top: 6px; }
+                        .spec-sheets-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 0.5mm solid #111827; padding-bottom: 2px; margin-bottom: 4px; font-size: 13px; font-weight: 800; }
+                        .spec-sheets-legend { font-size: 10px; font-weight: 400; color: #374151; }
+                        .spec-card { --accent: #174395; --soft: #eef3fb; border: 0.3mm solid #94a3b8; border-left: 1.6mm solid var(--accent); break-inside: avoid; page-break-inside: avoid; }
+                        .spec-card.theme-pants { --accent: #c8161d; --soft: #fdf0f0; }
+                        .spec-card + .spec-card { margin-top: 5px; }
+                        .spec-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; background: var(--soft); padding: 3px 7px; border-bottom: 0.3mm solid #cbd5e1; }
+                        .spec-card-title { font-size: 14px; font-weight: 800; color: var(--accent); }
+                        .spec-card-meta { font-size: 11px; color: #374151; text-align: right; }
+                        .spec-card-meta b { color: #111827; }
+                        .spec-card-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 6mm; padding: 3px 7px 5px; }
+                        .spec-card-empty { padding: 6px 7px; color: #6b7280; font-style: italic; }
+                        .spec-group { min-width: 0; }
+                        .spec-group-title { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 0.04em; border-bottom: 0.3mm solid #cbd5e1; padding: 2px 0 1px; margin-bottom: 1px; }
+                        .spec-list { width: 100%; border-collapse: collapse; font-size: 12px; }
+                        .spec-list th, .spec-list td { border: 0; border-bottom: 0.25mm dotted #94a3b8; padding: 2px 0; text-align: left; vertical-align: top; }
+                        .spec-list th { width: 40%; padding-right: 6px; font-weight: 400; color: #475569; white-space: nowrap; }
+                        .spec-list td { font-weight: 700; color: #111827; overflow-wrap: anywhere; }
+                        .spec-list tr:last-child th, .spec-list tr:last-child td { border-bottom: 0; }
+                        .is-diff { background: #fde68a; padding: 0 3px; border-radius: 2px; }
+                        .spec-list td.is-diff { padding: 2px 3px; }
                         .empty-state { color: #6b7280; font-style: italic; text-align: center; }
 
                         /* Forms 1 and 4: the shirt list and the trouser list sit
@@ -5098,16 +5401,13 @@ export default function Counter({
                                     <div className="space-y-3">
                                         {dialogSportsDayMatrices.map(
                                             (matrix) => {
-                                                const isKids =
-                                                    matrix.sizeGroup === 'kids';
-
                                                 return (
                                                     <div
                                                         key={`${matrix.sizeGroup}-${matrix.garment}`}
-                                                        className={`overflow-hidden rounded-xl border shadow-sm ${isKids ? 'border-emerald-200' : 'border-orange-200'}`}
+                                                        className={`overflow-hidden rounded-xl border shadow-sm ${SIZE_TIER_CARD_CLASSES[matrix.sizeGroup]}`}
                                                     >
                                                         <div
-                                                            className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-xs font-bold text-white ${isKids ? 'bg-emerald-700' : 'bg-orange-700'}`}
+                                                            className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-xs font-bold text-white ${SIZE_TIER_HEAD_CLASSES[matrix.sizeGroup]}`}
                                                         >
                                                             <span>
                                                                 {matrix.title}
@@ -5524,23 +5824,27 @@ export default function Counter({
                                 )}
                             </section>
 
-                            <div
-                                className={`grid items-stretch gap-3 ${specBlocks.length > 1 ? 'lg:grid-cols-2' : ''}`}
-                            >
-                                {specBlocks.map((block) => (
-                                    <SpecTable
-                                        key={block.title}
-                                        title={block.title}
-                                        rows={block.rows}
-                                        accent={
-                                            block.title.includes('กางเกง')
-                                                ? 'red'
-                                                : 'blue'
-                                        }
-                                        split={specBlocks.length === 1}
-                                    />
-                                ))}
-                            </div>
+                            {dialogSpecSheets !== null ? (
+                                <GarmentSpecCards sheets={dialogSpecSheets} />
+                            ) : (
+                                <div
+                                    className={`grid items-stretch gap-3 ${specBlocks.length > 1 ? 'lg:grid-cols-2' : ''}`}
+                                >
+                                    {specBlocks.map((block) => (
+                                        <SpecTable
+                                            key={block.title}
+                                            title={block.title}
+                                            rows={block.rows}
+                                            accent={
+                                                block.title.includes('กางเกง')
+                                                    ? 'red'
+                                                    : 'blue'
+                                            }
+                                            split={specBlocks.length === 1}
+                                        />
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
