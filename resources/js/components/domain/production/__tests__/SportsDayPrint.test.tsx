@@ -188,60 +188,6 @@ describe('sports day print form', () => {
         expect(screen.getAllByText('คณะสีแดง').length).toBeGreaterThan(0);
     });
 
-    it('gives a ประถม - มัธยมต้น row a page of its own, paid at the child’s rate', () => {
-        const order = makeOrder(
-            sportsDaySpec([
-                {
-                    team_name: 'คณะสีเหลือง',
-                    rows: [
-                        {
-                            size_group: 'adults',
-                            size_label: 'M',
-                            shirt_qty: 10,
-                            pants_qty: 0,
-                        },
-                        {
-                            size_group: 'junior',
-                            size_label: 'JL',
-                            shirt_qty: 6,
-                            pants_qty: 0,
-                        },
-                    ],
-                },
-            ]),
-            [
-                {
-                    item_type: 'shirt',
-                    size_group: 'adults',
-                    size_label: 'M',
-                    quantity: 10,
-                },
-                {
-                    item_type: 'shirt',
-                    size_group: 'kids',
-                    size_tier: 'junior',
-                    size_label: 'JL',
-                    quantity: 6,
-                },
-            ],
-        );
-
-        openDetail(order);
-
-        const pages = [...document.querySelectorAll('.p-print-page')].map(
-            (page) => page.textContent?.replace(/\s+/g, ' ') ?? '',
-        );
-        const junior = pages.find((text) =>
-            text.includes('เสื้อไซต์ประถม - มัธยมต้น'),
-        );
-
-        expect(pages).toHaveLength(2);
-        expect(junior).toBeDefined();
-        // The child's rate, and named as the child's.
-        expect(junior).toContain('วิธีคิดคำนวณเงิน (เด็ก)');
-        expect(junior).toContain('6 x 10.00 = 60.00');
-    });
-
     it('gives shirts and pants of one house separate pages', () => {
         const order = makeOrder(
             sportsDaySpec([

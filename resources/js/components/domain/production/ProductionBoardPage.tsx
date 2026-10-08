@@ -315,19 +315,7 @@ type PersonalizationPrintRow = {
     number: string;
     size: string;
     quantity: number;
-    /** The person's trousers, '-' and 0 when they ordered none. */
-    pants_size: string;
-    pants_number: string;
-    pants_quantity: number;
 };
-
-/**
- * Whether a name list carries trousers at all. Only then does the roster give
- * them columns: a shirts-only list prints exactly as it always has.
- */
-export function rosterHasPants(rows: PersonalizationPrintRow[]): boolean {
-    return rows.some((row) => row.pants_quantity > 0);
-}
 
 /**
  * The name list a Form 2 bill carries. It lives in the spec JSON because
@@ -352,9 +340,6 @@ function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
                 number?: unknown;
                 size?: unknown;
                 quantity?: unknown;
-                pants_size?: unknown;
-                pants_number?: unknown;
-                pants_quantity?: unknown;
             }>;
         };
 
@@ -373,9 +358,6 @@ function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
         return parsed.personalization_rows
             .map((row) => {
                 const quantity = Number(row.quantity ?? 0);
-                const pantsQuantity = Number(row.pants_quantity ?? 0);
-                const hasPants =
-                    Number.isFinite(pantsQuantity) && pantsQuantity > 0;
 
                 return {
                     name: text(row.name),
@@ -385,11 +367,6 @@ function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
                         Number.isFinite(quantity) && quantity > 0
                             ? quantity
                             : 0,
-                    // A person who ordered no trousers has none to size or
-                    // number, whatever the row happens to carry.
-                    pants_size: hasPants ? text(row.pants_size) : '-',
-                    pants_number: hasPants ? text(row.pants_number) : '-',
-                    pants_quantity: hasPants ? pantsQuantity : 0,
                 };
             })
             .filter(
@@ -3025,8 +3002,6 @@ export function ProductionBoardPage({
                                 const orderItems = detailOrder.items ?? [];
                                 const personalizationRows =
                                     readPersonalizationRows(detailOrder);
-                                const withPants =
-                                    rosterHasPants(personalizationRows);
                                 const isIndividualOrder =
                                     personalizationRows.length > 0;
 
@@ -3083,22 +3058,12 @@ export function ProductionBoardPage({
                                                     : []
                                                 ).map((row) => ({
                                                     sizeGroup:
-                                                        ((): ProductionGroupSizeTier => {
-                                                            // A ประถม - มัธยมต้น row is its own sheet; rows saved before that
-                                                            // range existed say kids or adults.
-                                                            const value =
-                                                                String(
-                                                                    row.size_group ??
-                                                                        'adults',
-                                                                );
-
-                                                            return value ===
-                                                                'kids' ||
-                                                                value ===
-                                                                    'junior'
-                                                                ? value
-                                                                : 'adults';
-                                                        })(),
+                                                        String(
+                                                            row.size_group ??
+                                                                'adults',
+                                                        ) === 'kids'
+                                                            ? ('kids' as const)
+                                                            : ('adults' as const),
                                                     sizeLabel: String(
                                                         row.size_label ?? '',
                                                     ).trim(),
@@ -3489,11 +3454,7 @@ export function ProductionBoardPage({
                                         (['shirt', 'pants'] as const).flatMap(
                                             (garment) =>
                                                 (
-                                                    [
-                                                        'kids',
-                                                        'junior',
-                                                        'adults',
-                                                    ] as const
+                                                    ['kids', 'adults'] as const
                                                 ).flatMap((sizeGroup) => {
                                                     const rows =
                                                         team.rows.filter(
@@ -3555,18 +3516,16 @@ export function ProductionBoardPage({
                                                             definitionKey,
                                                             definitionKey,
                                                         );
-                                                    const garmentLabel = {
-                                                        shirt: {
-                                                            kids: 'เสื้อไซต์เด็ก',
-                                                            junior: 'เสื้อไซต์ประถม - มัธยมต้น',
-                                                            adults: 'เสื้อไซต์ผู้ใหญ่',
-                                                        },
-                                                        pants: {
-                                                            kids: 'กางเกงเด็ก',
-                                                            junior: 'กางเกงประถม - มัธยมต้น',
-                                                            adults: 'กางเกงผู้ใหญ่',
-                                                        },
-                                                    }[garment][sizeGroup];
+                                                    const garmentLabel =
+                                                        garment === 'pants'
+                                                            ? sizeGroup ===
+                                                              'kids'
+                                                                ? 'กางเกงเด็ก'
+                                                                : 'กางเกงผู้ใหญ่'
+                                                            : sizeGroup ===
+                                                                'kids'
+                                                              ? 'เสื้อไซต์เด็ก'
+                                                              : 'เสื้อไซต์ผู้ใหญ่';
 
                                                     return [
                                                         {
@@ -3576,14 +3535,8 @@ export function ProductionBoardPage({
                                                                 team.teamName,
                                                             garment,
                                                             sizeTier: sizeGroup,
-                                                            // A ประถม - มัธยมต้น
-                                                            // house sheet is its
-                                                            // own page, paid at
-                                                            // the child's rate.
                                                             pricingGroup:
-                                                                pricingGroupFor(
-                                                                    sizeGroup,
-                                                                ),
+                                                                sizeGroup,
                                                             quantity,
                                                             sizeRows:
                                                                 Array.from(
@@ -4351,29 +4304,16 @@ export function ProductionBoardPage({
                                                 td:nth-child(4),
                                             .p-personalization-table
                                                 tbody
-                                                td:nth-child(5),
-                                            .p-personalization-table
-                                                tbody
-                                                td:nth-child(n + 6) {
+                                                td:nth-child(5) {
                                                 text-align: center;
                                                 font-variant-numeric: tabular-nums;
                                             }
-                                            /* Trousers size and number read like the
-                                               shirt's beside them. */
                                             .p-personalization-table
                                                 tbody
                                                 td:nth-child(3),
                                             .p-personalization-table
                                                 tbody
-                                                td:nth-child(4),
-                                            .p-personalization-table
-                                                tbody
-                                                tr:not(.p-roster-total)
-                                                td:nth-child(6),
-                                            .p-personalization-table
-                                                tbody
-                                                tr:not(.p-roster-total)
-                                                td:nth-child(7) {
+                                                td:nth-child(4) {
                                                 font-weight: 700;
                                             }
                                             .p-roster-index {
@@ -4389,9 +4329,6 @@ export function ProductionBoardPage({
                                                 font-weight: 800;
                                                 text-align: right;
                                             }
-                                            .p-personalization-table
-                                                .p-roster-total
-                                                td:not(:first-child),
                                             .p-personalization-table
                                                 .p-roster-total
                                                 td:last-child {
@@ -6107,44 +6044,19 @@ export function ProductionBoardPage({
                                                                     <col />
                                                                     <col
                                                                         style={{
-                                                                            width: withPants
-                                                                                ? '17mm'
-                                                                                : '30mm',
+                                                                            width: '30mm',
                                                                         }}
                                                                     />
                                                                     <col
                                                                         style={{
-                                                                            width: withPants
-                                                                                ? '17mm'
-                                                                                : '30mm',
+                                                                            width: '30mm',
                                                                         }}
                                                                     />
                                                                     <col
                                                                         style={{
-                                                                            width: withPants
-                                                                                ? '17mm'
-                                                                                : '30mm',
+                                                                            width: '30mm',
                                                                         }}
                                                                     />
-                                                                    {withPants ? (
-                                                                        <>
-                                                                            <col
-                                                                                style={{
-                                                                                    width: '19mm',
-                                                                                }}
-                                                                            />
-                                                                            <col
-                                                                                style={{
-                                                                                    width: '19mm',
-                                                                                }}
-                                                                            />
-                                                                            <col
-                                                                                style={{
-                                                                                    width: '19mm',
-                                                                                }}
-                                                                            />
-                                                                        </>
-                                                                    ) : null}
                                                                 </colgroup>
                                                                 <thead>
                                                                     <tr>
@@ -6161,23 +6073,8 @@ export function ProductionBoardPage({
                                                                             ไซซ์
                                                                         </th>
                                                                         <th>
-                                                                            {withPants
-                                                                                ? 'จำนวนเสื้อ'
-                                                                                : 'จำนวน'}
+                                                                            จำนวน
                                                                         </th>
-                                                                        {withPants ? (
-                                                                            <>
-                                                                                <th>
-                                                                                    ไซซ์กางเกง
-                                                                                </th>
-                                                                                <th>
-                                                                                    เบอร์กางเกง
-                                                                                </th>
-                                                                                <th>
-                                                                                    จำนวนกางเกง
-                                                                                </th>
-                                                                            </>
-                                                                        ) : null}
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
@@ -6213,26 +6110,6 @@ export function ProductionBoardPage({
                                                                                         row.quantity
                                                                                     }
                                                                                 </td>
-                                                                                {withPants ? (
-                                                                                    <>
-                                                                                        <td>
-                                                                                            {
-                                                                                                row.pants_size
-                                                                                            }
-                                                                                        </td>
-                                                                                        <td>
-                                                                                            {
-                                                                                                row.pants_number
-                                                                                            }
-                                                                                        </td>
-                                                                                        <td>
-                                                                                            {row.pants_quantity >
-                                                                                            0
-                                                                                                ? row.pants_quantity
-                                                                                                : '-'}
-                                                                                        </td>
-                                                                                    </>
-                                                                                ) : null}
                                                                             </tr>
                                                                         ),
                                                                     )}
@@ -6276,19 +6153,6 @@ export function ProductionBoardPage({
                                                                                 <td>
                                                                                     &nbsp;
                                                                                 </td>
-                                                                                {withPants ? (
-                                                                                    <>
-                                                                                        <td>
-                                                                                            &nbsp;
-                                                                                        </td>
-                                                                                        <td>
-                                                                                            &nbsp;
-                                                                                        </td>
-                                                                                        <td>
-                                                                                            &nbsp;
-                                                                                        </td>
-                                                                                    </>
-                                                                                ) : null}
                                                                             </tr>
                                                                         ),
                                                                     )}
@@ -6311,26 +6175,6 @@ export function ProductionBoardPage({
                                                                                 0,
                                                                             )}
                                                                         </td>
-                                                                        {withPants ? (
-                                                                            <>
-                                                                                <td
-                                                                                    colSpan={
-                                                                                        2
-                                                                                    }
-                                                                                />
-                                                                                <td>
-                                                                                    {personalizationRows.reduce(
-                                                                                        (
-                                                                                            sum,
-                                                                                            row,
-                                                                                        ) =>
-                                                                                            sum +
-                                                                                            row.pants_quantity,
-                                                                                        0,
-                                                                                    )}
-                                                                                </td>
-                                                                            </>
-                                                                        ) : null}
                                                                     </tr>
                                                                 </tbody>
                                                             </table>

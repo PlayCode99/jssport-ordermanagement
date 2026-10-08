@@ -109,45 +109,13 @@ const props = {
 };
 
 /**
- * Rendered on Form 2 with one shirt sheet and one trousers sheet, each with
- * its spec folded under its own heading. What is under test here — that every
- * catalog field is a combobox the shop can add to, and that the two garments
- * share their colour lists — holds wherever the spec is drawn.
+ * Rendered on Form 2, which is where the spec card with its แบบเสื้อ /
+ * แบบกางเกง tabs still lives. Forms 1 and 4 carry a spec under each table
+ * instead, with both garments on screen at once and no tab to switch. What is
+ * under test here — that every catalog field is a combobox the shop can add
+ * to, and that the two garments share their colour lists — holds wherever the
+ * spec is drawn, so the tabbed card is the simpler place to check it.
  */
-/**
- * Opens one bill-wide spec and folds the other, so only one garment's boxes
- * are on the page — which is also what unmounts and remounts their dropdowns,
- * the thing these checks are about.
- */
-const showSpec = (garment: 'เสื้อ' | 'กางเกง') => {
-    const toggle = (name: 'เสื้อ' | 'กางเกง') =>
-        screen.getByRole('button', { name: new RegExp(`^สเปก${name}`) });
-    const other = garment === 'เสื้อ' ? 'กางเกง' : 'เสื้อ';
-
-    if (toggle(other).getAttribute('aria-expanded') === 'true') {
-        fireEvent.click(toggle(other));
-    }
-
-    if (toggle(garment).getAttribute('aria-expanded') !== 'true') {
-        fireEvent.click(toggle(garment));
-    }
-};
-
-/**
- * Form 2 carries a spec per sheet its people are cut on. One person in short
- * sleeves and short trousers gives the bill one shirt sheet and one trousers
- * sheet, each with its spec folded under its own heading.
- */
-const giveFormTwoAShirtAndATrousersSheet = () => {
-    fireEvent.change(screen.getByLabelText('สกรีนชื่อคนที่ 1'), {
-        target: { value: 'สมชาย' },
-    });
-    fireEvent.click(screen.getByLabelText('สั่งกางเกงด้วย'));
-    fireEvent.change(screen.getByLabelText('จำนวนกางเกงคนที่ 1'), {
-        target: { value: '1' },
-    });
-};
-
 const renderForm = (order?: Record<string, unknown>) => {
     const view = render(
         <OrderCreatePage
@@ -157,8 +125,6 @@ const renderForm = (order?: Record<string, unknown>) => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /รายตัว \(Form 2\)/ }));
-    giveFormTwoAShirtAndATrousersSheet();
-    showSpec('เสื้อ');
 
     return view;
 };
@@ -176,7 +142,8 @@ const asCounter = () => {
     };
 };
 
-const showPantsTab = () => showSpec('กางเกง');
+const showPantsTab = () =>
+    fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
 
 const savedOrder = (shirtSpecs: Record<string, string>) => ({
     id: 7,
@@ -331,7 +298,7 @@ describe('spec master data is managed from the form', () => {
         );
 
         // Back on the shirt tab the same catalog now offers it.
-        showSpec('เสื้อ');
+        fireEvent.click(screen.getByRole('button', { name: /^แบบเสื้อ/ }));
         const shirtColour = screen.getByLabelText('สีผ้า');
         fireEvent.change(shirtColour, { target: { value: '' } });
         fireEvent.focus(shirtColour);
@@ -357,7 +324,7 @@ describe('spec master data is managed from the form', () => {
         fireEvent.change(screen.getByLabelText('สีผ้า'), {
             target: { value: '3' },
         });
-        showSpec('เสื้อ');
+        fireEvent.click(screen.getByRole('button', { name: /^แบบเสื้อ/ }));
 
         expect(screen.getByLabelText<HTMLInputElement>('สีผ้า').value).toBe(
             'ขาว',

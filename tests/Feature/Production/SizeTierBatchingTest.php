@@ -250,15 +250,6 @@ class SizeTierBatchingTest extends TestCase
         $this->assertNull(Order::normalizeArtworkBatch('pants_junior_sleeveless', 'pants_artwork'));
     }
 
-    public function test_a_colour_house_has_a_junior_sheet_artwork_can_be_pinned_to(): void
-    {
-        $this->assertSame(
-            'sports_day_1_shirt_junior',
-            Order::normalizeArtworkBatch('sports_day_1_shirt_junior', 'shirt_artwork'),
-        );
-        $this->assertNull(Order::normalizeArtworkBatch('sports_day_1_shirt_teen', 'shirt_artwork'));
-    }
-
     public function test_a_bill_may_not_invent_a_tier(): void
     {
         $customer = Customer::firstOrCreate(['customer_code' => 'CUS-TIER'], ['customer_name' => 'Tier']);

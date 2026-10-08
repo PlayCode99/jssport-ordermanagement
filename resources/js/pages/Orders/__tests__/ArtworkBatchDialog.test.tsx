@@ -497,60 +497,23 @@ describe('the Art Work dialog', () => {
  * which pins them without anyone having to choose a batch.
  */
 describe('every form takes its artwork pinned to a sheet', () => {
-    it('gives each รายตัว (Form 2) sheet a gallery of its own, as Form 1 does a table', () => {
-        renderForm();
-        fireEvent.click(screen.getByRole('button', { name: /^รายตัว/ }));
-        fireEvent.change(screen.getByLabelText('สกรีนชื่อคนที่ 1'), {
-            target: { value: 'สมชาย' },
-        });
-
-        expect(
-            screen.getByText('Art Work · เสื้อผู้ใหญ่ · แขนสั้น'),
-        ).toBeInTheDocument();
-        // Nothing pinned to no sheet, so no bill-level dialog either.
-        expect(
-            screen.queryByRole('button', { name: /จัดการรูป Art Work/ }),
-        ).not.toBeInTheDocument();
-    });
-
-    it('keeps the dialog on รายตัว (Form 2) for a picture pinned to no sheet', () => {
+    it.each([
+        ['รายตัว (Form 2)', /^รายตัว/],
+        ['กีฬาสี (Form 3)', /^กีฬาสี/],
+    ])('offers %s the dialog and no gallery of its own', (_name, tab) => {
         renderFormWithDialog();
-        fireEvent.click(screen.getByRole('button', { name: /^รายตัว/ }));
+        fireEvent.click(screen.getByRole('button', { name: tab }));
 
         expect(
             screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
         ).toBeInTheDocument();
+        expect(screen.queryByText('Art Work เสื้อ')).not.toBeInTheDocument();
+
+        // The trousers tab does not ask for artwork a second time either.
+        fireEvent.click(screen.getByRole('button', { name: /^แบบกางเกง/ }));
+
+        expect(screen.queryByText('Art Work กางเกง')).not.toBeInTheDocument();
     });
-
-    it.each([['กีฬาสี (Form 3)', /^กีฬาสี/]])(
-        'offers %s the dialog and no gallery of its own',
-        (_name, tab) => {
-            renderFormWithDialog();
-            fireEvent.click(screen.getByRole('button', { name: tab }));
-
-            expect(
-                screen.getByRole('button', { name: /จัดการรูป Art Work/ }),
-            ).toBeInTheDocument();
-
-            // No spec, opened, asks for artwork a second time. Form 3 sells
-            // shirts only, so it has no trousers spec to open.
-            fireEvent.click(screen.getByRole('button', { name: /^สเปกเสื้อ/ }));
-            const pantsSpec = screen.queryByRole('button', {
-                name: /^สเปกกางเกง/,
-            });
-
-            if (pantsSpec) {
-                fireEvent.click(pantsSpec);
-            }
-
-            expect(
-                screen.queryByText('Art Work เสื้อ'),
-            ).not.toBeInTheDocument();
-            expect(
-                screen.queryByText('Art Work กางเกง'),
-            ).not.toBeInTheDocument();
-        },
-    );
 
     it.each([
         ['แพทเทรินเสื้อเหมือนกัน (Form 1)', /^แพทเทรินเสื้อเหมือนกัน/],
