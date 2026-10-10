@@ -363,6 +363,40 @@ describe('counter work-sheet PDF', () => {
         expect(html).not.toContain('spec-card');
     });
 
+    /**
+     * A short bill left the signatures and the red warning riding up under its
+     * last table, with the rest of the paper blank below them. They close the
+     * document, so they belong at the foot of the sheet where someone signing
+     * looks for them — the sheet is as tall as the page and pushes them down to
+     * it, and a bill long enough to fill the page has no spare room to push
+     * them into and simply closes under its last table.
+     */
+    it('holds the signatures and the warning at the foot of the sheet', () => {
+        const html = printedHtml();
+
+        expect(html).toContain('class="sheet-foot"');
+        expect(html).toContain('.sheet-foot { margin-top: auto; }');
+        expect(html).toMatch(
+            /\.page \{[^}]*display: flex[^}]*flex-direction: column/,
+        );
+    });
+
+    /**
+     * Sized to exactly the 283mm a 7mm margin leaves, the sheet spilled and
+     * printed its signatures alone on a second, otherwise empty page. The
+     * height has to sit under the mark, not level with it.
+     */
+    it('leaves the page a little slack rather than asking for all of it', () => {
+        const html = printedHtml();
+        const printable = 297 - 7 * 2;
+        const minHeight = Number(
+            /\.page \{[^}]*min-height: (\d+)mm/.exec(html)?.[1],
+        );
+
+        expect(minHeight).toBeLessThan(printable);
+        expect(minHeight).toBeGreaterThanOrEqual(printable - 6);
+    });
+
     it('still prints everything the customer signs for', () => {
         const html = printedHtml();
 

@@ -640,6 +640,13 @@ const PRINT_PAGE_HEIGHT_MM = 297;
  */
 const PRINT_PAGE_MARGIN_MM = 7;
 /**
+ * Taken off the sheet's own height so it never asks for the whole printable
+ * area. Sized to exactly the 283mm a 7mm margin leaves, the sheet spilled and
+ * printed its signatures alone on a second page: the browser needs the figure
+ * to be under the mark, not level with it.
+ */
+const PRINT_PAGE_SLACK_MM = 3;
+/**
  * The artwork block is the same height on every sheet, so two bills printed one
  * after the other look alike instead of one carrying a poster and the next a
  * stamp. 58mm is what the first artwork on ORD-2026-00010 fills at four images
@@ -781,6 +788,15 @@ export function buildPrintFitScript(): string {
                     // than a sheet — it runs on, numbered, rather than being
                     // squeezed until nobody can read it.
                 }
+
+                // The sheet's closing block is pushed to the foot of the page
+                // by the stylesheet, which states that height in millimetres —
+                // the same unit @page is written in. Restating it here in the
+                // pixels this script measures in was enough to put the sheet
+                // over the mark and the signatures onto a second, otherwise
+                // empty page, so the height is left exactly as the stylesheet
+                // set it. A bill long enough to need another page has no spare
+                // room to push anything into, and closes under its last table.
 
                 // One runner per page, each at the foot of its own page, so a
                 // receipt that runs to three sheets says so on every one of
@@ -4200,7 +4216,14 @@ export default function Counter({
                         * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                         html, body { margin: 0; padding: 0; background: #ffffff; color: #111827; }
                         body { font-family: 'TH Sarabun New', 'Prompt', 'Noto Sans Thai', Arial, sans-serif; font-size: 11px; line-height: 1.2; }
-                        .page { width: 100%; max-width: ${PRINT_PAGE_WIDTH_MM - PRINT_PAGE_MARGIN_MM * 2}mm; margin: 0 auto; padding: 0; }
+                        /* As tall as the printable page, and laid out so the
+                           closing block can be pushed to the foot of it. On a
+                           short bill the signatures and the warning used to ride
+                           up under the last table with the rest of the paper
+                           blank below them; they belong at the bottom of the
+                           sheet, where someone signing looks for them. */
+                        .page { width: 100%; max-width: ${PRINT_PAGE_WIDTH_MM - PRINT_PAGE_MARGIN_MM * 2}mm; margin: 0 auto; padding: 0; min-height: ${PRINT_PAGE_HEIGHT_MM - PRINT_PAGE_MARGIN_MM * 2 - PRINT_PAGE_SLACK_MM}mm; display: flex; flex-direction: column; }
+                        .sheet-foot { margin-top: auto; }
                         /* One masthead instead of three stacked blocks: a slim
                            title bar, the company row, then the job line. Roughly a
                            third shorter, which goes straight to the artwork. */
@@ -4418,7 +4441,7 @@ export default function Counter({
                         .section-title, .table-title { break-after: avoid; page-break-after: avoid; }
                         /* The signatures and the warning close the document;
                            they belong together wherever they land. */
-                        .footer-table, .warning-banner { break-inside: avoid; page-break-inside: avoid; }
+                        .footer-table, .warning-banner, .sheet-foot { break-inside: avoid; page-break-inside: avoid; }
                         /* Every page says which bill it belongs to, so a sheet
                            that gets separated from the rest can be put back. */
                         .page { position: relative; }
@@ -4519,6 +4542,7 @@ export default function Counter({
                         </table>`
                         }
 
+                        <div class="sheet-foot">
                         <table class="footer-table">
                             <tr>
                                 <td style="width:50%;">
@@ -4535,6 +4559,7 @@ export default function Counter({
                         </table>
 
                         <div class="warning-banner">*** หมายเหตุ งานเพิ่มจำนวนไม่ถึง 20 ตัว ไม่ลด % และต้องชำระค่าชุด ที่เพิ่มเติมทั้งหมดก่อนเปิดออเดอร์ ***</div>
+                        </div>
                         <div class="print-runner">
                             <span>ใบรับงาน <strong>${escapeHtml(order.order_code)}</strong></span>
                             <span>${escapeHtml(order.job_name || '-')}</span>
