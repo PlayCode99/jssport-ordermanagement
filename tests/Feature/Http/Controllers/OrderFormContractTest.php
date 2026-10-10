@@ -400,6 +400,46 @@ class OrderFormContractTest extends TestCase
     }
 
     /**
+     * Artwork is not required to open a bill. Plenty are taken over the counter
+     * from a sample the customer brought in or from a description, and the
+     * picture follows later — so a bill with nothing attached must save, and
+     * its receipt says in the gallery that none was attached.
+     */
+    public function test_a_bill_with_no_artwork_at_all_is_accepted(): void
+    {
+        $payload = $this->formPayload();
+
+        $this->assertArrayNotHasKey('shirt_artwork', $payload);
+        $this->assertArrayNotHasKey('design_artwork', $payload);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $order = Order::query()->firstOrFail();
+
+        $this->assertSame(1, Order::query()->count());
+        $this->assertCount(0, $order->getMedia('shirt_artwork'));
+        $this->assertCount(0, $order->getMedia('pants_artwork'));
+    }
+
+    /**
+     * And saying none was attached is not the same as saying none arrived: a
+     * bill that claims pictures it did not bring is still refused.
+     */
+    public function test_claiming_no_artwork_is_not_how_a_dropped_upload_slips_through(): void
+    {
+        $payload = $this->formPayload();
+        $payload['artwork_file_count'] = 0;
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    /**
      * The failure the counter actually saw: a bill whose spec is on the tables
      * but whose flat columns were left empty.
      */

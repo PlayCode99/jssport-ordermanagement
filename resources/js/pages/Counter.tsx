@@ -4287,6 +4287,14 @@ export default function Counter({
                         /* The cap stops a lone artwork from stretching into a banner
                            the width of the sheet with a small picture adrift in it. */
                         .image-card { border: 1px solid #d1d5db; background: #f9fafb; padding: 4px; min-height: var(--artwork-h); max-height: var(--artwork-h); max-width: calc(var(--artwork-col) * 1.6); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+                        /* A bill with nothing attached still says so in the
+                           gallery, drawn as the picture that is missing rather
+                           than written as a line of text — so a sheet handed
+                           over the counter reads at a glance as one with no
+                           artwork, not one whose artwork failed to print. */
+                        .image-card.is-empty { grid-column: 1 / -1; flex-direction: column; gap: 5px; border-style: dashed; border-color: #9ca3af; background: #ffffff; color: #6b7280; }
+                        .image-card.is-empty svg { width: 34px; height: 29px; fill: none; stroke: #9ca3af; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+                        .image-card.is-empty span { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
                         /* Every picture fills the same box, whatever its proportions:
                            height comes from the card rather than from the file, and
                            object-fit keeps the whole artwork visible without
@@ -4516,7 +4524,15 @@ export default function Counter({
                                 `,
                                           )
                                           .join('')
-                                    : '<div class="image-card" style="grid-column: 1 / -1; color: #6b7280;">[ ไม่มีรูปภาพแนบ ]</div>'
+                                    : `<div class="image-card is-empty">
+                                        <svg viewBox="0 0 48 40" role="img" aria-label="ไม่ได้แนบรูปภาพ">
+                                            <rect x="1.5" y="1.5" width="45" height="37" rx="3" />
+                                            <circle cx="14" cy="13" r="4" />
+                                            <path d="M4 32l11-12 8 8 6-5 15 13z" />
+                                            <line x1="6" y1="35" x2="42" y2="5" />
+                                        </svg>
+                                        <span>ไม่ได้แนบรูปภาพ</span>
+                                    </div>`
                             }
                         </div>
 

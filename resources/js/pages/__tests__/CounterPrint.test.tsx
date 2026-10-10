@@ -397,6 +397,36 @@ describe('counter work-sheet PDF', () => {
         expect(minHeight).toBeGreaterThanOrEqual(printable - 6);
     });
 
+    /**
+     * Artwork is not required to open a bill — plenty are taken from a sample
+     * or a description — so the receipt has to say so rather than print a row
+     * of empty grey boxes that read as artwork that failed to come out.
+     */
+    it('draws a placeholder on a bill that carries no artwork', () => {
+        const html = printedHtml();
+
+        expect(html).toContain('class="image-card is-empty"');
+        expect(html).toContain('ไม่ได้แนบรูปภาพ');
+        // Drawn, not written: a line of text alone reads like a fault.
+        expect(html).toMatch(/is-empty[\s\S]{0,400}<svg/);
+        expect(html).toContain('.image-card.is-empty');
+    });
+
+    it('draws no placeholder once the bill has a picture', () => {
+        const html = printedHtml(
+            makeRow({
+                details: {
+                    ...makeRow().details,
+                    shirt_artwork_urls: ['/a.webp'],
+                },
+            }),
+        );
+
+        expect(html).toContain('/a.webp');
+        expect(html).not.toContain('class="image-card is-empty"');
+        expect(html).not.toContain('ไม่ได้แนบรูปภาพ');
+    });
+
     it('still prints everything the customer signs for', () => {
         const html = printedHtml();
 

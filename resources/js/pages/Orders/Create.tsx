@@ -3759,6 +3759,24 @@ export default function OrderCreatePage({
         artworkSavedImages.pants.length;
 
     /**
+     * Whether the bill carries a picture at all, counting every place one can
+     * sit: loose, pinned to a sheet, under a colour house, and the ones
+     * already saved on a bill being edited or copied.
+     *
+     * Artwork is not required to open a bill — plenty are taken over the
+     * counter from a sample or a description, and refusing to save one until a
+     * picture exists would only teach people to attach any file at all. It is
+     * worth asking about once, though, because a bill that reaches the floor
+     * without one is the usual reason work comes back.
+     */
+    const billHasArtwork =
+        artworkAttachedCount > 0 ||
+        Object.values(data.sports_day_artwork_files).some(
+            (files) => files.length > 0,
+        ) ||
+        data.sports_day_groups.some((group) => group.saved_artwork.length > 0);
+
+    /**
      * Artwork the bill carries that is not pinned to any sheet — it prints on
      * every sheet of its garment. Forms 1 and 4 no longer take artwork that
      * way: each table takes its own, pinned by where it sits. A bill written
@@ -7265,13 +7283,30 @@ export default function OrderCreatePage({
                             </DialogDescription>
                         </DialogHeader>
 
+                        {billHasArtwork ? null : (
+                            <div
+                                className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+                                data-testid="no-artwork-notice"
+                            >
+                                <p className="font-semibold">
+                                    บิลนี้ยังไม่ได้แนบรูปงาน
+                                </p>
+                                <p className="mt-1 text-amber-800">
+                                    บันทึกต่อได้ตามปกติ
+                                    ใบงานจะพิมพ์ออกมาพร้อมข้อความว่าไม่ได้แนบรูปภาพ
+                                    หากมีรูปอยู่แล้ว
+                                    แนบตอนนี้จะสะดวกกว่าแก้ทีหลัง
+                                </p>
+                            </div>
+                        )}
+
                         <DialogFooter className="gap-2">
                             <Button
                                 type="button"
                                 variant="outline"
                                 onClick={() => setShowConfirmModal(false)}
                             >
-                                ยกเลิก
+                                {billHasArtwork ? 'ยกเลิก' : 'กลับไปแนบรูป'}
                             </Button>
                             <Button
                                 type="button"
@@ -7280,7 +7315,9 @@ export default function OrderCreatePage({
                             >
                                 {isEditing
                                     ? 'ยืนยันและบันทึกการแก้ไข'
-                                    : 'ยืนยันและบันทึก'}
+                                    : billHasArtwork
+                                      ? 'ยืนยันและบันทึก'
+                                      : 'บันทึกโดยไม่มีรูป'}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
