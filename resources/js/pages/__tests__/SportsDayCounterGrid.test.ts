@@ -76,6 +76,48 @@ describe('the colour house grid on the counter sheet', () => {
         expect(matrix.rows[0].price).toBe('250.00-270.00');
     });
 
+    it('gives ประถม - มัธยมต้น a grid of its own, between kids and adults', () => {
+        const matrices = buildSportsDayMatrices([
+            {
+                team_name: 'คณะสีเขียว',
+                color_name: 'เขียว',
+                rows: [
+                    {
+                        size_group: 'adults',
+                        size_label: 'L',
+                        shirt_qty: 6,
+                        shirt_price: 250,
+                        pants_qty: 0,
+                        pants_price: 0,
+                    },
+                    {
+                        size_group: 'junior',
+                        size_label: 'JL',
+                        shirt_qty: 8,
+                        shirt_price: 200,
+                        pants_qty: 0,
+                        pants_price: 0,
+                    },
+                    {
+                        size_group: 'kids',
+                        size_label: 'JM',
+                        shirt_qty: 4,
+                        shirt_price: 150,
+                        pants_qty: 0,
+                        pants_price: 0,
+                    },
+                ],
+            },
+        ]);
+
+        expect(matrices.map((matrix) => matrix.title)).toEqual([
+            'ขนาดเด็ก · เสื้อ',
+            'ขนาดประถม - มัธยมต้น · เสื้อ',
+            'ขนาดผู้ใหญ่ · เสื้อ',
+        ]);
+        expect(matrices[1].grandTotal).toBe(8);
+    });
+
     it('splits kids from adults and shirts from pants', () => {
         const matrices = buildSportsDayMatrices([
             {

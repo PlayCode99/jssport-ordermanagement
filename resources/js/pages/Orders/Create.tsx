@@ -13,8 +13,14 @@ import {
     Upload,
     X,
 } from 'lucide-react';
-import type { ChangeEvent, FormEvent, ReactNode } from 'react';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import type {
+    ChangeEvent,
+    FormEvent,
+    KeyboardEvent,
+    ReactNode,
+    WheelEvent,
+} from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ArtworkBatchDialog,
     ARTWORK_SCOPE_ALL,
@@ -52,6 +58,8 @@ import {
     SHIRT_STYLES,
     SIZE_TIER_LABELS,
     SIZE_TIERS,
+    pricingGroupForTier,
+    readSizeTier,
     stylesFor,
     styleLabel,
     buildGarmentSpecsPayload,
@@ -69,6 +77,7 @@ import {
     hydrateGarmentTables,
     representativeSpecs,
     resolveGarmentTableBatches,
+    specsForKey,
 } from './garmentTables';
 import type {
     GarmentKind,
@@ -318,7 +327,11 @@ type PersonalizationRowForm = {
  */
 type SportsDayRowForm = {
     id: string;
-    size_group: 'kids' | 'adults';
+    /**
+     * The size range the row is cut in. ประถม - มัธยมต้น is its own sheet on
+     * the floor and is charged at the child's rate, as on Forms 1 and 4.
+     */
+    size_group: SizeTier;
     size_label: string;
     shirt_qty: number;
     shirt_price: number;
@@ -369,6 +382,13 @@ type OrderCreateFormData = {
      */
     shirt_artwork_scoped: Record<string, File[]>;
     pants_artwork_scoped: Record<string, File[]>;
+    /**
+     * Form 3: pictures newly attached to a colour house, keyed by the house's
+     * id so they stay with it when houses are added or removed. They are sent
+     * by the house's position, which is what the server and the production
+     * sheet key a house by.
+     */
+    sports_day_artwork_files: Record<string, File[]>;
     /** Batch each saved image is pinned to, keyed by media id. '' = every sheet. */
     artwork_scopes: Record<string, string>;
     pants_artwork_files: File[];
@@ -402,6 +422,14 @@ type OrderCreateFormData = {
     individual_keeper_color: string;
     /** Form 2 only: the customer also wants pants for each person. */
     individual_include_pants: boolean;
+    /**
+     * Form 2's spec per production sheet, keyed `{garment}_{tier}_{length}`
+     * exactly as Form 1's tables are — a long-sleeved shirt is sewn from
+     * different instructions than a short one, so each sheet the list of
+     * people produces carries its own. A sheet nobody has filled in yet is
+     * absent and is read from its seed (see sheetSpecFor in the page).
+     */
+    individual_sheet_specs: Record<string, ShirtSpecsForm | PantsSpecsForm>;
     sports_day_groups: SportsDayGroupForm[];
     line_items: OrderLineItemPayload[];
 };
@@ -747,8 +775,10 @@ type ProductionGarment = 'shirt' | 'pants';
 
 const BATCH_BASE_LABELS: Record<string, string> = {
     shirt_kids: 'เสื้อไซต์เด็ก',
+    shirt_junior: 'เสื้อไซต์ประถม - มัธยมต้น',
     shirt_adults: 'เสื้อไซต์ผู้ใหญ่',
     pants_kids: 'กางเกงเด็ก',
+    pants_junior: 'กางเกงประถม - มัธยมต้น',
     pants_adults: 'กางเกงผู้ใหญ่',
 };
 
@@ -854,6 +884,149 @@ export function resolveIndividualArtworkBatches(
 }
 
 /**
+ * One production sheet of a Form 2 bill: the people on it share a garment, a
+ * size range and a length, and so a pattern, a spec and a page on the floor.
+ * Keyed exactly as Form 1 keys a table, so the counter, the production board
+ * and the costing all read the same name.
+ */
+export type IndividualSheet = {
+    key: string;
+    garment: GarmentKind;
+    tier: SizeTableType;
+    style: GarmentStyle;
+    /** How many people on the list are on this sheet. */
+    people: number;
+    /** e.g. "เสื้อผู้ใหญ่ · แขนยาว". */
+    title: string;
+};
+
+/**
+ * The sheets a list of people is cut on. Everyone typed in is billed a shirt,
+ * so every person is on a shirt sheet; trousers only when the bill orders
+ * them and that person has some. Shirts first, kids before adults, short
+ * before long — the order the sheets come off the printer in.
+ */
+export function individualSheets(
+    rows: PersonalizationRowForm[],
+    includePants: boolean,
+): IndividualSheet[] {
+    const sheets = new Map<string, IndividualSheet>();
+
+    const add = (
+        garment: GarmentKind,
+        tier: SizeTableType,
+        style: GarmentStyle,
+    ) => {
+        const key = `${garment}_${tier}_${style}`;
+        const found = sheets.get(key);
+
+        if (found) {
+            found.people += 1;
+
+            return;
+        }
+
+        sheets.set(key, {
+            key,
+            garment,
+            tier,
+            style,
+            people: 1,
+            title: `${garment === 'pants' ? 'กางเกง' : 'เสื้อ'}${SIZE_TIER_LABELS[tier]} · ${styleLabel(garment, style)}`,
+        });
+    };
+
+    rows.filter((row) => !isBlankPersonalizationRow(row)).forEach((row) => {
+        const tier: SizeTableType =
+            row.size_group === 'kids' ? 'kids' : 'adults';
+
+        add('shirt', tier, readShirtStyle(row.shirt_style));
+
+        if (includePants && row.pants_quantity > 0) {
+            add('pants', tier, readPantsStyle(row.pants_style));
+        }
+    });
+
+    const rank = (sheet: IndividualSheet): number[] => [
+        sheet.garment === 'pants' ? 1 : 0,
+        sheet.tier === 'kids' ? 0 : 1,
+        (sheet.garment === 'pants' ? PANTS_STYLES : SHIRT_STYLES).indexOf(
+            sheet.style as PantsStyle,
+        ),
+    ];
+
+    return [...sheets.values()].sort((left, right) => {
+        const a = rank(left);
+        const b = rank(right);
+
+        return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+    });
+}
+
+/**
+ * The sheets Form 2 asks a spec for. Those the list produces, and — so the
+ * spec can be filled in before anyone is typed — a shirt sheet in the first
+ * row's size range and sleeve while the list has none, and a trousers sheet
+ * the same way once the bill sells trousers. Such a sheet has nobody on it
+ * yet; it becomes a real one, spec and all, as soon as someone is.
+ */
+export function individualSpecSheets(
+    rows: PersonalizationRowForm[],
+    includePants: boolean,
+): IndividualSheet[] {
+    const sheets = individualSheets(rows, includePants);
+    const first = rows[0];
+    const tier: SizeTableType =
+        first?.size_group === 'kids' ? 'kids' : 'adults';
+    const empty = (
+        garment: GarmentKind,
+        style: GarmentStyle,
+    ): IndividualSheet => ({
+        key: `${garment}_${tier}_${style}`,
+        garment,
+        tier,
+        style,
+        people: 0,
+        title: `${garment === 'pants' ? 'กางเกง' : 'เสื้อ'}${SIZE_TIER_LABELS[tier]} · ${styleLabel(garment, style)}`,
+    });
+
+    if (!sheets.some((sheet) => sheet.garment === 'shirt')) {
+        sheets.unshift(empty('shirt', readShirtStyle(first?.shirt_style)));
+    }
+
+    if (includePants && !sheets.some((sheet) => sheet.garment === 'pants')) {
+        sheets.push(empty('pants', readPantsStyle(first?.pants_style)));
+    }
+
+    return sheets;
+}
+
+/**
+ * The spec each sheet of a reopened Form 2 bill was saved with. A bill written
+ * before sheets had specs of their own carries one shirt and one trousers
+ * spec, and that is what every sheet of it was sewn from, so each sheet is
+ * given that one — the same rule Form 1 reopens its tables by.
+ */
+export function savedIndividualSheetSpecs(
+    sheets: IndividualSheet[],
+    decoded: Record<string, unknown>,
+    saved: { shirt: ShirtSpecsForm; pants: PantsSpecsForm },
+): Record<string, ShirtSpecsForm | PantsSpecsForm> {
+    return Object.fromEntries(
+        sheets.map((sheet) => [
+            sheet.key,
+            specsForKey(decoded, sheet.key, sheet.garment, saved),
+        ]),
+    );
+}
+
+/**
+ * The trousers size choice that means "the same as this person's shirt" — the
+ * default. Radix Select cannot hold an empty value, so it stands for one.
+ */
+const PANTS_FOLLOWS_SHIRT = '__follows_shirt__';
+
+/**
  * Form 3 is cut per colour house, and a house's sheet carries no sleeve
  * length: the board prints one sheet per house, garment and size group. The
  * house is named by its position on the bill, which is what the production
@@ -871,7 +1044,7 @@ export function resolveSportsDayArtworkBatches(
                 : `คณะที่ ${index + 1}`;
 
         (['shirt', 'pants'] as const).forEach((garment) => {
-            (['kids', 'adults'] as const).forEach((sizeGroup) => {
+            SIZE_TIERS.forEach((sizeGroup) => {
                 const quantity = group.rows
                     .filter((row) => row.size_group === sizeGroup)
                     .reduce(
@@ -903,6 +1076,27 @@ export function resolveSportsDayArtworkBatches(
     });
 
     return batches;
+}
+
+/**
+ * The pictures newly attached to each colour house, as the server takes them:
+ * keyed by the house's position on the bill, which is what the media is stored
+ * against and what the production sheet reads a house's pictures back by. The
+ * form holds them by the house's id instead, so a house added or removed
+ * before saving takes its own pictures with it. A house with none is left out.
+ */
+export function sportsDayArtworkPayload(
+    groups: Array<{ id: string }>,
+    filesByGroupId: Record<string, File[]>,
+): Record<string, File[]> {
+    return Object.fromEntries(
+        groups
+            .map((group, index): [string, File[]] => [
+                String(index),
+                filesByGroupId[group.id] ?? [],
+            ])
+            .filter(([, files]) => files.length > 0),
+    );
 }
 
 export function resolveArtworkBatches(
@@ -1103,6 +1297,8 @@ function GarmentTable({
                                 <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
                                     <Input
                                         type="number"
+                                        inputMode="numeric"
+                                        onWheel={blurOnWheel}
                                         min={0}
                                         value={numberFieldValue(row.quantity)}
                                         placeholder="0"
@@ -1120,6 +1316,8 @@ function GarmentTable({
                                 <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
                                     <Input
                                         type="number"
+                                        inputMode="decimal"
+                                        onWheel={blurOnWheel}
                                         min={0}
                                         value={numberFieldValue(row.unit_price)}
                                         placeholder="0"
@@ -1235,6 +1433,64 @@ function SectionHeading({
 }
 
 /**
+ * A number box keeps its value while the page is scrolled over it. Browsers
+ * step a focused number input on the mouse wheel, so scrolling down a long
+ * bill with the cursor resting on a quantity could change what was ordered.
+ * Letting go of focus hands the wheel back to the page.
+ */
+function blurOnWheel(event: WheelEvent<HTMLInputElement>) {
+    event.currentTarget.blur();
+}
+
+/**
+ * Enter moves to the next box instead of submitting the bill. The counter types
+ * a table row by row and reaches for Enter out of habit; submitting there
+ * threw the "fill everything in" dialog over a half-typed table. Saving stays
+ * on the save buttons. A box that already uses Enter — a dropdown picking its
+ * highlighted option — has handled it before it reaches here, and a textarea
+ * keeps its new line.
+ */
+export function moveFocusOnEnter(event: KeyboardEvent<HTMLFormElement>) {
+    if (
+        event.key !== 'Enter' ||
+        event.defaultPrevented ||
+        event.nativeEvent.isComposing
+    ) {
+        return;
+    }
+
+    const target = event.target;
+    const form = event.currentTarget;
+
+    // Dialogs render in a portal and their key events still bubble here
+    // through React; they are not part of the bill's tab order.
+    if (!(target instanceof HTMLInputElement) || !form.contains(target)) {
+        return;
+    }
+
+    if (
+        ['button', 'submit', 'reset', 'checkbox', 'radio', 'file'].includes(
+            target.type,
+        )
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+
+    const focusable = [
+        ...form.querySelectorAll<HTMLElement>(
+            'input:not([type="hidden"]):not([type="file"]):not([disabled]):not([readonly]), textarea:not([disabled]), button[role="combobox"]:not([disabled])',
+        ),
+    ].filter((element) => element.checkVisibility?.() ?? true);
+    const index = focusable.indexOf(target);
+
+    if (index !== -1) {
+        focusable[index + 1]?.focus();
+    }
+}
+
+/**
  * One table of Form 1 / Form 4: a single garment, cut at one size tier in one
  * length, priced per piece. The length is not a column here because it is what
  * the table is — a different sleeve is a different table, a different spec and
@@ -1250,6 +1506,7 @@ function GarmentTierTable({
     onChange,
     onAdd,
     onRemove,
+    invalidClass = () => '',
 }: {
     title: string;
     garment: GarmentKind;
@@ -1264,6 +1521,8 @@ function GarmentTierTable({
     ) => void;
     onAdd: () => void;
     onRemove: (rowId: string) => void;
+    /** Red-box styling for a cell the last save attempt found short. */
+    invalidClass?: (key: string) => string;
 }) {
     const isShirt = garment === 'shirt';
     const sizeHeading = isShirt ? 'ไซซ์เสื้อ' : 'ไซซ์กางเกง';
@@ -1348,7 +1607,7 @@ function GarmentTierTable({
                                         }
                                     >
                                         <SelectTrigger
-                                            className="h-8 w-full bg-white text-xs"
+                                            className={`h-8 w-full bg-white text-xs${invalidClass(`garment_row.${row.id}.size_label`)}`}
                                             aria-label={`${sizeHeading} แถวที่ ${rowIndex + 1}`}
                                         >
                                             <SelectValue placeholder="ไม่ระบุ" />
@@ -1375,6 +1634,7 @@ function GarmentTierTable({
                                     <Input
                                         type="number"
                                         min={0}
+                                        inputMode="numeric"
                                         value={numberFieldValue(row.quantity)}
                                         placeholder="0"
                                         onChange={(event) =>
@@ -1384,7 +1644,8 @@ function GarmentTierTable({
                                                 toNumber(event.target.value),
                                             )
                                         }
-                                        className="h-8 w-full min-w-0 text-right text-xs md:text-xs"
+                                        onWheel={blurOnWheel}
+                                        className={`h-8 w-full min-w-0 text-right text-xs md:text-xs${invalidClass(`garment_row.${row.id}.quantity`)}`}
                                         aria-label={`จำนวน${piece} แถวที่ ${rowIndex + 1}`}
                                     />
                                 </td>
@@ -1392,6 +1653,7 @@ function GarmentTierTable({
                                     <Input
                                         type="number"
                                         min={0}
+                                        inputMode="decimal"
                                         value={numberFieldValue(row.unit_price)}
                                         placeholder="0"
                                         onChange={(event) =>
@@ -1401,7 +1663,8 @@ function GarmentTierTable({
                                                 toNumber(event.target.value),
                                             )
                                         }
-                                        className="h-8 w-full min-w-0 text-right text-xs md:text-xs"
+                                        onWheel={blurOnWheel}
+                                        className={`h-8 w-full min-w-0 text-right text-xs md:text-xs${invalidClass(`garment_row.${row.id}.unit_price`)}`}
                                         aria-label={`ราคาต่อตัว${piece} แถวที่ ${rowIndex + 1}`}
                                     />
                                 </td>
@@ -1532,7 +1795,7 @@ function createSizeTable(tableType: SizeTableType): SizeTableForm {
 }
 
 function createSportsDayRow(
-    sizeGroup: 'kids' | 'adults' = 'adults',
+    sizeGroup: SizeTier = 'adults',
     sizeLabel = '',
 ): SportsDayRowForm {
     return {
@@ -1591,7 +1854,8 @@ export function buildRequestItemsFromSportsDay(
             if (row.shirt_qty > 0 && row.shirt_price > 0) {
                 items.push({
                     item_type: 'shirt',
-                    size_group: row.size_group,
+                    size_group: pricingGroupForTier(row.size_group),
+                    size_tier: row.size_group,
                     size_label: sizeLabel,
                     quantity: row.shirt_qty,
                     unit_price: Math.max(row.shirt_price, 0),
@@ -1601,7 +1865,8 @@ export function buildRequestItemsFromSportsDay(
             if (row.pants_qty > 0 && row.pants_price > 0) {
                 items.push({
                     item_type: 'pants',
-                    size_group: row.size_group,
+                    size_group: pricingGroupForTier(row.size_group),
+                    size_tier: row.size_group,
                     size_label: sizeLabel,
                     quantity: row.pants_qty,
                     unit_price: Math.max(row.pants_price, 0),
@@ -2029,6 +2294,7 @@ export function buildEditInitialFormData(
             shirt_artwork_files: [],
             shirt_artwork_scoped: {},
             pants_artwork_scoped: {},
+            sports_day_artwork_files: {},
             artwork_scopes: {},
             pants_artwork_files: [],
             removed_media_ids: [],
@@ -2081,6 +2347,7 @@ export function buildEditInitialFormData(
             size_tables: [defaultSizeTable],
             personalization_rows: [],
             individual_include_pants: false,
+            individual_sheet_specs: {},
             individual_keeper_color: '',
             sports_day_groups: [createSportsDayGroup()],
             line_items: [],
@@ -2132,10 +2399,10 @@ export function buildEditInitialFormData(
 
                 return {
                     id: uid(`sd-row-${groupIndex}-${rowIndex}`),
-                    size_group:
-                        toStringValueFromUnknown(row.size_group) === 'kids'
-                            ? 'kids'
-                            : 'adults',
+                    size_group: readSizeTier(
+                        toStringValueFromUnknown(row.size_group),
+                        toStringValueFromUnknown(row.size_group),
+                    ),
                     size_label: toStringValueFromUnknown(row.size_label),
                     shirt_qty: toNumberValueFromUnknown(row.shirt_qty),
                     shirt_price: toNumberValueFromUnknown(row.shirt_price),
@@ -2348,9 +2615,19 @@ export function buildEditInitialFormData(
             number: toStringValue(row.number),
             quantity: Math.max(1, toNumberValue(row.quantity)),
             unit_price: toNumberValue(row.unit_price),
-            pants_size: toStringValueFromUnknown(row.pants_size),
+            // Saved equal to the shirt's, the trousers were following it, and
+            // reopen still following it.
+            pants_size:
+                toStringValueFromUnknown(row.pants_size) ===
+                toStringValueFromUnknown(row.size)
+                    ? ''
+                    : toStringValueFromUnknown(row.pants_size),
             pants_style: readPantsStyle(row.pants_style),
-            pants_number: toStringValueFromUnknown(row.pants_number),
+            pants_number:
+                toStringValueFromUnknown(row.pants_number) ===
+                toStringValueFromUnknown(row.number)
+                    ? ''
+                    : toStringValueFromUnknown(row.pants_number),
             pants_quantity: toNumberValueFromUnknown(row.pants_quantity),
             pants_unit_price: toNumberValueFromUnknown(row.pants_unit_price),
         }));
@@ -2387,6 +2664,7 @@ export function buildEditInitialFormData(
         shirt_artwork_files: [],
         shirt_artwork_scoped: {},
         pants_artwork_scoped: {},
+        sports_day_artwork_files: {},
         artwork_scopes: {},
         pants_artwork_files: [],
         removed_media_ids: [],
@@ -2529,6 +2807,8 @@ export function buildEditInitialFormData(
             : [defaultSizeTable],
         personalization_rows: mappedPersonalizationRows,
         individual_include_pants: specPayload.individual_include_pants === true,
+        // Filled in by the return below, from the people this bill reopens with.
+        individual_sheet_specs: {},
         individual_keeper_color: toStringValueFromUnknown(
             specPayload.individual_keeper_color,
         ),
@@ -2549,6 +2829,14 @@ export function buildEditInitialFormData(
             shirt: editing.shirt_specs,
             pants: editing.pants_specs,
         }),
+        individual_sheet_specs: savedIndividualSheetSpecs(
+            individualSheets(
+                editing.personalization_rows,
+                editing.individual_include_pants,
+            ),
+            specPayload,
+            { shirt: editing.shirt_specs, pants: editing.pants_specs },
+        ),
     };
 }
 
@@ -2598,10 +2886,13 @@ function SavedArtworkCard({
     media,
     onRemoveSaved,
     compact = false,
+    name,
 }: {
     media: SavedArtwork;
     onRemoveSaved: (id: number) => void;
     compact?: boolean;
+    /** Whose picture this is, when a page shows several galleries. */
+    name?: string;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -2610,7 +2901,7 @@ function SavedArtworkCard({
             >
                 <img
                     src={media.url}
-                    alt="รูปที่บันทึกไว้"
+                    alt={name ? `Art Work ${name}` : 'รูปที่บันทึกไว้'}
                     className="h-full w-full object-contain"
                 />
             </div>
@@ -2622,7 +2913,11 @@ function SavedArtworkCard({
                     type="button"
                     size="icon"
                     variant="ghost"
-                    aria-label="ลบรูปที่บันทึกไว้"
+                    aria-label={
+                        name
+                            ? `ลบรูปที่บันทึกไว้ของ ${name}`
+                            : 'ลบรูปที่บันทึกไว้'
+                    }
                     className={`${compact ? 'size-6' : 'size-8'} shrink-0 text-slate-500 hover:text-rose-600`}
                     onClick={() => onRemoveSaved(media.id)}
                 >
@@ -2693,6 +2988,7 @@ function MultiArtworkUpload({
     onSelect,
     onRemove,
     onRemoveSaved,
+    name,
 }: {
     title: string;
     inputId: string;
@@ -2703,6 +2999,12 @@ function MultiArtworkUpload({
     onSelect: (event: ChangeEvent<HTMLInputElement>) => void;
     onRemove: (index: number) => void;
     onRemoveSaved: (id: number) => void;
+    /**
+     * Whose gallery this is, when a page carries several of one kind — each
+     * colour house of Form 3 — so every picture and its remove button can be
+     * told apart.
+     */
+    name?: string;
 }) {
     const hasAnything = files.length > 0 || savedMedia.length > 0;
 
@@ -2718,6 +3020,7 @@ function MultiArtworkUpload({
                             media={media}
                             onRemoveSaved={onRemoveSaved}
                             compact
+                            name={name}
                         />
                     ))}
 
@@ -2751,7 +3054,11 @@ function MultiArtworkUpload({
                                         type="button"
                                         size="icon"
                                         variant="ghost"
-                                        aria-label="ลบรูปที่เลือกไว้"
+                                        aria-label={
+                                            name
+                                                ? `ลบรูปที่เลือกไว้ของ ${name}`
+                                                : 'ลบรูปที่เลือกไว้'
+                                        }
                                         className="size-6 shrink-0 text-slate-500 hover:text-rose-600"
                                         onClick={() => onRemove(index)}
                                     >
@@ -2823,7 +3130,17 @@ export default function OrderCreatePage({
         auth?.user?.access_role === 'ADMIN_SYSTEM' ||
         (auth?.user?.access_role === undefined && auth?.user?.role === 'admin');
 
-    const [activeSpecTab, setActiveSpecTab] = useState<SpecTab>('shirt');
+    /**
+     * Forms 2 and 3 carry one shirt spec and one trousers spec for the whole
+     * bill. They are laid out the way Forms 1 and 4 lay out a table's spec —
+     * folded under a heading that says how much is still missing — so both
+     * read alike; the heading is what the counter checks, and a failed save
+     * unfolds whichever is short.
+     */
+    const [billSpecOpen, setBillSpecOpen] = useState<Record<SpecTab, boolean>>({
+        shirt: false,
+        pants: false,
+    });
     // Price columns start linked to the first row, which is how most bills are
     // priced. Keyed by table so the two size tables can be linked separately.
     const [unlinkedPriceColumns, setUnlinkedPriceColumns] = useState<
@@ -2939,6 +3256,15 @@ export default function OrderCreatePage({
     const [showValidationModal, setShowValidationModal] = useState(false);
     const [showCancelConfirmModal, setShowCancelConfirmModal] = useState(false);
     const [validationErrors, setValidationErrors] = useState<string[]>([]);
+    const [validationTargets, setValidationTargets] = useState<
+        Map<string, string>
+    >(() => new Map());
+    /**
+     * The box to land on once the missing-fields dialog has closed. Taken
+     * when the dialog hands focus back, so the dialog does not return it to
+     * the save button straight after.
+     */
+    const pendingJumpRef = useRef<string | null>(null);
     const [showFieldErrors, setShowFieldErrors] = useState(false);
 
     // What this form has done to each catalog since the page loaded, keyed by
@@ -2991,7 +3317,7 @@ export default function OrderCreatePage({
     };
 
     /**
-     * A hidden row leaves the choices at once. Any spec field on either tab
+     * A hidden row leaves the choices at once. Any spec field on the bill
      * still pointing at it is cleared, so the bill cannot be saved with a
      * value the counter can no longer see or pick.
      */
@@ -3024,10 +3350,39 @@ export default function OrderCreatePage({
             return next;
         };
 
+        // Every spec on the bill, wherever it lives: the bill's own, each
+        // Form 1 table's and each Form 2 sheet's.
         setData((previous) => ({
             ...previous,
             shirt_specs: clearMatching(previous.shirt_specs, shirtCatalogKeys),
             pants_specs: clearMatching(previous.pants_specs, pantsCatalogKeys),
+            garment_tables: previous.garment_tables.map((table) =>
+                table.garment === 'pants'
+                    ? {
+                          ...table,
+                          specs: clearMatching(table.specs, pantsCatalogKeys),
+                      }
+                    : {
+                          ...table,
+                          specs: clearMatching(table.specs, shirtCatalogKeys),
+                      },
+            ),
+            individual_sheet_specs: Object.fromEntries(
+                Object.entries(previous.individual_sheet_specs).map(
+                    ([key, specs]) => [
+                        key,
+                        key.startsWith('pants_')
+                            ? clearMatching(
+                                  specs as PantsSpecsForm,
+                                  pantsCatalogKeys,
+                              )
+                            : clearMatching(
+                                  specs as ShirtSpecsForm,
+                                  shirtCatalogKeys,
+                              ),
+                    ],
+                ),
+            ),
         }));
     };
 
@@ -3142,6 +3497,41 @@ export default function OrderCreatePage({
 
     const { data, setData, post, put, processing, errors, transform } =
         useForm<OrderCreateFormData>(initialFormData);
+
+    /** The sheets the list of people is cut on, as it stands now. */
+    const individualSheetList = useMemo(
+        () =>
+            individualSheets(
+                data.personalization_rows,
+                data.individual_include_pants,
+            ),
+        [data.personalization_rows, data.individual_include_pants],
+    );
+
+    /** The sheets a spec is asked for, including ones nobody is on yet. */
+    const individualSpecSheetList = useMemo(
+        () =>
+            individualSpecSheets(
+                data.personalization_rows,
+                data.individual_include_pants,
+            ),
+        [data.personalization_rows, data.individual_include_pants],
+    );
+
+    /**
+     * Form 3 sells shirts only: no trouser columns on a colour house and no
+     * trouser spec. A colour-house bill saved before that with trousers on it
+     * keeps both when reopened, so nothing it was sold with disappears on the
+     * next save. Decided from what the bill was opened with, so the columns
+     * cannot vanish under the counter while they are editing it.
+     */
+    const sportsDayKeepsPants = useMemo(
+        () =>
+            initialFormData.sports_day_groups.some((group) =>
+                group.rows.some((row) => row.pants_qty > 0),
+            ),
+        [initialFormData],
+    );
 
     // ---- Art Work by production batch (Forms 1 and 4) ----
 
@@ -3359,6 +3749,48 @@ export default function OrderCreatePage({
                 ).length,
             0,
         );
+
+    /**
+     * Form 2 pictures pinned to a sheet the list no longer produces — someone
+     * changed sleeve, or left — would otherwise sit on no gallery at all. The
+     * Art Work dialog stays offered while there are any, so they can be moved
+     * or removed.
+     */
+    const strayIndividualArtworkCount = (() => {
+        if (sizeFormMode !== 'individual') {
+            return 0;
+        }
+
+        const current = new Set(
+            individualSpecSheetList.map((sheet) => sheet.key),
+        );
+
+        return (
+            (['shirt', 'pants'] as const).reduce(
+                (total, garment) =>
+                    total +
+                    artworkSavedImages[garment].filter((image) => {
+                        const scope = savedImageScope(
+                            image,
+                            data.artwork_scopes,
+                        );
+
+                        return (
+                            scope !== ARTWORK_SCOPE_ALL && !current.has(scope)
+                        );
+                    }).length,
+                0,
+            ) +
+            [
+                ...Object.entries(data.shirt_artwork_scoped),
+                ...Object.entries(data.pants_artwork_scoped),
+            ].reduce(
+                (total, [key, files]) =>
+                    total + (current.has(key) ? 0 : files.length),
+                0,
+            )
+        );
+    })();
 
     const selectedBranch = useMemo(
         () =>
@@ -3724,6 +4156,15 @@ export default function OrderCreatePage({
         updateSportsDayGroups(
             data.sports_day_groups.filter((group) => group.id !== groupId),
         );
+        // Pictures picked for a house that is gone go with it, rather than
+        // land on whichever house takes its place.
+        setData((previous) => {
+            const remaining = { ...previous.sports_day_artwork_files };
+
+            delete remaining[groupId];
+
+            return { ...previous, sports_day_artwork_files: remaining };
+        });
     };
 
     const addSportsDayRow = (groupId: string) => {
@@ -4060,6 +4501,156 @@ export default function OrderCreatePage({
                 : table,
         );
 
+    // ---- Form 2: a spec per sheet, as Form 1 keeps one per table ----
+
+    /**
+     * The spec a sheet starts from, the way Form 1 starts a table added beside
+     * another: from a spec the bill already has for that garment, with the
+     * garment type left to pick — a long sleeve is a different type and a
+     * different rate from a short one, so it has to be chosen, and the
+     * heading says so. Another sheet on the list is preferred; failing that,
+     * one the list no longer produces, so switching everyone from short to
+     * long sleeves keeps what was typed rather than starting from nothing.
+     * The very first sheet of a garment starts from the bill's own spec.
+     */
+    const seedSheetSpec = (
+        sheet: IndividualSheet,
+    ): ShirtSpecsForm | PantsSpecsForm => {
+        const billSpec =
+            sheet.garment === 'pants' ? data.pants_specs : data.shirt_specs;
+        const onList = individualSpecSheetList.find(
+            (other) =>
+                other.garment === sheet.garment &&
+                other.key !== sheet.key &&
+                data.individual_sheet_specs[other.key] !== undefined,
+        );
+        const offList = Object.keys(data.individual_sheet_specs).filter(
+            (key) => key.startsWith(`${sheet.garment}_`) && key !== sheet.key,
+        );
+        const baseKey =
+            onList?.key ??
+            offList.find((key) =>
+                key.startsWith(`${sheet.garment}_${sheet.tier}_`),
+            ) ??
+            offList[0];
+
+        if (baseKey === undefined) {
+            return billSpec;
+        }
+
+        const base = data.individual_sheet_specs[baseKey];
+
+        return sheet.garment === 'pants'
+            ? { ...(base as PantsSpecsForm), pants_type_id: '' }
+            : { ...(base as ShirtSpecsForm), shirt_type_id: '' };
+    };
+
+    /** The spec a sheet is sewn from. */
+    const sheetSpecFor = (
+        sheet: IndividualSheet,
+    ): ShirtSpecsForm | PantsSpecsForm =>
+        data.individual_sheet_specs[sheet.key] ?? seedSheetSpec(sheet);
+
+    /**
+     * A sheet takes its own copy the moment it appears — someone is typed in
+     * on a new length or size range — so from then on it is its own spec, and
+     * nothing typed on one sheet ever shows on another.
+     */
+    useEffect(() => {
+        if (sizeFormMode !== 'individual') {
+            return;
+        }
+
+        const missing = individualSpecSheetList.filter(
+            (sheet) => data.individual_sheet_specs[sheet.key] === undefined,
+        );
+
+        if (missing.length === 0) {
+            return;
+        }
+
+        const seeds = Object.fromEntries(
+            missing.map((sheet) => [sheet.key, seedSheetSpec(sheet)]),
+        );
+
+        setData((previous) => ({
+            ...previous,
+            individual_sheet_specs: {
+                ...seeds,
+                ...previous.individual_sheet_specs,
+            },
+        }));
+        // seedSheetSpec reads the same data this effect is keyed on.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sizeFormMode, individualSpecSheetList, data.individual_sheet_specs]);
+
+    const updateSheetSpec = (
+        sheet: IndividualSheet,
+        key: string,
+        value: string,
+    ) =>
+        setData('individual_sheet_specs', {
+            ...data.individual_sheet_specs,
+            [sheet.key]: {
+                ...sheetSpecFor(sheet),
+                [key]: value,
+            } as ShirtSpecsForm | PantsSpecsForm,
+        });
+
+    /** As Form 1 copies one table's spec onto another of the same garment. */
+    const copySheetSpec = (target: IndividualSheet, sourceKey: string) => {
+        const source = individualSpecSheetList.find(
+            (sheet) => sheet.key === sourceKey,
+        );
+
+        if (!source || source.garment !== target.garment) {
+            return;
+        }
+
+        setData('individual_sheet_specs', {
+            ...data.individual_sheet_specs,
+            [target.key]: { ...sheetSpecFor(source) },
+        });
+    };
+
+    /** Required boxes a sheet's spec still has empty. */
+    const sheetSpecBlanks = (sheet: IndividualSheet): string[] => {
+        const required = (
+            sheet.garment === 'pants'
+                ? REQUIRED_PANTS_SPEC_KEYS
+                : REQUIRED_SHIRT_SPEC_KEYS
+        ) as readonly string[];
+        const specs = sheetSpecFor(sheet) as Record<string, unknown>;
+
+        return required.filter((key) => !String(specs[key] ?? '').trim());
+    };
+
+    /** The shirt and trousers spec that stand for a Form 2 bill as a whole. */
+    const individualRepresentativeSpecs = (): {
+        shirt: ShirtSpecsForm;
+        pants: PantsSpecsForm;
+    } => {
+        const firstShirt = individualSheetList.find(
+            (sheet) => sheet.garment === 'shirt',
+        );
+        const firstPants = individualSheetList.find(
+            (sheet) => sheet.garment === 'pants',
+        );
+
+        return {
+            shirt: firstShirt
+                ? (sheetSpecFor(firstShirt) as ShirtSpecsForm)
+                : data.shirt_specs,
+            pants: firstPants
+                ? (sheetSpecFor(firstPants) as PantsSpecsForm)
+                : data.pants_specs,
+        };
+    };
+
+    const [sheetSpecOpen, setSheetSpecOpen] = useState<Record<string, boolean>>(
+        {},
+    );
+
     const addSizeRow = (tableId: string) => {
         setData(
             'size_tables',
@@ -4358,6 +4949,79 @@ export default function OrderCreatePage({
         };
     }, [data.shirt_artwork_scoped, data.pants_artwork_scoped]);
 
+    // Preview links for the pictures picked per colour house, made the same
+    // way the tables' previews are and let go of when the pictures change.
+    const [houseArtworkPreviews, setHouseArtworkPreviews] = useState<
+        Record<string, string[]>
+    >({});
+
+    useEffect(() => {
+        const next: Record<string, string[]> = {};
+
+        Object.entries(data.sports_day_artwork_files).forEach(
+            ([groupId, files]) => {
+                if (files.length > 0) {
+                    next[groupId] = files.map((file) =>
+                        URL.createObjectURL(file),
+                    );
+                }
+            },
+        );
+
+        setHouseArtworkPreviews(next);
+
+        return () => {
+            Object.values(next)
+                .flat()
+                .forEach((url) => URL.revokeObjectURL(url));
+        };
+    }, [data.sports_day_artwork_files]);
+
+    /**
+     * Pictures picked under a colour house belong to that house — the gallery
+     * sits at the end of the house it is for, as a table's does on Forms 1
+     * and 4, so there is nothing to choose. The production sheet prints them
+     * on every sheet of that house.
+     */
+    const handleHouseArtworkSelect = async (
+        groupId: string,
+        event: ChangeEvent<HTMLInputElement>,
+    ) => {
+        const selectedFiles = Array.from(event.target.files ?? []);
+
+        if (selectedFiles.length === 0) {
+            return;
+        }
+
+        const compressedFiles = await Promise.all(
+            selectedFiles.map((file) => compressImage(file)),
+        );
+
+        setData((previous) => ({
+            ...previous,
+            sports_day_artwork_files: {
+                ...previous.sports_day_artwork_files,
+                [groupId]: [
+                    ...(previous.sports_day_artwork_files[groupId] ?? []),
+                    ...compressedFiles,
+                ],
+            },
+        }));
+        event.target.value = '';
+    };
+
+    const removeHouseArtworkFile = (groupId: string, index: number) => {
+        setData((previous) => ({
+            ...previous,
+            sports_day_artwork_files: {
+                ...previous.sports_day_artwork_files,
+                [groupId]: (
+                    previous.sports_day_artwork_files[groupId] ?? []
+                ).filter((_, position) => position !== index),
+            },
+        }));
+    };
+
     /** Artwork the bill already carries, pinned to this table's sheet. */
     const savedArtworkForBatch = (
         garment: ArtworkGarment,
@@ -4629,17 +5293,31 @@ export default function OrderCreatePage({
             (table) => garmentTableTotals(table).quantity > 0,
         );
 
-    const analyzeForm = (): { missing: string[]; fields: Set<string> } => {
+    const analyzeForm = (): {
+        missing: string[];
+        fields: Set<string>;
+        targets: Map<string, string>;
+    } => {
         const missing: string[] = [];
         const fields = new Set<string>();
+        // The box each message is about, so the dialog can take the counter
+        // straight to it rather than leave them to hunt for it.
+        const targets = new Map<string, string>();
+        const need = (message: string, field?: string) => {
+            missing.push(message);
+
+            if (field !== undefined && !targets.has(message)) {
+                targets.set(message, field);
+            }
+        };
 
         if (!data.job_name.trim()) {
-            missing.push('ชื่อหน่วยงาน, ชื่องาน');
+            need('ชื่อหน่วยงาน, ชื่องาน', 'job_name');
             fields.add('job_name');
         }
 
         if (!data.customer_name.trim()) {
-            missing.push('ชื่อลูกค้า');
+            need('ชื่อลูกค้า', 'customer_name');
             fields.add('customer_name');
         }
 
@@ -4652,12 +5330,12 @@ export default function OrderCreatePage({
         }
 
         if (!data.due_date) {
-            missing.push('วันที่รับสินค้า');
+            need('วันที่รับสินค้า', 'due_date');
             fields.add('due_date');
         }
 
         if (!data.branch_id) {
-            missing.push('สาขา');
+            need('สาขา', 'branch_id');
             fields.add('branch_id');
         }
 
@@ -4670,8 +5348,77 @@ export default function OrderCreatePage({
             data.garment_tables,
         );
 
-        if (requestItems.length === 0) {
+        // Forms 1 and 4 write their rows on the garment tables. A row is only
+        // billed once it has both a quantity and a price, so a row with a
+        // quantity and no price would drop off the bill without a word, and
+        // one with no size would be cut as "-".
+        const tableRows =
+            usesSizeTables(sizeFormMode) && !editingLegacySizeRows
+                ? data.garment_tables.flatMap((table) => table.rows)
+                : [];
+
+        // Whether anything has been counted on this form yet. When it has, a
+        // bill with no lines is short of a price or a size on those rows, and
+        // the boxes to fix are theirs — not the form's first empty one.
+        const nothingCounted =
+            sizeFormMode === 'sports_day'
+                ? data.sports_day_groups.every((group) =>
+                      group.rows.every(
+                          (row) => row.shirt_qty <= 0 && row.pants_qty <= 0,
+                      ),
+                  )
+                : sizeFormMode === 'individual'
+                  ? data.personalization_rows.every(isBlankPersonalizationRow)
+                  : tableRows.every((row) => row.quantity <= 0);
+
+        if (requestItems.length === 0 && !nothingCounted) {
             missing.push('จำนวนและราคาสินค้าอย่างน้อย 1 รายการ');
+        }
+
+        if (requestItems.length === 0 && nothingCounted) {
+            // Where the first line of this form is typed.
+            const firstTableRow = tableRows[0];
+            const firstSportsDayRow = data.sports_day_groups[0]?.rows[0];
+            const firstPerson = data.personalization_rows[0];
+            const firstBox =
+                sizeFormMode === 'sports_day'
+                    ? firstSportsDayRow
+                        ? `sd_row.${firstSportsDayRow.id}.shirt_qty`
+                        : undefined
+                    : sizeFormMode === 'individual'
+                      ? firstPerson
+                          ? `person.${firstPerson.id}.name`
+                          : undefined
+                      : firstTableRow
+                        ? `garment_row.${firstTableRow.id}.quantity`
+                        : undefined;
+
+            need('จำนวนและราคาสินค้าอย่างน้อย 1 รายการ', firstBox);
+
+            if (firstBox !== undefined) {
+                fields.add(firstBox);
+            }
+        }
+
+        const unsizedRows = tableRows.filter(
+            (row) => row.quantity > 0 && row.size_label.trim() === '',
+        );
+        const unpricedRows = tableRows.filter(
+            (row) => row.quantity > 0 && row.unit_price <= 0,
+        );
+
+        unsizedRows.forEach((row) =>
+            fields.add(`garment_row.${row.id}.size_label`),
+        );
+        unpricedRows.forEach((row) =>
+            fields.add(`garment_row.${row.id}.unit_price`),
+        );
+
+        if (unpricedRows.length > 0) {
+            need(
+                'ราคาของรายการที่กรอกจำนวนไว้',
+                `garment_row.${unpricedRows[0].id}.unit_price`,
+            );
         }
 
         // Scoped to the two size-table forms: the others keep their own
@@ -4694,8 +5441,13 @@ export default function OrderCreatePage({
                       (row) => !isBlankGarmentRow(row) && !row.size_label,
                   );
 
-            if (sizeIsMissing) {
-                missing.push('ไซส์ในตารางเลือกไซซ์');
+            if (sizeIsMissing || unsizedRows.length > 0) {
+                need(
+                    'ไซส์ในตารางเลือกไซซ์',
+                    unsizedRows[0]
+                        ? `garment_row.${unsizedRows[0].id}.size_label`
+                        : undefined,
+                );
             }
 
             const sizeIsTooLong = editingLegacySizeRows
@@ -4717,12 +5469,16 @@ export default function OrderCreatePage({
         }
 
         if (sizeFormMode === 'sports_day') {
-            if (
-                data.sports_day_groups.some(
-                    (group) => group.team_name.trim() === '',
-                )
-            ) {
-                missing.push('ชื่อคณะสี');
+            const unnamedGroups = data.sports_day_groups.filter(
+                (group) => group.team_name.trim() === '',
+            );
+
+            unnamedGroups.forEach((group) =>
+                fields.add(`sd_group.${group.id}.team_name`),
+            );
+
+            if (unnamedGroups.length > 0) {
+                need('ชื่อคณะสี', `sd_group.${unnamedGroups[0].id}.team_name`);
             }
 
             const rowsWithQuantity = data.sports_day_groups.flatMap((group) =>
@@ -4730,9 +5486,19 @@ export default function OrderCreatePage({
                     (row) => row.shirt_qty > 0 || row.pants_qty > 0,
                 ),
             );
+            const unsizedSportsDayRows = rowsWithQuantity.filter(
+                (row) => !row.size_label,
+            );
 
-            if (rowsWithQuantity.some((row) => !row.size_label)) {
-                missing.push('ไซซ์ในตารางคณะสี');
+            unsizedSportsDayRows.forEach((row) =>
+                fields.add(`sd_row.${row.id}.size_label`),
+            );
+
+            if (unsizedSportsDayRows.length > 0) {
+                need(
+                    'ไซซ์ในตารางคณะสี',
+                    `sd_row.${unsizedSportsDayRows[0].id}.size_label`,
+                );
             }
 
             if (
@@ -4745,14 +5511,40 @@ export default function OrderCreatePage({
                 );
             }
 
-            if (
-                rowsWithQuantity.some(
-                    (row) =>
-                        (row.shirt_qty > 0 && row.shirt_price <= 0) ||
-                        (row.pants_qty > 0 && row.pants_price <= 0),
-                )
-            ) {
-                missing.push('ราคาของรายการที่กรอกจำนวนไว้');
+            // A linked price is typed on the group's first row and shown on
+            // the rest read-only, so that first row is the box to fix.
+            const unpricedBoxes: string[] = [];
+
+            data.sports_day_groups.forEach((group) => {
+                group.rows.forEach((row, rowIndex) => {
+                    (
+                        [
+                            ['shirt_qty', 'shirt_price'],
+                            ['pants_qty', 'pants_price'],
+                        ] as const
+                    ).forEach(([quantityKey, priceKey]) => {
+                        if (row[quantityKey] <= 0 || row[priceKey] > 0) {
+                            return;
+                        }
+
+                        const sourceRow =
+                            rowIndex > 0 &&
+                            isSportsDayPriceLinked(group.id, priceKey)
+                                ? group.rows[0]
+                                : row;
+                        const box = `sd_row.${sourceRow.id}.${priceKey}`;
+
+                        if (!unpricedBoxes.includes(box)) {
+                            unpricedBoxes.push(box);
+                        }
+                    });
+                });
+            });
+
+            unpricedBoxes.forEach((box) => fields.add(box));
+
+            if (unpricedBoxes.length > 0) {
+                need('ราคาของรายการที่กรอกจำนวนไว้', unpricedBoxes[0]);
             }
         }
 
@@ -4773,7 +5565,75 @@ export default function OrderCreatePage({
             }
 
             if (!hasPersonalization) {
-                missing.push('ข้อมูลรายตัวในฟอร์มรายตัว');
+                // Point at the first person someone started on, or the first
+                // row when nobody has been typed in yet, and at whichever of
+                // name, size and number that person is still short of.
+                const person =
+                    data.personalization_rows.find(
+                        (row) => !isBlankPersonalizationRow(row),
+                    ) ?? data.personalization_rows[0];
+                const shortOf = person
+                    ? (['name', 'size', 'number'] as const)
+                          .filter((key) => person[key].trim() === '')
+                          .map((key) => `person.${person.id}.${key}`)
+                    : [];
+
+                shortOf.forEach((box) => fields.add(box));
+                need('ข้อมูลรายตัวในฟอร์มรายตัว', shortOf[0]);
+            }
+
+            // Every person typed in is billed a shirt — the quantity cannot go
+            // below one — so a person with no size would be cut as "-".
+            const people = data.personalization_rows.filter(
+                (row) => !isBlankPersonalizationRow(row),
+            );
+            const unsizedPeople = people.filter(
+                (row) => row.size.trim() === '',
+            );
+
+            unsizedPeople.forEach((row) => fields.add(`person.${row.id}.size`));
+
+            if (unsizedPeople.length > 0) {
+                need(
+                    'ไซซ์เสื้อในรายชื่อรายตัว',
+                    `person.${unsizedPeople[0].id}.size`,
+                );
+            }
+
+            // Trousers are only billed with a price, so trousers counted and
+            // left unpriced would drop off the bill — and off the floor's
+            // sheet — without a word. A linked price is typed on the first
+            // person, so that is the box to fix.
+            if (data.individual_include_pants) {
+                const firstPerson = data.personalization_rows[0];
+                const unpricedPantsBoxes: string[] = [];
+
+                people.forEach((row) => {
+                    if (row.pants_quantity <= 0 || row.pants_unit_price > 0) {
+                        return;
+                    }
+
+                    const sourceRow =
+                        firstPerson &&
+                        row.id !== firstPerson.id &&
+                        isIndividualColumnLinked('pants_unit_price')
+                            ? firstPerson
+                            : row;
+                    const box = `person.${sourceRow.id}.pants_unit_price`;
+
+                    if (!unpricedPantsBoxes.includes(box)) {
+                        unpricedPantsBoxes.push(box);
+                    }
+                });
+
+                unpricedPantsBoxes.forEach((box) => fields.add(box));
+
+                if (unpricedPantsBoxes.length > 0) {
+                    need(
+                        'ราคากางเกงของคนที่กรอกจำนวนกางเกงไว้',
+                        unpricedPantsBoxes[0],
+                    );
+                }
             }
         }
 
@@ -4797,8 +5657,24 @@ export default function OrderCreatePage({
                 );
 
                 if (blanks.length > 0) {
-                    missing.push(
+                    need(
                         `สเปก${garmentTableTitle(table)} ยังไม่ได้กรอก ${blanks.length} ช่อง`,
+                        `${garmentTableKey(table)}.${blanks[0]}`,
+                    );
+                }
+            });
+        } else if (sizeFormMode === 'individual') {
+            // Form 2 is sewn a sheet at a time too: each sheet the list of
+            // people produces is asked for its own spec.
+            individualSheetList.forEach((sheet) => {
+                const blanks = sheetSpecBlanks(sheet);
+
+                blanks.forEach((key) => fields.add(`${sheet.key}.${key}`));
+
+                if (blanks.length > 0) {
+                    need(
+                        `สเปก${sheet.title} ยังไม่ได้กรอก ${blanks.length} ช่อง`,
+                        `${sheet.key}.${blanks[0]}`,
                     );
                 }
             });
@@ -4811,8 +5687,9 @@ export default function OrderCreatePage({
                 blanks.forEach((key) => fields.add(`shirt.${key}`));
 
                 if (blanks.length > 0) {
-                    missing.push(
+                    need(
                         `สเปกแบบเสื้อ ยังไม่ได้กรอก ${blanks.length} ช่อง`,
+                        `shirt.${blanks[0]}`,
                     );
                 }
             }
@@ -4825,14 +5702,33 @@ export default function OrderCreatePage({
                 blanks.forEach((key) => fields.add(`pants.${key}`));
 
                 if (blanks.length > 0) {
-                    missing.push(
+                    need(
                         `สเปกแบบกางเกง ยังไม่ได้กรอก ${blanks.length} ช่อง`,
+                        `pants.${blanks[0]}`,
                     );
                 }
             }
         }
 
-        return { missing, fields };
+        // A bill with counted rows but no lines is pointed at the row boxes
+        // the other messages found short.
+        const itemsMessage = 'จำนวนและราคาสินค้าอย่างน้อย 1 รายการ';
+
+        if (missing.includes(itemsMessage) && !targets.has(itemsMessage)) {
+            const rowTarget = [
+                'ราคาของรายการที่กรอกจำนวนไว้',
+                'ไซส์ในตารางเลือกไซซ์',
+                'ไซซ์ในตารางคณะสี',
+            ]
+                .map((message) => targets.get(message))
+                .find((target) => target !== undefined);
+
+            if (rowTarget !== undefined) {
+                targets.set(itemsMessage, rowTarget);
+            }
+        }
+
+        return { missing, fields, targets };
     };
 
     // Recomputed on every render once a submit has failed, so a box stops being
@@ -4841,9 +5737,11 @@ export default function OrderCreatePage({
         ? analyzeForm().fields
         : EMPTY_INVALID_FIELDS;
 
+    // `field-invalid` and `fx-{key}` carry no style. They are how the
+    // missing-fields dialog finds the box it is pointing at.
     const invalidClass = (key: string): string =>
         invalidFields.has(key)
-            ? ' border-red-500 bg-red-50 ring-1 ring-red-500/40 focus-visible:border-red-500'
+            ? ` border-red-500 bg-red-50 ring-1 ring-red-500/40 focus-visible:border-red-500 field-invalid fx-${key}`
             : '';
 
     /**
@@ -5194,11 +6092,63 @@ export default function OrderCreatePage({
         </>
     );
 
+    /**
+     * Brings a box the last save found short into view and puts the cursor in
+     * it. `key` is the box a message is about; when it cannot be found — a
+     * message about the bill as a whole — the first red box on the page is
+     * used instead.
+     */
+    const focusMissingField = (key: string) => {
+        const element =
+            (key !== ''
+                ? document.getElementsByClassName(`fx-${key}`)[0]
+                : undefined) ?? document.querySelector('.field-invalid');
+
+        if (!(element instanceof HTMLElement)) {
+            return;
+        }
+
+        const focusTarget = element.matches('input, textarea, button')
+            ? element
+            : element.querySelector<HTMLElement>('input, textarea, button');
+
+        element.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+        focusTarget?.focus({ preventScroll: true });
+    };
+
+    const jumpToMissingField = (key: string) => {
+        // A folded Form 2 sheet has none of its boxes on the page either.
+        const sheet = individualSheetList.find((candidate) =>
+            key.startsWith(`${candidate.key}.`),
+        );
+
+        if (sheet !== undefined) {
+            setSheetSpecOpen((current) => ({ ...current, [sheet.key]: true }));
+        }
+
+        // A folded bill-wide spec (Form 3) has none of its boxes on the page
+        // until it is opened.
+        const specGarment = (['shirt', 'pants'] as const).find((garment) =>
+            key.startsWith(`${garment}.`),
+        );
+
+        if (specGarment !== undefined) {
+            setBillSpecOpen((current) => ({
+                ...current,
+                [specGarment]: true,
+            }));
+        }
+
+        pendingJumpRef.current = key;
+        setShowValidationModal(false);
+    };
+
     const handleSubmitClick = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        const { missing, fields } = analyzeForm();
+        const { missing, fields, targets } = analyzeForm();
         setValidationErrors(missing);
+        setValidationTargets(targets);
         setShowFieldErrors(missing.length > 0);
 
         if (missing.length > 0) {
@@ -5217,15 +6167,58 @@ export default function OrderCreatePage({
                 return opened;
             });
 
-            // Same idea for the tabbed spec card, which Forms 2 and 3 use.
-            const blankTab = [...fields].some((key) => key.startsWith('shirt.'))
-                ? 'shirt'
-                : [...fields].some((key) => key.startsWith('pants.'))
-                  ? 'pants'
-                  : null;
+            // A folded table shows none of its boxes, red or not.
+            setFoldedTables((current) => {
+                const unfolded = { ...current };
 
-            if (blankTab !== null) {
-                setActiveSpecTab(blankTab);
+                data.garment_tables.forEach((table) => {
+                    const rowIsShort = table.rows.some(
+                        (row) =>
+                            fields.has(`garment_row.${row.id}.size_label`) ||
+                            fields.has(`garment_row.${row.id}.unit_price`) ||
+                            fields.has(`garment_row.${row.id}.quantity`),
+                    );
+
+                    if (rowIsShort || specBlanksFor(table) > 0) {
+                        unfolded[table.id] = false;
+                    }
+                });
+
+                return unfolded;
+            });
+
+            // And the sheets of a Form 2 bill.
+            const shortSheets = individualSheetList.filter((sheet) =>
+                [...fields].some((key) => key.startsWith(`${sheet.key}.`)),
+            );
+
+            if (shortSheets.length > 0) {
+                setSheetSpecOpen((current) => {
+                    const opened = { ...current };
+
+                    shortSheets.forEach((sheet) => {
+                        opened[sheet.key] = true;
+                    });
+
+                    return opened;
+                });
+            }
+
+            // Same idea for the bill-wide spec Form 3 uses.
+            const shortSpecs = (['shirt', 'pants'] as const).filter((garment) =>
+                [...fields].some((key) => key.startsWith(`${garment}.`)),
+            );
+
+            if (shortSpecs.length > 0) {
+                setBillSpecOpen((current) => {
+                    const opened = { ...current };
+
+                    shortSpecs.forEach((garment) => {
+                        opened[garment] = true;
+                    });
+
+                    return opened;
+                });
             }
 
             setShowValidationModal(true);
@@ -5267,12 +6260,18 @@ export default function OrderCreatePage({
         );
         // What a reader that still expects one spec per bill sees, and what the
         // flat columns on order_specifications are written from.
+        // Form 2's sheets each carry their own spec; its first shirt and
+        // first trousers sheet stand for the bill where one spec has to.
+        const billSpecs =
+            sizeFormMode === 'individual'
+                ? individualRepresentativeSpecs()
+                : { shirt: data.shirt_specs, pants: data.pants_specs };
         const { shirt: flatSpecShirt, pants: flatSpecPants } =
             representativeSpecs(
                 usesSizeTables(sizeFormMode),
                 data.garment_tables,
-                data.shirt_specs,
-                data.pants_specs,
+                billSpecs.shirt,
+                billSpecs.pants,
             );
         const representativeShirtSpecs = flatSpecShirt;
         const representativePantsSpecs = flatSpecPants;
@@ -5280,9 +6279,13 @@ export default function OrderCreatePage({
             ? shirtTables.length > 0
                 ? flatSpecShirt
                 : flatSpecPants
-            : activeSpecTab === 'pants'
-              ? data.pants_specs
-              : data.shirt_specs;
+            : // The bill's shirts when it sells any, its trousers otherwise —
+              // the same choice representativeSpecs() makes for Forms 1 and 4.
+              // It used to follow whichever tab was open at the moment of
+              // saving.
+              orderIncludesGarment('pants') && !orderIncludesGarment('shirt')
+              ? billSpecs.pants
+              : billSpecs.shirt;
         const screenPrintDetail = JSON.stringify({
             schema: 'spec-v3',
             mode: sizeFormMode,
@@ -5290,13 +6293,16 @@ export default function OrderCreatePage({
             // sell one spec for the whole bill and so write none of these.
             garment_specs: usesSizeTables(sizeFormMode)
                 ? buildGarmentSpecsPayload(data.garment_tables)
-                : {},
-            shirt_specs: usesSizeTables(sizeFormMode)
-                ? representativeShirtSpecs
-                : data.shirt_specs,
-            pants_specs: usesSizeTables(sizeFormMode)
-                ? representativePantsSpecs
-                : data.pants_specs,
+                : sizeFormMode === 'individual'
+                  ? Object.fromEntries(
+                        individualSheetList.map((sheet) => [
+                            sheet.key,
+                            sheetSpecFor(sheet),
+                        ]),
+                    )
+                  : {},
+            shirt_specs: representativeShirtSpecs,
+            pants_specs: representativePantsSpecs,
             // The master-data names as they read at the moment of saving.
             // The master-data names as they read at the moment of saving, so
             // renaming a colour later cannot rewrite what an already-printed
@@ -5323,18 +6329,32 @@ export default function OrderCreatePage({
                                 ),
                       ]),
                   )
-                : {},
+                : sizeFormMode === 'individual'
+                  ? Object.fromEntries(
+                        individualSheetList.map((sheet) => [
+                            sheet.key,
+                            snapshotSpecLabels(
+                                sheetSpecFor(sheet),
+                                sheet.garment === 'pants'
+                                    ? withCatalogPatches(
+                                          resolvedPantsCatalogs,
+                                          pantsCatalogKeys,
+                                      )
+                                    : withCatalogPatches(
+                                          resolvedShirtCatalogs,
+                                          shirtCatalogKeys,
+                                      ),
+                            ),
+                        ]),
+                    )
+                  : {},
             spec_labels: {
                 shirt: snapshotSpecLabels(
-                    usesSizeTables(sizeFormMode)
-                        ? representativeShirtSpecs
-                        : data.shirt_specs,
+                    representativeShirtSpecs,
                     withCatalogPatches(resolvedShirtCatalogs, shirtCatalogKeys),
                 ),
                 pants: snapshotSpecLabels(
-                    usesSizeTables(sizeFormMode)
-                        ? representativePantsSpecs
-                        : data.pants_specs,
+                    representativePantsSpecs,
                     withCatalogPatches(resolvedPantsCatalogs, pantsCatalogKeys),
                 ),
             },
@@ -5377,12 +6397,21 @@ export default function OrderCreatePage({
                               number: row.number.trim(),
                               quantity: Math.max(row.quantity, 1),
                               unit_price: Math.max(row.unit_price, 0),
+                              // Left blank, a person's trousers follow their
+                              // shirt: saved as the shirt's, so the roster and
+                              // the floor read a size and a number for them.
                               pants_size: data.individual_include_pants
-                                  ? row.pants_size.trim()
+                                  ? row.pants_size.trim() ||
+                                    (row.pants_quantity > 0
+                                        ? row.size.trim()
+                                        : '')
                                   : '',
                               pants_style: row.pants_style,
                               pants_number: data.individual_include_pants
-                                  ? row.pants_number.trim()
+                                  ? row.pants_number.trim() ||
+                                    (row.pants_quantity > 0
+                                        ? row.number.trim()
+                                        : '')
                                   : '',
                               pants_quantity: data.individual_include_pants
                                   ? Math.max(row.pants_quantity, 0)
@@ -5416,6 +6445,16 @@ export default function OrderCreatePage({
             shirt_artwork_scoped: payload.shirt_artwork_scoped,
             pants_artwork_scoped: payload.pants_artwork_scoped,
             artwork_scopes: payload.artwork_scopes,
+            // Form 3: each house's new pictures, by the house's position on
+            // the bill — the key the server stores them under and the
+            // production sheet reads them back by.
+            sports_day_artwork:
+                sizeFormMode === 'sports_day'
+                    ? sportsDayArtworkPayload(
+                          payload.sports_day_groups,
+                          payload.sports_day_artwork_files,
+                      )
+                    : {},
             duplicate_from_id: order?.duplicate_from_id ?? null,
             // Saved artwork the user removed. On an edit these media are deleted;
             // on a duplicate they are simply not copied onto the new bill.
@@ -5662,6 +6701,406 @@ export default function OrderCreatePage({
     const pantsArtworkError =
         formErrors.pants_artwork ?? formErrors['pants_artwork.0'];
 
+    /**
+     * Form 2's specs, one per sheet the list of people is cut on, drawn the
+     * way Form 1 draws a table: grouped by garment, each sheet named for what
+     * it is and how many people are on it, its pictures, and its spec folded
+     * under a heading that says what is still missing. A long-sleeved shirt
+     * and a short one are two sheets here, as they are on the floor.
+     */
+    const renderIndividualSheetSpecs = () => {
+        return (['shirt', 'pants'] as const).map((garment) => {
+            const sheets = individualSpecSheetList.filter(
+                (sheet) => sheet.garment === garment,
+            );
+
+            if (sheets.length === 0) {
+                return null;
+            }
+
+            const isPants = garment === 'pants';
+
+            return (
+                <section
+                    key={garment}
+                    data-sheet-group={garment}
+                    className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3"
+                >
+                    <h3 className="flex items-center gap-2 text-xs font-bold tracking-wide text-slate-600">
+                        <span
+                            className={`h-3.5 w-1 rounded-full ${
+                                isPants ? 'bg-[#E21E26]' : 'bg-[#174395]'
+                            }`}
+                        />
+                        {isPants ? 'กางเกง' : 'เสื้อ'}
+                        <span className="font-normal text-slate-400">
+                            {sheets.length} แบบ · แยกสเปกตามแบบ
+                        </span>
+                    </h3>
+
+                    {sheets.map((sheet) => {
+                        const blanks = sheetSpecBlanks(sheet).length;
+                        const open = sheetSpecOpen[sheet.key] ?? false;
+                        const specs = sheetSpecFor(sheet);
+                        const otherSheets = sheets.filter(
+                            (other) => other.key !== sheet.key,
+                        );
+
+                        return (
+                            <article
+                                key={sheet.key}
+                                data-individual-sheet={sheet.key}
+                                aria-label={sheet.title}
+                                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+                            >
+                                <header
+                                    className={`flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-2.5 py-2 ${
+                                        isPants
+                                            ? 'bg-rose-50/70'
+                                            : 'bg-blue-50/70'
+                                    }`}
+                                >
+                                    <h4 className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+                                        <span
+                                            className={`h-3 w-1 rounded-full ${
+                                                isPants
+                                                    ? 'bg-[#E21E26]'
+                                                    : 'bg-[#174395]'
+                                            }`}
+                                        />
+                                        {sheet.title}
+                                    </h4>
+                                    {sheet.people > 0 ? (
+                                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                                            {sheet.people.toLocaleString(
+                                                'th-TH',
+                                            )}{' '}
+                                            คน
+                                        </span>
+                                    ) : (
+                                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200">
+                                            ยังไม่มีรายชื่อ · กรอกสเปกไว้ก่อนได้
+                                        </span>
+                                    )}
+                                </header>
+
+                                <div className="bg-slate-50/50 px-2.5 py-3">
+                                    <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setSheetSpecOpen((current) => ({
+                                                    ...current,
+                                                    [sheet.key]: !open,
+                                                }))
+                                            }
+                                            aria-expanded={open}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-800 hover:text-slate-950"
+                                        >
+                                            <ChevronDown
+                                                className={`size-3.5 text-slate-400 transition-transform ${
+                                                    open ? '' : '-rotate-90'
+                                                }`}
+                                            />
+                                            สเปก{isPants ? 'กางเกง' : 'เสื้อ'}
+                                            {blanks > 0 ? (
+                                                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                                    ยังขาด {blanks} ช่อง
+                                                </span>
+                                            ) : (
+                                                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                                    กรอกครบ
+                                                </span>
+                                            )}
+                                        </button>
+                                        {otherSheets.length > 0 ? (
+                                            <Select
+                                                value=""
+                                                onValueChange={(sourceKey) =>
+                                                    copySheetSpec(
+                                                        sheet,
+                                                        sourceKey,
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger
+                                                    className="h-7 w-auto gap-1 border-dashed bg-white text-[11px]"
+                                                    aria-label={`คัดลอกสเปกมาที่ ${sheet.title}`}
+                                                >
+                                                    <Copy className="size-3" />
+                                                    <SelectValue placeholder="คัดลอกสเปกจากแบบอื่น" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {otherSheets.map(
+                                                        (other) => (
+                                                            <SelectItem
+                                                                key={other.key}
+                                                                value={
+                                                                    other.key
+                                                                }
+                                                            >
+                                                                {other.title}
+                                                            </SelectItem>
+                                                        ),
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        ) : null}
+                                    </div>
+
+                                    <div className="mb-3">
+                                        <MultiArtworkUpload
+                                            title={`Art Work · ${sheet.title}`}
+                                            inputId={`artwork-${sheet.key}`}
+                                            files={
+                                                (isPants
+                                                    ? data.pants_artwork_scoped
+                                                    : data.shirt_artwork_scoped)[
+                                                    sheet.key
+                                                ] ?? []
+                                            }
+                                            previewUrls={
+                                                scopedArtworkPreviews[
+                                                    `${garment}:${sheet.key}`
+                                                ] ?? []
+                                            }
+                                            savedMedia={savedArtworkForBatch(
+                                                garment,
+                                                sheet.key,
+                                            )}
+                                            onSelect={(event) => {
+                                                void handleTableArtworkSelect(
+                                                    garment,
+                                                    sheet.key,
+                                                    event,
+                                                );
+                                            }}
+                                            onRemove={(index) =>
+                                                removeArtworkFile(
+                                                    garment,
+                                                    sheet.key,
+                                                    index,
+                                                )
+                                            }
+                                            onRemoveSaved={removeSavedMedia}
+                                        />
+                                    </div>
+
+                                    {open ? (
+                                        <div
+                                            data-slot="garment-spec"
+                                            data-garment={garment}
+                                            className="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+                                        >
+                                            {isPants
+                                                ? renderPantsSpecFields(
+                                                      specs as PantsSpecsForm,
+                                                      sheet.key,
+                                                      (key, value) =>
+                                                          updateSheetSpec(
+                                                              sheet,
+                                                              key,
+                                                              String(value),
+                                                          ),
+                                                      garmentTypesForStyle(
+                                                          resolvedPantsTypes,
+                                                          sheet.style,
+                                                          (
+                                                              specs as PantsSpecsForm
+                                                          ).pants_type_id,
+                                                      ),
+                                                  )
+                                                : renderShirtSpecFields(
+                                                      specs as ShirtSpecsForm,
+                                                      sheet.key,
+                                                      (key, value) =>
+                                                          updateSheetSpec(
+                                                              sheet,
+                                                              key,
+                                                              String(value),
+                                                          ),
+                                                      (key, value) => {
+                                                          // An empty value is the hidden
+                                                          // native <select> echoing on
+                                                          // remount, never the user.
+                                                          if (value !== '') {
+                                                              updateSheetSpec(
+                                                                  sheet,
+                                                                  key,
+                                                                  value,
+                                                              );
+                                                          }
+                                                      },
+                                                      garmentTypesForStyle(
+                                                          resolvedShirtTypes,
+                                                          sheet.style,
+                                                          (
+                                                              specs as ShirtSpecsForm
+                                                          ).shirt_type_id,
+                                                      ),
+                                                  )}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </article>
+                        );
+                    })}
+                </section>
+            );
+        });
+    };
+
+    /**
+     * The bill-wide spec of one garment on Forms 2 and 3, drawn like a table's
+     * spec on Forms 1 and 4: a group headed by the garment, and a folded panel
+     * whose heading says how much is still missing. A garment the bill has not
+     * ordered yet is only asked for once it is, so its count is shown muted
+     * and says why.
+     */
+    const renderBillSpecGroup = (garment: SpecTab) => {
+        const isPants = garment === 'pants';
+        const garmentLabel = isPants ? 'กางเกง' : 'เสื้อ';
+        const required = isPants
+            ? REQUIRED_PANTS_SPEC_KEYS
+            : REQUIRED_SHIRT_SPEC_KEYS;
+        const specs: Record<string, unknown> = isPants
+            ? data.pants_specs
+            : data.shirt_specs;
+        const blanks = (required as readonly string[]).filter(
+            (key) => !String(specs[key] ?? '').trim(),
+        ).length;
+        const ordered = orderIncludesGarment(garment);
+        const open = billSpecOpen[garment];
+
+        return (
+            <section
+                key={garment}
+                data-bill-spec-group={garment}
+                className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3"
+            >
+                <h3 className="flex items-center gap-2 text-xs font-bold tracking-wide text-slate-600">
+                    <span
+                        className={`h-3.5 w-1 rounded-full ${
+                            isPants ? 'bg-[#E21E26]' : 'bg-[#174395]'
+                        }`}
+                    />
+                    {garmentLabel}
+                    <span className="font-normal text-slate-400">
+                        ใช้กับทั้งบิล
+                    </span>
+                </h3>
+
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <div className="bg-slate-50/50 px-2.5 py-3">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setBillSpecOpen((current) => ({
+                                    ...current,
+                                    [garment]: !current[garment],
+                                }))
+                            }
+                            aria-expanded={open}
+                            className={`flex items-center gap-1.5 text-xs font-bold text-slate-800 hover:text-slate-950 ${
+                                open ? 'mb-2.5' : ''
+                            }`}
+                        >
+                            <ChevronDown
+                                className={`size-3.5 text-slate-400 transition-transform ${
+                                    open ? '' : '-rotate-90'
+                                }`}
+                            />
+                            สเปก{garmentLabel}
+                            {blanks === 0 ? (
+                                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                    กรอกครบ
+                                </span>
+                            ) : ordered ? (
+                                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                    ยังขาด {blanks} ช่อง
+                                </span>
+                            ) : (
+                                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                                    ยังขาด {blanks} ช่อง · ยังไม่ได้สั่ง
+                                    {garmentLabel}
+                                </span>
+                            )}
+                        </button>
+
+                        {open ? (
+                            <div
+                                data-slot="garment-spec"
+                                data-garment={garment}
+                                className="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+                            >
+                                {/* Every form takes its artwork through the
+                                Art Work dialog above; these stay for a mode
+                                that would not. */}
+                                {usesArtworkBatches(sizeFormMode) ? null : (
+                                    <div className="md:col-span-2 xl:col-span-3">
+                                        {isPants ? (
+                                            <MultiArtworkUpload
+                                                title="Art Work กางเกง"
+                                                inputId="pants-artwork-upload"
+                                                files={data.pants_artwork_files}
+                                                previewUrls={
+                                                    pantsArtworkPreviewUrls
+                                                }
+                                                savedMedia={visibleSavedMedia(
+                                                    order?.pants_artwork_media,
+                                                )}
+                                                error={pantsArtworkError}
+                                                onSelect={(event) => {
+                                                    void handlePantsArtworkSelect(
+                                                        event,
+                                                    );
+                                                }}
+                                                onRemove={removePantsArtworkAt}
+                                                onRemoveSaved={removeSavedMedia}
+                                            />
+                                        ) : (
+                                            <MultiArtworkUpload
+                                                title="Art Work เสื้อ"
+                                                inputId="shirt-artwork-upload"
+                                                files={data.shirt_artwork_files}
+                                                previewUrls={
+                                                    shirtArtworkPreviewUrls
+                                                }
+                                                savedMedia={visibleSavedMedia(
+                                                    order?.shirt_artwork_media,
+                                                )}
+                                                error={shirtArtworkError}
+                                                onSelect={(event) => {
+                                                    void handleShirtArtworkSelect(
+                                                        event,
+                                                    );
+                                                }}
+                                                onRemove={removeShirtArtworkAt}
+                                                onRemoveSaved={removeSavedMedia}
+                                            />
+                                        )}
+                                    </div>
+                                )}
+                                {isPants
+                                    ? renderPantsSpecFields(
+                                          data.pants_specs,
+                                          'pants',
+                                          updatePantsSpecs,
+                                      )
+                                    : renderShirtSpecFields(
+                                          data.shirt_specs,
+                                          'shirt',
+                                          updateShirtSpecs,
+                                          selectShirtSpec,
+                                      )}
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            </section>
+        );
+    };
+
     return (
         <>
             <Head
@@ -5677,30 +7116,72 @@ export default function OrderCreatePage({
                     open={showValidationModal}
                     onOpenChange={setShowValidationModal}
                 >
-                    <DialogContent className="sm:max-w-md">
+                    <DialogContent
+                        className="sm:max-w-md"
+                        onCloseAutoFocus={(event) => {
+                            if (pendingJumpRef.current === null) {
+                                return;
+                            }
+
+                            event.preventDefault();
+                            focusMissingField(pendingJumpRef.current);
+                            pendingJumpRef.current = null;
+                        }}
+                    >
                         <DialogHeader>
                             <DialogTitle>
                                 กรอกข้อมูลให้ครบก่อนบันทึก
                             </DialogTitle>
                             <DialogDescription>
-                                กรุณากรอกข้อมูลต่อไปนี้ก่อนส่งคำสั่งผลิต
+                                กดที่รายการเพื่อไปยังช่องนั้น
+                                ช่องที่ยังขาดจะมีกรอบสีแดง
                             </DialogDescription>
                         </DialogHeader>
 
-                        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
-                            <ul className="space-y-1 text-sm text-rose-700">
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 p-1.5">
+                            <ul className="space-y-0.5 text-sm text-rose-700">
                                 {validationErrors.map((message) => (
-                                    <li key={message}>• {message}</li>
+                                    <li key={message}>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                jumpToMissingField(
+                                                    validationTargets.get(
+                                                        message,
+                                                    ) ?? '',
+                                                )
+                                            }
+                                            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-rose-100 focus-visible:bg-rose-100 focus-visible:outline-none"
+                                        >
+                                            <span>• {message}</span>
+                                            <span className="shrink-0 text-xs font-semibold text-rose-600">
+                                                ไปที่ช่อง ›
+                                            </span>
+                                        </button>
+                                    </li>
                                 ))}
                             </ul>
                         </div>
 
-                        <DialogFooter>
+                        <DialogFooter className="gap-2 sm:gap-2">
                             <Button
                                 type="button"
+                                variant="outline"
                                 onClick={() => setShowValidationModal(false)}
                             >
                                 ปิด
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={() =>
+                                    jumpToMissingField(
+                                        validationTargets.get(
+                                            validationErrors[0] ?? '',
+                                        ) ?? '',
+                                    )
+                                }
+                            >
+                                ไปที่ช่องแรกที่ขาด
                             </Button>
                         </DialogFooter>
                     </DialogContent>
@@ -5801,6 +7282,7 @@ export default function OrderCreatePage({
 
                 <form
                     onSubmit={handleSubmitClick}
+                    onKeyDown={moveFocusOnEnter}
                     className="min-h-screen bg-slate-100 pb-12"
                 >
                     <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-xs">
@@ -6113,168 +7595,6 @@ export default function OrderCreatePage({
                                     </div>
                                 </section>
                             </div>
-
-                            {/*
-                                One spec for the whole bill, which is how Forms
-                                2 and 3 are sold: a list of people, or a set of
-                                colour houses, all in the same garment. Forms 1
-                                and 4 carry a spec per table instead, drawn
-                                under the table it belongs to, so this card
-                                would be a second place to fill the same thing
-                                in and no way to tell which one production
-                                reads.
-                            */}
-                            {usesSizeTables(sizeFormMode) &&
-                            !editingLegacySizeRows ? null : (
-                                <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                                    <h2 className="mb-3 text-sm font-bold text-slate-900">
-                                        รายละเอียดสเปกงานตัดเย็บ
-                                    </h2>
-
-                                    <div className="mb-4 flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1.5">
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant={
-                                                activeSpecTab === 'shirt'
-                                                    ? 'default'
-                                                    : 'ghost'
-                                            }
-                                            className="h-8 text-xs"
-                                            onClick={() =>
-                                                setActiveSpecTab('shirt')
-                                            }
-                                        >
-                                            แบบเสื้อ
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant={
-                                                activeSpecTab === 'pants'
-                                                    ? 'default'
-                                                    : 'ghost'
-                                            }
-                                            className="h-8 text-xs"
-                                            onClick={() =>
-                                                setActiveSpecTab('pants')
-                                            }
-                                        >
-                                            แบบกางเกง
-                                        </Button>
-                                    </div>
-
-                                    {activeSpecTab === 'shirt' ? (
-                                        <div
-                                            data-slot="garment-spec"
-                                            data-garment="shirt"
-                                            className="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
-                                        >
-                                            <div className="md:col-span-2 xl:col-span-3">
-                                                {usesArtworkBatches(
-                                                    sizeFormMode,
-                                                ) ? (
-                                                    <ArtworkBatchButton
-                                                        attached={
-                                                            artworkAttachedCount
-                                                        }
-                                                        missing={
-                                                            artworkBatchesMissing.length
-                                                        }
-                                                        onOpen={() =>
-                                                            setArtworkDialogOpen(
-                                                                true,
-                                                            )
-                                                        }
-                                                    />
-                                                ) : (
-                                                    <MultiArtworkUpload
-                                                        title="Art Work เสื้อ"
-                                                        inputId="shirt-artwork-upload"
-                                                        files={
-                                                            data.shirt_artwork_files
-                                                        }
-                                                        previewUrls={
-                                                            shirtArtworkPreviewUrls
-                                                        }
-                                                        savedMedia={visibleSavedMedia(
-                                                            order?.shirt_artwork_media,
-                                                        )}
-                                                        error={
-                                                            shirtArtworkError
-                                                        }
-                                                        onSelect={(event) => {
-                                                            void handleShirtArtworkSelect(
-                                                                event,
-                                                            );
-                                                        }}
-                                                        onRemove={
-                                                            removeShirtArtworkAt
-                                                        }
-                                                        onRemoveSaved={
-                                                            removeSavedMedia
-                                                        }
-                                                    />
-                                                )}
-                                            </div>
-                                            {renderShirtSpecFields(
-                                                data.shirt_specs,
-                                                'shirt',
-                                                updateShirtSpecs,
-                                                selectShirtSpec,
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div
-                                            data-slot="garment-spec"
-                                            data-garment="pants"
-                                            className="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
-                                        >
-                                            {/* Artwork is taken through the Art Work dialog, which
-                                            already covers both garments, so this tab does not
-                                            ask for it a second time. */}
-                                            {usesArtworkBatches(
-                                                sizeFormMode,
-                                            ) ? null : (
-                                                <div className="md:col-span-2 xl:col-span-3">
-                                                    <MultiArtworkUpload
-                                                        title="Art Work กางเกง"
-                                                        inputId="pants-artwork-upload"
-                                                        files={
-                                                            data.pants_artwork_files
-                                                        }
-                                                        previewUrls={
-                                                            pantsArtworkPreviewUrls
-                                                        }
-                                                        savedMedia={visibleSavedMedia(
-                                                            order?.pants_artwork_media,
-                                                        )}
-                                                        error={
-                                                            pantsArtworkError
-                                                        }
-                                                        onSelect={(event) => {
-                                                            void handlePantsArtworkSelect(
-                                                                event,
-                                                            );
-                                                        }}
-                                                        onRemove={
-                                                            removePantsArtworkAt
-                                                        }
-                                                        onRemoveSaved={
-                                                            removeSavedMedia
-                                                        }
-                                                    />
-                                                </div>
-                                            )}
-                                            {renderPantsSpecFields(
-                                                data.pants_specs,
-                                                'pants',
-                                                updatePantsSpecs,
-                                            )}
-                                        </div>
-                                    )}
-                                </section>
-                            )}
                         </div>
 
                         <div className="mt-4 space-y-4">
@@ -6345,7 +7665,15 @@ export default function OrderCreatePage({
                                 <SectionHeading
                                     step={2}
                                     title="รายการสินค้า, สเปก และรูปงาน"
-                                    hint="หนึ่งตาราง = ชิ้นงาน ชั้นไซซ์ และความยาวหนึ่งแบบ = ใบงานผลิตหนึ่งใบ"
+                                    hint={
+                                        sizeFormMode === 'individual'
+                                            ? 'กรอกรายชื่อทีละคน แล้วกรอกสเปกแยกตามแบบที่สั่ง เช่น เสื้อแขนสั้น / แขนยาว'
+                                            : sizeFormMode === 'sports_day'
+                                              ? sportsDayKeepsPants
+                                                  ? 'กรอกจำนวนตามคณะสี แล้วกรอกสเปกเสื้อและกางเกงที่ใช้กับทุกคณะ'
+                                                  : 'กรอกจำนวนเสื้อตามคณะสี แล้วกรอกสเปกเสื้อที่ใช้กับทุกคณะ'
+                                              : 'หนึ่งตาราง = ชิ้นงาน ชั้นไซซ์ และความยาวหนึ่งแบบ = ใบงานผลิตหนึ่งใบ'
+                                    }
                                     action={
                                         <>
                                             {/*
@@ -6693,6 +8021,10 @@ export default function OrderCreatePage({
                                                                                             </Select>
                                                                                             <Input
                                                                                                 type="number"
+                                                                                                inputMode="numeric"
+                                                                                                onWheel={
+                                                                                                    blurOnWheel
+                                                                                                }
                                                                                                 min={
                                                                                                     0
                                                                                                 }
@@ -6802,6 +8134,10 @@ export default function OrderCreatePage({
                                                                                             </Select>
                                                                                             <Input
                                                                                                 type="number"
+                                                                                                inputMode="numeric"
+                                                                                                onWheel={
+                                                                                                    blurOnWheel
+                                                                                                }
                                                                                                 min={
                                                                                                     0
                                                                                                 }
@@ -6831,6 +8167,10 @@ export default function OrderCreatePage({
                                                                                     <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
                                                                                         <Input
                                                                                             type="number"
+                                                                                            inputMode="decimal"
+                                                                                            onWheel={
+                                                                                                blurOnWheel
+                                                                                            }
                                                                                             min={
                                                                                                 0
                                                                                             }
@@ -6874,6 +8214,10 @@ export default function OrderCreatePage({
                                                                                             </div>
                                                                                             <Input
                                                                                                 type="number"
+                                                                                                inputMode="numeric"
+                                                                                                onWheel={
+                                                                                                    blurOnWheel
+                                                                                                }
                                                                                                 min={
                                                                                                     0
                                                                                                 }
@@ -6912,6 +8256,10 @@ export default function OrderCreatePage({
                                                                                             </div>
                                                                                             <Input
                                                                                                 type="number"
+                                                                                                inputMode="numeric"
+                                                                                                onWheel={
+                                                                                                    blurOnWheel
+                                                                                                }
                                                                                                 min={
                                                                                                     0
                                                                                                 }
@@ -6941,6 +8289,10 @@ export default function OrderCreatePage({
                                                                                     <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
                                                                                         <Input
                                                                                             type="number"
+                                                                                            inputMode="decimal"
+                                                                                            onWheel={
+                                                                                                blurOnWheel
+                                                                                            }
                                                                                             min={
                                                                                                 0
                                                                                             }
@@ -6968,6 +8320,10 @@ export default function OrderCreatePage({
                                                                                     <td className="border border-slate-200 px-1.5 py-1.5 align-middle">
                                                                                         <Input
                                                                                             type="number"
+                                                                                            inputMode="decimal"
+                                                                                            onWheel={
+                                                                                                blurOnWheel
+                                                                                            }
                                                                                             min={
                                                                                                 0
                                                                                             }
@@ -7658,6 +9014,9 @@ export default function OrderCreatePage({
                                                                                                     rowId,
                                                                                                 )
                                                                                             }
+                                                                                            invalidClass={
+                                                                                                invalidClass
+                                                                                            }
                                                                                         />
                                                                                     </div>
                                                                                     <div className="border-t border-slate-200 bg-slate-50/50 px-2.5 py-3">
@@ -8004,7 +9363,7 @@ export default function OrderCreatePage({
                                                                         )
                                                                     }
                                                                     placeholder="เช่น คณะสีแดง"
-                                                                    className="h-9 bg-white text-xs md:text-xs"
+                                                                    className={`h-9 bg-white text-xs md:text-xs${invalidClass(`sd_group.${group.id}.team_name`)}`}
                                                                     aria-label={`ชื่อคณะสีที่ ${groupIndex + 1}`}
                                                                 />
                                                             </label>
@@ -8102,19 +9461,49 @@ export default function OrderCreatePage({
                                                         </div>
 
                                                         <div className="overflow-x-auto p-2.5">
-                                                            <table className="w-full min-w-[760px] table-fixed border-collapse text-xs">
+                                                            <table
+                                                                className={
+                                                                    sportsDayKeepsPants
+                                                                        ? 'w-full min-w-[760px] table-fixed border-collapse text-xs'
+                                                                        : 'w-full min-w-[560px] table-fixed border-collapse text-xs'
+                                                                }
+                                                            >
                                                                 <thead>
                                                                     <tr className="bg-slate-100 text-slate-700">
-                                                                        <th className="w-[15%] border border-slate-200 px-2 py-2">
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[15%] border border-slate-200 px-2 py-2'
+                                                                                    : 'w-[22%] border border-slate-200 px-2 py-2'
+                                                                            }
+                                                                        >
                                                                             ประเภทไซซ์
                                                                         </th>
-                                                                        <th className="w-[14%] border border-slate-200 px-2 py-2">
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[14%] border border-slate-200 px-2 py-2'
+                                                                                    : 'w-[20%] border border-slate-200 px-2 py-2'
+                                                                            }
+                                                                        >
                                                                             ไซซ์
                                                                         </th>
-                                                                        <th className="w-[12%] border border-slate-200 px-2 py-2">
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[12%] border border-slate-200 px-2 py-2'
+                                                                                    : 'w-[16%] border border-slate-200 px-2 py-2'
+                                                                            }
+                                                                        >
                                                                             เสื้อ
                                                                         </th>
-                                                                        <th className="w-[16%] border border-slate-200 px-2 py-2">
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[16%] border border-slate-200 px-2 py-2'
+                                                                                    : 'w-[20%] border border-slate-200 px-2 py-2'
+                                                                            }
+                                                                        >
                                                                             <PriceLinkHeader
                                                                                 label="ราคาเสื้อ"
                                                                                 linked={isSportsDayPriceLinked(
@@ -8129,28 +9518,44 @@ export default function OrderCreatePage({
                                                                                 }
                                                                             />
                                                                         </th>
-                                                                        <th className="w-[12%] border border-slate-200 px-2 py-2">
-                                                                            กางเกง
-                                                                        </th>
-                                                                        <th className="w-[16%] border border-slate-200 px-2 py-2">
-                                                                            <PriceLinkHeader
-                                                                                label="ราคากางเกง"
-                                                                                linked={isSportsDayPriceLinked(
-                                                                                    group.id,
-                                                                                    'pants_price',
-                                                                                )}
-                                                                                onToggle={() =>
-                                                                                    toggleSportsDayPriceLink(
-                                                                                        group.id,
-                                                                                        'pants_price',
-                                                                                    )
-                                                                                }
-                                                                            />
-                                                                        </th>
-                                                                        <th className="w-[13%] border border-slate-200 px-2 py-2">
+                                                                        {sportsDayKeepsPants ? (
+                                                                            <>
+                                                                                <th className="w-[12%] border border-slate-200 px-2 py-2">
+                                                                                    กางเกง
+                                                                                </th>
+                                                                                <th className="w-[16%] border border-slate-200 px-2 py-2">
+                                                                                    <PriceLinkHeader
+                                                                                        label="ราคากางเกง"
+                                                                                        linked={isSportsDayPriceLinked(
+                                                                                            group.id,
+                                                                                            'pants_price',
+                                                                                        )}
+                                                                                        onToggle={() =>
+                                                                                            toggleSportsDayPriceLink(
+                                                                                                group.id,
+                                                                                                'pants_price',
+                                                                                            )
+                                                                                        }
+                                                                                    />
+                                                                                </th>
+                                                                            </>
+                                                                        ) : null}
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[13%] border border-slate-200 px-2 py-2'
+                                                                                    : 'w-[18%] border border-slate-200 px-2 py-2'
+                                                                            }
+                                                                        >
                                                                             รวม
                                                                         </th>
-                                                                        <th className="w-[2%] border border-slate-200 px-1 py-2">
+                                                                        <th
+                                                                            className={
+                                                                                sportsDayKeepsPants
+                                                                                    ? 'w-[2%] border border-slate-200 px-1 py-2'
+                                                                                    : 'w-[4%] border border-slate-200 px-1 py-2'
+                                                                            }
+                                                                        >
                                                                             <span className="sr-only">
                                                                                 ลบแถว
                                                                             </span>
@@ -8164,10 +9569,9 @@ export default function OrderCreatePage({
                                                                             rowIndex,
                                                                         ) => {
                                                                             const rowSizeOptions =
-                                                                                row.size_group ===
-                                                                                'kids'
-                                                                                    ? resolvedKidsSizes
-                                                                                    : resolvedAdultSizes;
+                                                                                sizeOptionsForTier(
+                                                                                    row.size_group,
+                                                                                );
                                                                             const shirtPriceLinked =
                                                                                 isSportsDayPriceLinked(
                                                                                     group.id,
@@ -8202,10 +9606,10 @@ export default function OrderCreatePage({
                                                                                                     row.id,
                                                                                                     {
                                                                                                         size_group:
-                                                                                                            value ===
-                                                                                                            'kids'
-                                                                                                                ? 'kids'
-                                                                                                                : 'adults',
+                                                                                                            readSizeTier(
+                                                                                                                value,
+                                                                                                                value,
+                                                                                                            ),
                                                                                                         size_label:
                                                                                                             '',
                                                                                                     },
@@ -8233,6 +9637,11 @@ export default function OrderCreatePage({
                                                                                                     เด็ก
                                                                                                     (Kids)
                                                                                                 </SelectItem>
+                                                                                                <SelectItem value="junior">
+                                                                                                    ประถม
+                                                                                                    -
+                                                                                                    มัธยมต้น
+                                                                                                </SelectItem>
                                                                                                 <SelectItem value="adults">
                                                                                                     ผู้ใหญ่
                                                                                                     (Adults)
@@ -8259,7 +9668,7 @@ export default function OrderCreatePage({
                                                                                             }
                                                                                         >
                                                                                             <SelectTrigger
-                                                                                                className="h-8 w-full bg-white text-xs"
+                                                                                                className={`h-8 w-full bg-white text-xs${invalidClass(`sd_row.${row.id}.size_label`)}`}
                                                                                                 aria-label={`ไซซ์แถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
                                                                                             >
                                                                                                 <SelectValue placeholder="ไม่ระบุ" />
@@ -8299,6 +9708,10 @@ export default function OrderCreatePage({
                                                                                     <td className="border border-slate-200 px-1.5 py-1.5">
                                                                                         <Input
                                                                                             type="number"
+                                                                                            inputMode="numeric"
+                                                                                            onWheel={
+                                                                                                blurOnWheel
+                                                                                            }
                                                                                             min={
                                                                                                 0
                                                                                             }
@@ -8324,13 +9737,17 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className="h-8 bg-white text-center text-xs md:text-xs"
+                                                                                            className={`h-8 bg-white text-center text-xs md:text-xs${invalidClass(`sd_row.${row.id}.shirt_qty`)}`}
                                                                                             aria-label={`จำนวนเสื้อแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
                                                                                         />
                                                                                     </td>
                                                                                     <td className="border border-slate-200 px-1.5 py-1.5">
                                                                                         <Input
                                                                                             type="number"
+                                                                                            inputMode="decimal"
+                                                                                            onWheel={
+                                                                                                blurOnWheel
+                                                                                            }
                                                                                             min={
                                                                                                 0
                                                                                             }
@@ -8359,7 +9776,7 @@ export default function OrderCreatePage({
                                                                                                     },
                                                                                                 )
                                                                                             }
-                                                                                            className={`h-8 text-center text-xs md:text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
+                                                                                            className={`h-8 text-center text-xs md:text-xs ${shirtPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}${invalidClass(`sd_row.${row.id}.shirt_price`)}`}
                                                                                             title={
                                                                                                 shirtPriceLinked
                                                                                                     ? 'ราคาตามแถวแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละแถว'
@@ -8368,78 +9785,90 @@ export default function OrderCreatePage({
                                                                                             aria-label={`ราคาเสื้อแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
                                                                                         />
                                                                                     </td>
-                                                                                    <td className="border border-slate-200 px-1.5 py-1.5">
-                                                                                        <Input
-                                                                                            type="number"
-                                                                                            min={
-                                                                                                0
-                                                                                            }
-                                                                                            value={numberFieldValue(
-                                                                                                row.pants_qty,
-                                                                                            )}
-                                                                                            onChange={(
-                                                                                                event,
-                                                                                            ) =>
-                                                                                                patchSportsDayRow(
-                                                                                                    group.id,
-                                                                                                    row.id,
-                                                                                                    {
-                                                                                                        pants_qty:
-                                                                                                            Math.max(
-                                                                                                                toNumber(
-                                                                                                                    event
-                                                                                                                        .target
-                                                                                                                        .value,
-                                                                                                                ),
-                                                                                                                0,
-                                                                                                            ),
-                                                                                                    },
-                                                                                                )
-                                                                                            }
-                                                                                            className="h-8 bg-white text-center text-xs md:text-xs"
-                                                                                            aria-label={`จำนวนกางเกงแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
-                                                                                        />
-                                                                                    </td>
-                                                                                    <td className="border border-slate-200 px-1.5 py-1.5">
-                                                                                        <Input
-                                                                                            type="number"
-                                                                                            min={
-                                                                                                0
-                                                                                            }
-                                                                                            value={numberFieldValue(
-                                                                                                row.pants_price,
-                                                                                            )}
-                                                                                            readOnly={
-                                                                                                pantsPriceLinked
-                                                                                            }
-                                                                                            onChange={(
-                                                                                                event,
-                                                                                            ) =>
-                                                                                                patchSportsDayRow(
-                                                                                                    group.id,
-                                                                                                    row.id,
-                                                                                                    {
-                                                                                                        pants_price:
-                                                                                                            Math.max(
-                                                                                                                toNumber(
-                                                                                                                    event
-                                                                                                                        .target
-                                                                                                                        .value,
-                                                                                                                ),
-                                                                                                                0,
-                                                                                                            ),
-                                                                                                    },
-                                                                                                )
-                                                                                            }
-                                                                                            className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}`}
-                                                                                            title={
-                                                                                                pantsPriceLinked
-                                                                                                    ? 'ราคาตามแถวแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละแถว'
-                                                                                                    : undefined
-                                                                                            }
-                                                                                            aria-label={`ราคากางเกงแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
-                                                                                        />
-                                                                                    </td>
+                                                                                    {sportsDayKeepsPants ? (
+                                                                                        <>
+                                                                                            <td className="border border-slate-200 px-1.5 py-1.5">
+                                                                                                <Input
+                                                                                                    type="number"
+                                                                                                    inputMode="numeric"
+                                                                                                    onWheel={
+                                                                                                        blurOnWheel
+                                                                                                    }
+                                                                                                    min={
+                                                                                                        0
+                                                                                                    }
+                                                                                                    value={numberFieldValue(
+                                                                                                        row.pants_qty,
+                                                                                                    )}
+                                                                                                    onChange={(
+                                                                                                        event,
+                                                                                                    ) =>
+                                                                                                        patchSportsDayRow(
+                                                                                                            group.id,
+                                                                                                            row.id,
+                                                                                                            {
+                                                                                                                pants_qty:
+                                                                                                                    Math.max(
+                                                                                                                        toNumber(
+                                                                                                                            event
+                                                                                                                                .target
+                                                                                                                                .value,
+                                                                                                                        ),
+                                                                                                                        0,
+                                                                                                                    ),
+                                                                                                            },
+                                                                                                        )
+                                                                                                    }
+                                                                                                    className="h-8 bg-white text-center text-xs md:text-xs"
+                                                                                                    aria-label={`จำนวนกางเกงแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
+                                                                                                />
+                                                                                            </td>
+                                                                                            <td className="border border-slate-200 px-1.5 py-1.5">
+                                                                                                <Input
+                                                                                                    type="number"
+                                                                                                    inputMode="decimal"
+                                                                                                    onWheel={
+                                                                                                        blurOnWheel
+                                                                                                    }
+                                                                                                    min={
+                                                                                                        0
+                                                                                                    }
+                                                                                                    value={numberFieldValue(
+                                                                                                        row.pants_price,
+                                                                                                    )}
+                                                                                                    readOnly={
+                                                                                                        pantsPriceLinked
+                                                                                                    }
+                                                                                                    onChange={(
+                                                                                                        event,
+                                                                                                    ) =>
+                                                                                                        patchSportsDayRow(
+                                                                                                            group.id,
+                                                                                                            row.id,
+                                                                                                            {
+                                                                                                                pants_price:
+                                                                                                                    Math.max(
+                                                                                                                        toNumber(
+                                                                                                                            event
+                                                                                                                                .target
+                                                                                                                                .value,
+                                                                                                                        ),
+                                                                                                                        0,
+                                                                                                                    ),
+                                                                                                            },
+                                                                                                        )
+                                                                                                    }
+                                                                                                    className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : 'bg-white'}${invalidClass(`sd_row.${row.id}.pants_price`)}`}
+                                                                                                    title={
+                                                                                                        pantsPriceLinked
+                                                                                                            ? 'ราคาตามแถวแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละแถว'
+                                                                                                            : undefined
+                                                                                                    }
+                                                                                                    aria-label={`ราคากางเกงแถวที่ ${rowIndex + 1} ของคณะที่ ${groupIndex + 1}`}
+                                                                                                />
+                                                                                            </td>
+                                                                                        </>
+                                                                                    ) : null}
                                                                                     <td className="border border-slate-200 px-2 py-1.5 text-right font-mono font-semibold text-slate-900">
                                                                                         ฿{' '}
                                                                                         {formatMoney(
@@ -8479,7 +9908,9 @@ export default function OrderCreatePage({
                                                                         <td
                                                                             className="border border-slate-200 px-2 py-2 text-right"
                                                                             colSpan={
-                                                                                6
+                                                                                sportsDayKeepsPants
+                                                                                    ? 6
+                                                                                    : 4
                                                                             }
                                                                         >
                                                                             รวมคณะ{' '}
@@ -8515,60 +9946,57 @@ export default function OrderCreatePage({
                                                                 </Button>
                                                             </div>
 
-                                                            {/* Artwork saved when a กีฬาสี bill kept one pile of pictures
-                                                                per colour house, before artwork was pinned to the sheets
-                                                                it prints on. It stays removable so an old bill can be
-                                                                tidied up; new pictures go through the Art Work dialog
-                                                                like every other form. */}
-                                                            {savedGroupArtwork.length >
-                                                            0 ? (
-                                                                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
-                                                                    <p className="mb-1.5 text-xs font-semibold text-amber-900">
-                                                                        Art Work
-                                                                        เดิมของคณะนี้
-                                                                        <span className="ml-2 font-normal text-amber-700">
-                                                                            รูปใหม่ให้แนบที่ปุ่ม
-                                                                            Art
-                                                                            Work
-                                                                            ของใบงาน
-                                                                        </span>
-                                                                    </p>
-                                                                    <div className="flex flex-wrap gap-2">
-                                                                        {savedGroupArtwork.map(
-                                                                            (
-                                                                                media,
-                                                                            ) => (
-                                                                                <div
-                                                                                    key={
-                                                                                        media.id
-                                                                                    }
-                                                                                    className="relative size-16 overflow-hidden rounded-md border border-amber-200 bg-white"
-                                                                                >
-                                                                                    <img
-                                                                                        src={
-                                                                                            media.url
-                                                                                        }
-                                                                                        alt={`Art Work ${group.team_name}`}
-                                                                                        className="size-full object-contain"
-                                                                                    />
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() =>
-                                                                                            removeSavedMedia(
-                                                                                                media.id,
-                                                                                            )
-                                                                                        }
-                                                                                        aria-label={`ลบรูปที่บันทึกไว้ของ ${group.team_name || 'คณะนี้'}`}
-                                                                                        className="absolute top-0 right-0 rounded-bl bg-slate-900/70 px-1 text-[10px] leading-4 text-white hover:bg-rose-600"
-                                                                                    >
-                                                                                        ✕
-                                                                                    </button>
-                                                                                </div>
-                                                                            ),
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            ) : null}
+                                                            {/* The house's own pictures, at the end of the
+                                                                house they belong to — as a table's sit under
+                                                                it on Forms 1 and 4. The production sheet
+                                                                prints them on every sheet of this house. A
+                                                                bill saved earlier shows its pictures here
+                                                                too, each removable. */}
+                                                            <div className="mt-3">
+                                                                <MultiArtworkUpload
+                                                                    title={`Art Work · ${group.team_name.trim() || `คณะที่ ${groupIndex + 1}`}`}
+                                                                    name={
+                                                                        group.team_name.trim() ||
+                                                                        `คณะที่ ${groupIndex + 1}`
+                                                                    }
+                                                                    inputId={`sports-day-artwork-${group.id}`}
+                                                                    files={
+                                                                        data
+                                                                            .sports_day_artwork_files[
+                                                                            group
+                                                                                .id
+                                                                        ] ?? []
+                                                                    }
+                                                                    previewUrls={
+                                                                        houseArtworkPreviews[
+                                                                            group
+                                                                                .id
+                                                                        ] ?? []
+                                                                    }
+                                                                    savedMedia={
+                                                                        savedGroupArtwork
+                                                                    }
+                                                                    onSelect={(
+                                                                        event,
+                                                                    ) => {
+                                                                        void handleHouseArtworkSelect(
+                                                                            group.id,
+                                                                            event,
+                                                                        );
+                                                                    }}
+                                                                    onRemove={(
+                                                                        index,
+                                                                    ) =>
+                                                                        removeHouseArtworkFile(
+                                                                            group.id,
+                                                                            index,
+                                                                        )
+                                                                    }
+                                                                    onRemoveSaved={
+                                                                        removeSavedMedia
+                                                                    }
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 );
@@ -8884,7 +10312,7 @@ export default function OrderCreatePage({
                                                                                         .value,
                                                                                 )
                                                                             }
-                                                                            className="h-8 text-xs md:text-xs"
+                                                                            className={`h-8 text-xs md:text-xs${invalidClass(`person.${row.id}.name`)}`}
                                                                             aria-label={`สกรีนชื่อคนที่ ${rowIndex + 1}`}
                                                                         />
                                                                     </td>
@@ -8950,7 +10378,7 @@ export default function OrderCreatePage({
                                                                             }
                                                                         >
                                                                             <SelectTrigger
-                                                                                className="h-8 w-full bg-white text-xs"
+                                                                                className={`h-8 w-full bg-white text-xs${invalidClass(`person.${row.id}.size`)}`}
                                                                                 aria-label={`ไซซ์คนที่ ${rowIndex + 1}`}
                                                                             >
                                                                                 <SelectValue placeholder="ไม่ระบุ" />
@@ -9074,13 +10502,17 @@ export default function OrderCreatePage({
                                                                                         .value,
                                                                                 )
                                                                             }
-                                                                            className="h-8 text-center text-xs md:text-xs"
+                                                                            className={`h-8 text-center text-xs md:text-xs${invalidClass(`person.${row.id}.number`)}`}
                                                                             aria-label={`เบอร์คนที่ ${rowIndex + 1}`}
                                                                         />
                                                                     </td>
                                                                     <td className="border border-slate-200 px-1.5 py-1.5">
                                                                         <Input
                                                                             type="number"
+                                                                            inputMode="numeric"
+                                                                            onWheel={
+                                                                                blurOnWheel
+                                                                            }
                                                                             min={
                                                                                 1
                                                                             }
@@ -9110,6 +10542,10 @@ export default function OrderCreatePage({
                                                                     <td className="border border-slate-200 px-1.5 py-1.5">
                                                                         <Input
                                                                             type="number"
+                                                                            inputMode="decimal"
+                                                                            onWheel={
+                                                                                blurOnWheel
+                                                                            }
                                                                             min={
                                                                                 0
                                                                             }
@@ -9157,15 +10593,32 @@ export default function OrderCreatePage({
                                                                                         updatePersonalization(
                                                                                             row.id,
                                                                                             'pants_size',
-                                                                                            value,
+                                                                                            // Back to following the shirt, or the shirt's own size picked:
+                                                                                            // either way it stays linked.
+                                                                                            value ===
+                                                                                                PANTS_FOLLOWS_SHIRT ||
+                                                                                                value ===
+                                                                                                    row.size
+                                                                                                ? ''
+                                                                                                : value,
                                                                                         )
                                                                                     }
                                                                                 >
                                                                                     <SelectTrigger
-                                                                                        className="h-8 w-full bg-white text-xs"
+                                                                                        className={
+                                                                                            row.pants_size
+                                                                                                ? 'h-8 w-full bg-white text-xs'
+                                                                                                : 'h-8 w-full bg-blue-50/60 text-xs'
+                                                                                        }
                                                                                         aria-label={`ไซซ์กางเกงคนที่ ${rowIndex + 1}`}
                                                                                     >
-                                                                                        <SelectValue placeholder="ไม่ระบุ" />
+                                                                                        <SelectValue
+                                                                                            placeholder={
+                                                                                                row.size
+                                                                                                    ? `${row.size} · ตามเสื้อ`
+                                                                                                    : 'ตามไซซ์เสื้อ'
+                                                                                            }
+                                                                                        />
                                                                                     </SelectTrigger>
                                                                                     <SelectContent
                                                                                         position="popper"
@@ -9178,6 +10631,13 @@ export default function OrderCreatePage({
                                                                                             12
                                                                                         }
                                                                                     >
+                                                                                        <SelectItem
+                                                                                            value={
+                                                                                                PANTS_FOLLOWS_SHIRT
+                                                                                            }
+                                                                                        >
+                                                                                            ตามไซซ์เสื้อ
+                                                                                        </SelectItem>
                                                                                         {sizeOptionsByGroup[
                                                                                             row
                                                                                                 .size_group
@@ -9275,13 +10735,21 @@ export default function OrderCreatePage({
                                                                                                 .value,
                                                                                         )
                                                                                     }
-                                                                                    className="h-8 text-center text-xs md:text-xs"
+                                                                                    placeholder={
+                                                                                        row.number
+                                                                                    }
+                                                                                    title="เว้นว่างไว้ = ใช้เบอร์ตามเสื้อ"
+                                                                                    className="h-8 text-center text-xs placeholder:text-blue-700/60 md:text-xs"
                                                                                     aria-label={`เบอร์กางเกงคนที่ ${rowIndex + 1}`}
                                                                                 />
                                                                             </td>
                                                                             <td className="border border-slate-200 px-1.5 py-1.5">
                                                                                 <Input
                                                                                     type="number"
+                                                                                    inputMode="numeric"
+                                                                                    onWheel={
+                                                                                        blurOnWheel
+                                                                                    }
                                                                                     min={
                                                                                         0
                                                                                     }
@@ -9311,6 +10779,10 @@ export default function OrderCreatePage({
                                                                             <td className="border border-slate-200 px-1.5 py-1.5">
                                                                                 <Input
                                                                                     type="number"
+                                                                                    inputMode="decimal"
+                                                                                    onWheel={
+                                                                                        blurOnWheel
+                                                                                    }
                                                                                     min={
                                                                                         0
                                                                                     }
@@ -9336,7 +10808,7 @@ export default function OrderCreatePage({
                                                                                             ),
                                                                                         )
                                                                                     }
-                                                                                    className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : ''}`}
+                                                                                    className={`h-8 text-center text-xs md:text-xs ${pantsPriceLinked ? 'bg-slate-50 text-slate-500' : ''}${invalidClass(`person.${row.id}.pants_unit_price`)}`}
                                                                                     title={
                                                                                         pantsPriceLinked
                                                                                             ? 'ราคาตามคนแรก กดไอคอนลิงก์ที่หัวตารางเพื่อแก้ทีละคน'
@@ -9439,6 +10911,65 @@ export default function OrderCreatePage({
                                         </div>
                                     </div>
                                 ) : null}
+
+                                {/*
+                                    One spec for the whole bill, which is how
+                                    Forms 2 and 3 are sold: a list of people,
+                                    or a set of colour houses, all in the same
+                                    garment. It sits in this step, after what
+                                    is being bought, and reads the way Forms 1
+                                    and 4 read a table's spec: shirts and
+                                    trousers each in their own group, folded
+                                    under a heading that says what is still
+                                    missing. Forms 1 and 4 carry a spec per
+                                    table instead, so they never show this.
+                                */}
+                                {usesSizeTables(sizeFormMode) &&
+                                !editingLegacySizeRows ? null : (
+                                    <div
+                                        data-slot="bill-spec"
+                                        className="mt-4 space-y-3"
+                                    >
+                                        {/* Form 3 takes its pictures under each
+                                        house now. A bill that already carries
+                                        pictures attached the earlier way keeps
+                                        this, so they stay reachable. */}
+                                        {usesArtworkBatches(sizeFormMode) &&
+                                        (sizeFormMode === 'sports_day'
+                                            ? artworkAttachedCount > 0
+                                            : sizeFormMode === 'individual'
+                                              ? unpinnedArtworkCount +
+                                                    strayIndividualArtworkCount >
+                                                0
+                                              : true) ? (
+                                            <ArtworkBatchButton
+                                                attached={artworkAttachedCount}
+                                                missing={
+                                                    artworkBatchesMissing.length
+                                                }
+                                                onOpen={() =>
+                                                    setArtworkDialogOpen(true)
+                                                }
+                                            />
+                                        ) : null}
+
+                                        {sizeFormMode === 'individual'
+                                            ? renderIndividualSheetSpecs()
+                                            : (['shirt', 'pants'] as const)
+                                                  .filter(
+                                                      (garment) =>
+                                                          garment === 'shirt' ||
+                                                          sizeFormMode !==
+                                                              'sports_day' ||
+                                                          sportsDayKeepsPants,
+                                                  )
+                                                  .map((garment) =>
+                                                      renderBillSpecGroup(
+                                                          garment,
+                                                      ),
+                                                  )}
+                                    </div>
+                                )}
                             </section>
 
                             {/*
@@ -9520,6 +11051,8 @@ export default function OrderCreatePage({
                                             </span>
                                             <Input
                                                 type="number"
+                                                inputMode="decimal"
+                                                onWheel={blurOnWheel}
                                                 min={0}
                                                 value={data.deposit_amount}
                                                 onChange={(event) =>
