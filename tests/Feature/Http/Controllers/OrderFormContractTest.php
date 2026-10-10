@@ -11,6 +11,7 @@ use App\Models\GarmentType;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 /**
@@ -161,6 +162,241 @@ class OrderFormContractTest extends TestCase
 
         $this->assertSame(11, $specification?->pattern_id);
         $this->assertSame(22, $specification?->fabric_id);
+    }
+
+    /**
+     * The form posts its two long lists as JSON strings rather than as arrays.
+     *
+     * It has to. Multipart encoding gives every scalar its own input variable,
+     * and PHP reads only the first `max_input_vars` of them — 1000 by default —
+     * before silently discarding the rest. At roughly ten variables per size
+     * row, a Form 2 bill of fifty people lost three quarters of its rows and
+     * all of its spec on the way in, and came back refused for a pattern and a
+     * fabric that were filled in. As one string each, the variable count no
+     * longer grows with the bill.
+     */
+    public function test_items_posted_as_a_json_string_are_read_as_rows(): void
+    {
+        $payload = $this->formPayload();
+        $payload['items'] = json_encode($payload['items'], JSON_THROW_ON_ERROR);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(2, Order::query()->firstOrFail()->items()->count());
+    }
+
+    /**
+     * Unpacking happens before the rules, not instead of them.
+     */
+    public function test_a_json_string_of_items_is_still_checked_row_by_row(): void
+    {
+        $payload = $this->formPayload();
+        $payload['items'][0]['quantity'] = 0;
+        $payload['items'] = json_encode($payload['items'], JSON_THROW_ON_ERROR);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasErrors(['items.0.quantity']);
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    /**
+     * The size that used to break: 60 rows was about 1,210 input variables,
+     * past the 1000 PHP reads, so the bill arrived in pieces.
+     */
+    public function test_a_bill_far_past_the_old_variable_limit_saves_every_row(): void
+    {
+        $rows = [];
+
+        for ($i = 0; $i < 60; $i++) {
+            $rows[] = [
+                'item_type' => 'separate_shirt', 'size_group' => 'adults',
+                'size_tier' => 'adults', 'size_label' => 'XL',
+                'shirt_style' => 'short', 'quantity' => 1, 'unit_price' => 250,
+            ];
+            $rows[] = [
+                'item_type' => 'separate_pants', 'size_group' => 'adults',
+                'size_tier' => 'adults', 'size_label' => 'XL',
+                'pants_style' => 'short', 'quantity' => 1, 'unit_price' => 220,
+            ];
+        }
+
+        $payload = $this->formPayload();
+        $payload['items'] = json_encode($rows, JSON_THROW_ON_ERROR);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(120, Order::query()->firstOrFail()->items()->count());
+    }
+
+    /**
+     * Anything that is not a list of rows is reported, never read as an empty
+     * bill: a truncated or mangled string must not save an order with no items.
+     */
+    public function test_an_unreadable_items_string_is_refused(): void
+    {
+        $payload = $this->formPayload();
+        $payload['items'] = '[{"item_type":"separate_shirt","quan';
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasErrors(['items']);
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    /**
+     * PHP keeps only `max_file_uploads` files per request and drops the rest at
+     * startup without raising anything. The browser says how many it attached,
+     * so the shortfall is caught here rather than stored.
+     */
+    public function test_a_bill_whose_artwork_was_dropped_on_the_way_in_is_refused(): void
+    {
+        $payload = $this->formPayload();
+        $payload['shirt_artwork'] = [UploadedFile::fake()->image('art.png')];
+        $payload['artwork_file_count'] = 5;
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasErrors(['artwork_file_count']);
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    public function test_a_bill_whose_artwork_all_arrived_is_accepted(): void
+    {
+        $payload = $this->formPayload();
+        $payload['shirt_artwork'] = [
+            UploadedFile::fake()->image('one.png'),
+            UploadedFile::fake()->image('two.png'),
+        ];
+        $payload['artwork_file_count'] = 2;
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    /**
+     * Form 2 writes a person per row, so its bill is the longest the counter
+     * makes and the first to have broken: a roster of fifty with trousers was
+     * already past what PHP would read. It sells one spec for the whole bill,
+     * so the rows are all that grow.
+     *
+     * @param  int  $people  how many names are on the roster
+     * @return array<string, mixed>
+     */
+    private function rosterPayload(int $people): array
+    {
+        $payload = $this->formPayload();
+        $rows = [];
+
+        for ($i = 1; $i <= $people; $i++) {
+            $rows[] = [
+                'item_type' => 'separate_shirt', 'size_group' => 'adults',
+                'size_tier' => 'adults', 'size_label' => 'XL',
+                'shirt_style' => 'short', 'quantity' => 1, 'unit_price' => 250,
+            ];
+            $rows[] = [
+                'item_type' => 'separate_pants', 'size_group' => 'adults',
+                'size_tier' => 'adults', 'size_label' => 'XL',
+                'pants_style' => 'long', 'quantity' => 1, 'unit_price' => 220,
+            ];
+        }
+
+        $payload['items'] = json_encode($rows, JSON_THROW_ON_ERROR);
+        $payload['specification']['screen_print_detail'] = json_encode([
+            'schema' => 'spec-v3',
+            'mode' => 'individual',
+            'garment_specs' => [],
+            'shirt_specs' => $this->tableSpec('shirt_type_id', (string) $this->shirtType->id),
+            'pants_specs' => $this->tableSpec('pants_type_id', (string) $this->pantsType->id),
+        ], JSON_THROW_ON_ERROR);
+
+        return $payload;
+    }
+
+    public function test_a_form_2_roster_of_fifty_people_saves_whole(): void
+    {
+        $this->actingAs($this->owner)
+            ->post('/orders', $this->rosterPayload(50))
+            ->assertSessionHasNoErrors();
+
+        $order = Order::query()->firstOrFail();
+
+        $this->assertSame(100, $order->items()->count());
+        $this->assertSame(100, (int) $order->items()->sum('quantity'));
+    }
+
+    /**
+     * Well past anything the shop writes, to show the ceiling moved rather than
+     * merely rose: the bill no longer costs input variables by the row.
+     */
+    public function test_a_form_2_roster_of_three_hundred_people_saves_whole(): void
+    {
+        $this->actingAs($this->owner)
+            ->post('/orders', $this->rosterPayload(300))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(600, Order::query()->firstOrFail()->items()->count());
+    }
+
+    /**
+     * Form 3 sells a shirt and a pair of trousers per colour house. It keeps no
+     * per-sheet spec either, so what has to survive the trip is the rows and
+     * the house each one belongs to.
+     */
+    public function test_a_form_3_sports_day_bill_keeps_every_house(): void
+    {
+        $houses = ['แดง', 'เขียว', 'น้ำเงิน', 'เหลือง'];
+        $rows = [];
+
+        foreach ($houses as $house) {
+            foreach (['kids', 'adults'] as $group) {
+                $rows[] = [
+                    'item_type' => 'set', 'size_group' => $group,
+                    'size_tier' => $group, 'size_label' => $group === 'kids' ? 'JM' : 'L',
+                    'shirt_style' => 'short', 'quantity' => 25, 'unit_price' => 300,
+                ];
+            }
+        }
+
+        $payload = $this->formPayload();
+        $payload['items'] = json_encode($rows, JSON_THROW_ON_ERROR);
+        $payload['specification']['screen_print_detail'] = json_encode([
+            'schema' => 'spec-v3',
+            'mode' => 'sports_day',
+            'garment_specs' => [],
+            'sports_day_groups' => array_map(
+                fn (string $house): array => ['house_name' => $house],
+                $houses,
+            ),
+            'shirt_specs' => $this->tableSpec('shirt_type_id', (string) $this->shirtType->id),
+            'pants_specs' => $this->tableSpec('pants_type_id', (string) $this->pantsType->id),
+        ], JSON_THROW_ON_ERROR);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $order = Order::query()->firstOrFail();
+        $decoded = json_decode(
+            (string) $order->specification?->screen_print_detail,
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+
+        $this->assertSame(8, $order->items()->count());
+        $this->assertSame(200, (int) $order->items()->sum('quantity'));
+        $this->assertCount(4, $decoded['sports_day_groups']);
     }
 
     /**

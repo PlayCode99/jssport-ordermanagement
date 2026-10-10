@@ -2133,6 +2133,35 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
     );
 }
 
+/**
+ * How many files a payload actually carries, however deeply they are nested.
+ *
+ * PHP accepts only `max_file_uploads` files per request and discards the rest
+ * at startup, silently. Sending the count alongside them lets the server see
+ * that some never arrived, instead of saving a bill whose artwork is missing.
+ */
+export function countAttachedFiles(value: unknown): number {
+    if (value instanceof File || value instanceof Blob) {
+        return 1;
+    }
+
+    if (Array.isArray(value)) {
+        return value.reduce<number>(
+            (total, entry) => total + countAttachedFiles(entry),
+            0,
+        );
+    }
+
+    if (value !== null && typeof value === 'object') {
+        return Object.values(value).reduce<number>(
+            (total, entry) => total + countAttachedFiles(entry),
+            0,
+        );
+    }
+
+    return 0;
+}
+
 export function buildRequestItemsFromIndividual(
     rows: PersonalizationRowForm[],
     includePants = false,
@@ -6436,76 +6465,91 @@ export default function OrderCreatePage({
 
         const routings = resolveRoutingFlowByJobType(selectedJobType);
 
-        transform((payload) => ({
-            shirt_artwork: payload.shirt_artwork_files,
-            pants_artwork: payload.pants_artwork_files,
-            // Artwork pinned to one production batch, and the batches the user
-            // moved already-saved images to. Only Forms 1 and 4 ever fill these
-            // in; the server reads an unknown batch as "every sheet".
-            shirt_artwork_scoped: payload.shirt_artwork_scoped,
-            pants_artwork_scoped: payload.pants_artwork_scoped,
-            artwork_scopes: payload.artwork_scopes,
-            // Form 3: each house's new pictures, by the house's position on
-            // the bill — the key the server stores them under and the
-            // production sheet reads them back by.
-            sports_day_artwork:
-                sizeFormMode === 'sports_day'
-                    ? sportsDayArtworkPayload(
-                          payload.sports_day_groups,
-                          payload.sports_day_artwork_files,
-                      )
-                    : {},
-            duplicate_from_id: order?.duplicate_from_id ?? null,
-            // Saved artwork the user removed. On an edit these media are deleted;
-            // on a duplicate they are simply not copied onto the new bill.
-            removed_media_ids: payload.removed_media_ids,
-            customer_id: payload.customer_id
-                ? Number(payload.customer_id)
-                : null,
-            customer_name: customerName,
-            customer_phone: payload.customer_phone || null,
-            contact_detail: payload.contact_detail || null,
-            branch_id: Number(payload.branch_id || 0),
-            job_name: payload.job_name,
-            job_type: selectedJobType,
-            delivery_method: payload.delivery_method,
-            shipping_address: payload.shipping_address || null,
-            order_date: `${payload.billing_date} ${payload.billing_time || '00:00'}:00`,
-            due_date: `${normalizedDueDate} 00:00:00`,
-            discount_percent: discountPercent,
-            deposit_amount: payload.deposit_amount,
-            payment_method: payload.payment_method,
-            items: requestItems,
-            routings,
-            specification: {
-                pattern_id: activeSpecValues.pattern_id
-                    ? Number(activeSpecValues.pattern_id)
+        transform((payload) => {
+            const body = {
+                shirt_artwork: payload.shirt_artwork_files,
+                pants_artwork: payload.pants_artwork_files,
+                // Artwork pinned to one production batch, and the batches the user
+                // moved already-saved images to. Only Forms 1 and 4 ever fill these
+                // in; the server reads an unknown batch as "every sheet".
+                shirt_artwork_scoped: payload.shirt_artwork_scoped,
+                pants_artwork_scoped: payload.pants_artwork_scoped,
+                artwork_scopes: payload.artwork_scopes,
+                // Form 3: each house's new pictures, by the house's position on
+                // the bill — the key the server stores them under and the
+                // production sheet reads them back by.
+                sports_day_artwork:
+                    sizeFormMode === 'sports_day'
+                        ? sportsDayArtworkPayload(
+                              payload.sports_day_groups,
+                              payload.sports_day_artwork_files,
+                          )
+                        : {},
+                duplicate_from_id: order?.duplicate_from_id ?? null,
+                // Saved artwork the user removed. On an edit these media are deleted;
+                // on a duplicate they are simply not copied onto the new bill.
+                removed_media_ids: payload.removed_media_ids,
+                customer_id: payload.customer_id
+                    ? Number(payload.customer_id)
                     : null,
-                fabric_id: activeSpecValues.fabric_id
-                    ? Number(activeSpecValues.fabric_id)
-                    : null,
-                neck_style_id: flatSpecShirt.neck_style_id
-                    ? Number(flatSpecShirt.neck_style_id)
-                    : null,
-                collar_color: flatSpecShirt.neck_color_id || null,
-                leg_style: flatSpecPants.leg_style_id || null,
-                leg_hem: flatSpecPants.leg_cuff_id || null,
-                placket_style: flatSpecShirt.placket_style_id || null,
-                placket_color: flatSpecShirt.placket_outer_color_id || null,
-                sleeve_style: flatSpecShirt.sleeve_style_text || null,
-                sleeve_hem: flatSpecShirt.sleeve_cuff_id || null,
-                sublimation_detail:
-                    flatSpecShirt.sublimation_id ||
-                    flatSpecPants.sublimation_id ||
-                    null,
-                screen_print_detail: screenPrintDetail,
-                embroidery_code:
-                    flatSpecShirt.embroidery_code_text ||
-                    flatSpecPants.embroidery_code_text ||
-                    null,
-            },
-            line_items: derivedLineItems,
-        }));
+                customer_name: customerName,
+                customer_phone: payload.customer_phone || null,
+                contact_detail: payload.contact_detail || null,
+                branch_id: Number(payload.branch_id || 0),
+                job_name: payload.job_name,
+                job_type: selectedJobType,
+                delivery_method: payload.delivery_method,
+                shipping_address: payload.shipping_address || null,
+                order_date: `${payload.billing_date} ${payload.billing_time || '00:00'}:00`,
+                due_date: `${normalizedDueDate} 00:00:00`,
+                discount_percent: discountPercent,
+                deposit_amount: payload.deposit_amount,
+                payment_method: payload.payment_method,
+                // The two long lists go as one JSON string each. Posted as
+                // arrays they became about ten multipart variables per size row,
+                // and PHP stops reading a request after `max_input_vars` of them —
+                // so a bill of roughly fifty people arrived with its rows cut short
+                // and its spec missing, and was refused for fields that were
+                // filled in. The server unpacks these before validating.
+                items: JSON.stringify(requestItems),
+                routings,
+                specification: {
+                    pattern_id: activeSpecValues.pattern_id
+                        ? Number(activeSpecValues.pattern_id)
+                        : null,
+                    fabric_id: activeSpecValues.fabric_id
+                        ? Number(activeSpecValues.fabric_id)
+                        : null,
+                    neck_style_id: flatSpecShirt.neck_style_id
+                        ? Number(flatSpecShirt.neck_style_id)
+                        : null,
+                    collar_color: flatSpecShirt.neck_color_id || null,
+                    leg_style: flatSpecPants.leg_style_id || null,
+                    leg_hem: flatSpecPants.leg_cuff_id || null,
+                    placket_style: flatSpecShirt.placket_style_id || null,
+                    placket_color: flatSpecShirt.placket_outer_color_id || null,
+                    sleeve_style: flatSpecShirt.sleeve_style_text || null,
+                    sleeve_hem: flatSpecShirt.sleeve_cuff_id || null,
+                    sublimation_detail:
+                        flatSpecShirt.sublimation_id ||
+                        flatSpecPants.sublimation_id ||
+                        null,
+                    screen_print_detail: screenPrintDetail,
+                    embroidery_code:
+                        flatSpecShirt.embroidery_code_text ||
+                        flatSpecPants.embroidery_code_text ||
+                        null,
+                },
+                line_items: JSON.stringify(derivedLineItems),
+            };
+
+            // Counted from the body that is about to go, so nothing that
+            // carries a file can be left out of the tally by accident.
+            return {
+                ...body,
+                artwork_file_count: countAttachedFiles(body),
+            };
+        });
 
         const submitUrl = isEditing ? `/orders/${order.id}` : '/orders';
 

@@ -9,12 +9,52 @@ use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreOrderRequest extends FormRequest
 {
     public function authorize(): bool
     {
         return (bool) $this->user()?->can('create', Order::class);
+    }
+
+    /**
+     * The counter form posts as multipart/form-data, because it carries artwork
+     * files. In that encoding every scalar is its own input variable, so a bill
+     * sends roughly ten of them per size row — and PHP stops reading a request
+     * once it has seen `max_input_vars` of them, which is 1000 by default.
+     *
+     * It does not refuse the request. It parses the first thousand variables,
+     * silently discards the rest and hands the remains to the application, so a
+     * Form 2 bill of about fifty people arrived with its items cut in a quarter
+     * and its `specification` missing entirely — and was refused for a pattern
+     * and a fabric the counter had plainly filled in. Nothing on either side was
+     * wrong; the request never arrived whole.
+     *
+     * So the two long lists travel as one JSON string each and are unpacked
+     * here, before any rule runs. That makes the variable count a constant that
+     * does not grow with the bill, and every rule below still sees the arrays it
+     * was written for. A caller that posts real arrays — the tests, and anything
+     * speaking to this as an API — is left untouched.
+     */
+    protected function prepareForValidation(): void
+    {
+        foreach (['items', 'line_items'] as $key) {
+            $value = $this->input($key);
+
+            if (! is_string($value)) {
+                continue;
+            }
+
+            $decoded = json_decode($value, true);
+
+            // Anything that is not a list of rows is left exactly as it came, so
+            // the `array` rule reports it rather than this quietly reading it as
+            // an empty bill.
+            if (is_array($decoded)) {
+                $this->merge([$key => $decoded]);
+            }
+        }
     }
 
     /**
@@ -125,6 +165,11 @@ class StoreOrderRequest extends FormRequest
             'removed_media_ids' => ['sometimes', 'array'],
             'removed_media_ids.*' => ['integer', 'min:1'],
 
+            // How many artwork files the browser attached. PHP drops uploads
+            // past `max_file_uploads` without saying so, so the count is what
+            // lets the server notice that some never arrived.
+            'artwork_file_count' => ['nullable', 'integer', 'min:0'],
+
             'items' => ['required', 'array', 'min:1'],
             'items.*.item_type' => ['required', 'string'],
             'items.*.size_group' => ['required', 'string', Rule::in(['kids', 'adults', 'oversize'])],
@@ -157,6 +202,62 @@ class StoreOrderRequest extends FormRequest
             'routings' => ['sometimes', 'array', 'min:1'],
             'routings.*' => ['required', 'string', Rule::in(array_column(RoutingStationName::cases(), 'value'))],
         ];
+    }
+
+    /**
+     * Counts every file that actually reached PHP, however it was nested.
+     */
+    private function uploadedFileCount(): int
+    {
+        $count = 0;
+        // Held in a variable first: array_walk_recursive takes its subject by
+        // reference, so the result of a call cannot be passed straight in.
+        $files = $this->allFiles();
+
+        array_walk_recursive(
+            $files,
+            function (mixed $file) use (&$count): void {
+                if ($file !== null) {
+                    $count++;
+                }
+            },
+        );
+
+        return $count;
+    }
+
+    /**
+     * PHP accepts `max_file_uploads` files per request — twenty by default —
+     * and throws the rest away at startup without raising anything the
+     * application can catch. A bill with more artwork than that would have been
+     * saved looking complete while some of its images had simply vanished.
+     *
+     * The browser says how many it attached, so a shortfall is visible here and
+     * the bill is refused instead of stored short.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $claimed = $this->input('artwork_file_count');
+
+            if (! is_numeric($claimed)) {
+                return;
+            }
+
+            $arrived = $this->uploadedFileCount();
+
+            if ($arrived >= (int) $claimed) {
+                return;
+            }
+
+            $validator->errors()->add('artwork_file_count', sprintf(
+                'แนบรูปมา %d ไฟล์ แต่ระบบรับได้เพียง %d ไฟล์ '
+                .'เซิร์ฟเวอร์จำกัดจำนวนไฟล์ต่อการบันทึกหนึ่งครั้ง '
+                .'กรุณาลดจำนวนรูป แล้วบันทึกอีกครั้ง (ยังไม่มีการบันทึกข้อมูล)',
+                (int) $claimed,
+                $arrived,
+            ));
+        });
     }
 
     /**
