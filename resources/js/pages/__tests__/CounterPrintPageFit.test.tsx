@@ -7,11 +7,14 @@ import Counter from '@/pages/Counter';
 type InertiaModule = typeof InertiaModuleImport;
 
 /**
- * The receipt is fitted to one A4 sheet. A bill whose sheets are sewn
- * differently now prints a spec block each, which is the one thing that can
- * make it taller — so the document this bill produces is written out for a
- * real renderer to measure rather than trusted to a jsdom layout, which has
- * none.
+ * The receipt aims at one A4 sheet. The spec used to be what made it taller —
+ * a bill whose sheets are sewn differently printed a block for each — and it
+ * is now read on screen instead, where there is room for it, so the receipt
+ * carries only what the customer signs for.
+ *
+ * This bill has four specs that all differ, the worst case the old sheet had,
+ * and the document it produces is written out for a real renderer to measure
+ * rather than trusted to a jsdom layout, which has none.
  */
 vi.mock('@inertiajs/react', async () => {
     const actual = await vi.importActual<InertiaModule>('@inertiajs/react');
@@ -240,6 +243,15 @@ const row = makeRow({
 });
 
 describe('the receipt a bill with four different specs prints', () => {
+    /** Every spec heading this bill would once have printed. */
+    const specHeadings = [
+        'สเปกเสื้อ',
+        'สเปกกางเกง',
+        'แพทเทิร์น',
+        'เนื้อผ้า',
+        'สีผ้า',
+    ];
+
     it('builds a document a real renderer can be given to measure', () => {
         // jsdom has no scroll implementation; the table scrolls itself when the
         // detail dialog opens.
@@ -293,10 +305,19 @@ describe('the receipt a bill with four different specs prints', () => {
         fireEvent.click(screen.getByRole('button', { name: /Print เอกสาร/ }));
 
         expect(written).toContain('size: A4 portrait');
-        // Four specs that differ means four blocks; identical ones would fold
-        // into one, which is what nearly every bill prints.
-        expect(written).toContain('สเปกเสื้อ · เสื้อ เด็ก · แขนสั้น');
-        expect(written).toContain('สเปกกางเกง · กางเกง ผู้ใหญ่ · ขายาว');
+
+        // Not one of them prints, however many the bill has.
+        for (const heading of specHeadings) {
+            expect(written).not.toContain(heading);
+        }
+
+        // What the customer signs for is still all there.
+        expect(written).toContain('ใบรับงาน');
+        expect(written).toContain('ลงชื่อผู้สั่งสินค้า');
+
+        // The fitter may trim to stay on the sheet, in that order.
+        expect(written).toContain('var ART_MIN');
+        expect(written).toContain('var FONT_MIN');
 
         // Handed to whatever wants to render it for real. jsdom has no layout,
         // so page fit is measured by printing this document with a browser and

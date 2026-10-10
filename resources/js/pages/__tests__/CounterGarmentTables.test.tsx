@@ -778,83 +778,29 @@ const perSheetSpecs = {
     },
 };
 
+/**
+ * The spec used to print as a card per production sheet. It was the one thing
+ * that could push the receipt past its A4 page — six differing sheets meant
+ * six blocks of twenty settings — and it is read on screen instead, where
+ * there is room to group it and to mark what differs between sheets. The
+ * receipt carries what the customer signs for; the floor works from the
+ * production sheets.
+ */
 describe('the spec on a Form 1 receipt', () => {
-    it('prints one card per garment, tier and length, shirts first', () => {
-        const cards = specCards(printedHtml(garmentBill(perSheetSpecs)));
-
-        expect(cards.map((card) => card.key)).toEqual([
-            'shirt_adults_short',
-            'shirt_adults_long',
-            'pants_adults_short',
-        ]);
-        expect(cards[0].text).toContain('เสื้อผู้ใหญ่ · แขนสั้น');
-        expect(cards[2].text).toContain('กางเกงผู้ใหญ่ · ขาสั้น');
-    });
-
-    it('heads each card with how many it covers and in which sizes', () => {
-        const [shortSleeve] = specCards(
-            printedHtml(garmentBill(perSheetSpecs)),
-        );
-
-        expect(shortSleeve.text).toContain('20 ตัว | ไซซ์ S 20');
-    });
-
-    it('prints the spec saved under each card’s own key', () => {
-        const [shortSleeve, longSleeve, trousers] = specCards(
-            printedHtml(garmentBill(perSheetSpecs)),
-        );
-
-        expect(shortSleeve.text).toContain('ธรรมดา');
-        expect(longSleeve.text).toContain('จั๊ม');
-        expect(trousers.text).toContain('ขาจั๊ม');
-        expect(trousers.text).not.toContain('โปโล');
-    });
-
-    it('marks a setting that differs between the shirt cards', () => {
-        const [shortSleeve, , trousers] = specCards(
-            printedHtml(garmentBill(perSheetSpecs)),
-        );
-
-        expect(shortSleeve.text).toContain('ปลายแขน ▲ ธรรมดา');
-        expect(shortSleeve.text).toContain('แพทเทิร์น โปโล');
-        expect(trousers.text).not.toContain('▲');
-    });
-
-    it('gives an older bill its one spec on every card of that garment', () => {
-        const cards = specCards(printedHtml(garmentBill()));
-
-        expect(cards[0].text).toContain('แพทเทิร์นมาตรฐาน');
-        expect(cards[1].text).toContain('แพทเทิร์นมาตรฐาน');
-        expect(cards[2].text).toContain('ขาตรง');
-        expect(cards[2].text).not.toContain('แพทเทิร์นมาตรฐาน');
-    });
-
-    it('keeps the sizes on the shirt and trouser tables as before', () => {
+    it('prints no spec at all, however many sheets the bill has', () => {
         const html = printedHtml(garmentBill(perSheetSpecs));
 
-        expect(printedTables(html)).toHaveLength(2);
-        expect(html).not.toContain('<div class="spec-sections');
+        expect(specCards(html)).toHaveLength(0);
+        expect(html).not.toContain('spec-sections');
+        expect(html).not.toContain('เสื้อผู้ใหญ่ · แขนสั้น');
+        expect(html).not.toContain('ขาจั๊ม');
     });
 
-    it('leaves a bill carrying a set on the spec blocks it always printed', () => {
-        const html = printedHtml(
-            garmentBill({
-                items: [
-                    ...garmentItems,
-                    {
-                        item_type: 'set',
-                        size_group: 'adults',
-                        size_label: 'L',
-                        quantity: 4,
-                        unit_price: 300,
-                        total_price: 1200,
-                    },
-                ],
-            }),
-        );
+    it('still prints the sizes and the signatures', () => {
+        const html = printedHtml(garmentBill(perSheetSpecs));
 
-        expect(specCards(html)).toHaveLength(0);
-        expect(html).toContain('<div class="spec-sections');
+        expect(html).toContain('ลงชื่อผู้สั่งสินค้า');
+        expect(html).toContain('size: A4 portrait');
     });
 });
 

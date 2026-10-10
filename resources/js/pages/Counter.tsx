@@ -646,28 +646,49 @@ const PRINT_PAGE_MARGIN_MM = 7;
  * across, which is the size the shop settled on.
  */
 const PRINT_ARTWORK_FIXED_MM = 58;
+/**
+ * How far the fitter may trim to keep a bill on one sheet. The artwork gives
+ * way first: it is a reminder of what was ordered, while the size table is the
+ * figures the floor and the customer both read, so a smaller picture costs less
+ * than smaller numbers. Below these the sheet stops being worth reading and the
+ * bill is allowed its second page instead.
+ */
+const PRINT_ARTWORK_MIN_MM = 26;
+const PRINT_ARTWORK_STEP_MM = 2;
 const PRINT_SIZE_FONT_PX = 11;
 const PRINT_SIZE_FONT_MAX_PX = 15;
+const PRINT_SIZE_FONT_MIN_PX = 8;
 const PRINT_SIZE_FONT_STEP_PX = 0.5;
 
 /**
  * Runs inside the print window: waits for the artwork to load, then decides how
  * the sheet is laid out.
  *
- * A bill carries a spec for every garment type it sells and all of them belong
- * on the receipt, so a long bill is allowed the pages it needs. Nothing is
- * shrunk to avoid a page and nothing is scaled — the stylesheet says where the
- * paper may end, and the sheet reads at one size throughout. What is still
- * worth doing is filling a short bill's page, and numbering the pages of a long
- * one so a customer can see none is missing.
+ * The sheet aims at a single A4 portrait page. The spec no longer prints — it
+ * is read on screen, where there is room for it — so what is left is the
+ * masthead, the artwork, the bill's details and its size tables, and that fits
+ * on one page for all but the longest bills.
+ *
+ * So the fitter works both ways. A short bill's spare room goes to the size
+ * table, up to a size that still looks deliberate. A bill that runs over gives
+ * back the artwork's height first and the table's type second, each only as far
+ * as it must and no further than stays readable. Nothing is scaled: the sheet
+ * reads at one size throughout, whatever it was trimmed to.
+ *
+ * A bill longer than both floors can save is allowed the page it needs rather
+ * than being squeezed past legibility, and the pages are numbered so a customer
+ * can see none is missing.
  */
 export function buildPrintFitScript(): string {
     return `
         (function () {
             var PAGE_MM = ${PRINT_PAGE_HEIGHT_MM} - (${PRINT_PAGE_MARGIN_MM} * 2);
             var FIXED = ${PRINT_ARTWORK_FIXED_MM};
+            var ART_MIN = ${PRINT_ARTWORK_MIN_MM};
+            var ART_STEP = ${PRINT_ARTWORK_STEP_MM};
             var FONT = ${PRINT_SIZE_FONT_PX};
             var FONT_MAX = ${PRINT_SIZE_FONT_MAX_PX};
+            var FONT_MIN = ${PRINT_SIZE_FONT_MIN_PX};
             var FONT_STEP = ${PRINT_SIZE_FONT_STEP_PX};
 
             function whenImagesSettled(done) {
@@ -724,6 +745,10 @@ export function buildPrintFitScript(): string {
                 // artwork — but only while the sheet is still inside one page,
                 // so growth never causes the break it is trying to avoid.
                 if (page.scrollHeight <= limit) {
+                    // Room to spare goes to the size table, because readable
+                    // figures matter more than a big picture, and only while
+                    // the sheet is still inside the page — so growth never
+                    // causes the break it is there to avoid.
                     var font = FONT;
 
                     while (font < FONT_MAX) {
@@ -732,6 +757,29 @@ export function buildPrintFitScript(): string {
 
                         if (page.scrollHeight > limit) { setFont(font - FONT_STEP); break; }
                     }
+                } else {
+                    // Over the page: give back the artwork's height first, a
+                    // couple of millimetres at a time, and stop the moment it
+                    // fits so nothing is trimmed further than it needs to be.
+                    var art = FIXED;
+
+                    while (art > ART_MIN && page.scrollHeight > limit) {
+                        art = Math.max(ART_MIN, art - ART_STEP);
+                        setArtwork(art);
+                    }
+
+                    // Still over, so the table gives way too, down to the
+                    // smallest size the figures stay legible at.
+                    var small = FONT;
+
+                    while (small > FONT_MIN && page.scrollHeight > limit) {
+                        small = Math.max(FONT_MIN, small - FONT_STEP);
+                        setFont(small);
+                    }
+
+                    // If it is still over after both, the bill is simply longer
+                    // than a sheet — it runs on, numbered, rather than being
+                    // squeezed until nobody can read it.
                 }
 
                 // One runner per page, each at the foot of its own page, so a
@@ -832,59 +880,6 @@ const SIZE_TIER_HEAD_CLASSES: Record<SizeTierKey, string> = {
     junior: 'bg-sky-700',
     adults: 'bg-orange-700',
 };
-
-type SpecPrintRow = { label: string; value: string };
-
-/**
- * Settings that read as one and must share a printed row. The receipt lays
- * the spec out two settings to a row, so without this the inner placket
- * colour could end one row and the outer start the next.
- */
-const PAIRED_SPEC_LABELS: ReadonlyArray<readonly [string, string]> = [
-    ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
-];
-
-const isPairedSpecLabel = (label: string): boolean =>
-    PAIRED_SPEC_LABELS.some((pair) => pair.includes(label));
-
-/**
- * The receipt's spec settings as printed cells, two to a row, with every
- * pair kept on one row. A pair that would start in the right-hand column
- * takes the next single setting up into that slot instead and begins the
- * following row; when there is no single setting left to move, the slot
- * stays blank. Nothing else changes place.
- */
-function layoutSpecPrintCells(
-    rows: SpecPrintRow[],
-): Array<SpecPrintRow | null> {
-    const cells: Array<SpecPrintRow | null> = [];
-    const queue = [...rows];
-
-    while (queue.length > 0) {
-        const row = queue.shift() as SpecPrintRow;
-        const partner = PAIRED_SPEC_LABELS.find(
-            ([first]) => first === row.label,
-        )?.[1];
-        const startsPair = partner !== undefined && queue[0]?.label === partner;
-
-        if (startsPair && cells.length % 2 === 1) {
-            const fillerIndex = queue.findIndex(
-                (candidate, index) =>
-                    index > 0 && !isPairedSpecLabel(candidate.label),
-            );
-
-            cells.push(
-                fillerIndex === -1
-                    ? null
-                    : (queue.splice(fillerIndex, 1)[0] as SpecPrintRow),
-            );
-        }
-
-        cells.push(row);
-    }
-
-    return cells;
-}
 
 export type SportsDayGroupPayload = {
     team_name: string;
@@ -3745,13 +3740,6 @@ export default function Counter({
         }
 
         const order = sourceOrder.details;
-        const specificationRows = order.specification_display ?? [];
-        const shirtRows =
-            order.spec_sections?.shirt ??
-            specificationRows.filter((row) => !pantsLabels.has(row.label));
-        const pantsRows =
-            order.spec_sections?.pants ??
-            specificationRows.filter((row) => pantsLabels.has(row.label));
         const billingDate = order.billing_date ?? '';
         const dueDate = order.due_date ?? '';
         const printImages = Array.from(
@@ -3766,46 +3754,11 @@ export default function Counter({
                 ].filter((url): url is string => Boolean(url)),
             ),
         );
+        // Never more than four, and never more columns than pictures.
+        const galleryColumns = Math.min(4, Math.max(printImages.length, 1));
         const customerName =
             order.customer.name || sourceOrder.customer_name || '-';
         const receiverName = sourceOrder.receiver_name || '-';
-        const renderSpecTableRows = (
-            rows: Array<{ label: string; value: string }>,
-        ) => {
-            if (rows.length === 0) {
-                return '<tr><td colspan="4" class="empty-state">—</td></tr>';
-            }
-
-            const cells = layoutSpecPrintCells(rows);
-            const cell = (entry: SpecPrintRow | null | undefined) =>
-                entry
-                    ? `<td class="spec-label">${escapeHtml(entry.label)}</td><td class="spec-value">${escapeHtml(entry.value || '-')}</td>`
-                    : '<td class="spec-label"></td><td class="spec-value"></td>';
-
-            return Array.from(
-                { length: Math.ceil(cells.length / 2) },
-                (_, index) => `
-                    <tr class="spec-row">
-                        ${cell(cells[index * 2])}
-                        ${cell(cells[index * 2 + 1])}
-                    </tr>
-                `,
-            ).join('');
-        };
-
-        const renderSpecSection = (
-            title: string,
-            rows: Array<{ label: string; value: string }>,
-        ) => {
-            return `
-                <div class="spec-section">
-                    <div class="table-title">${title}</div>
-                    <table class="spec-table">
-                        <tbody>${renderSpecTableRows(rows)}</tbody>
-                    </table>
-                </div>
-            `;
-        };
         // A Form 2 bill prints its sizes the same way as every other form:
         // its line items are one shirt or pair of pants per person, which the
         // size tables below add up per size and length. The name list is its
@@ -4206,79 +4159,6 @@ export default function Counter({
          * a ▲ as well as a tint, so it still shows on a black-and-white
          * printer.
          */
-        const renderGarmentSpecCards = (sheets: GarmentSheet[]): string => {
-            const differences = specDifferences(sheets);
-            const cards = sheets
-                .map((sheet) => {
-                    const groups = groupSpecRows(sheet.spec, sheet.garment);
-                    const body =
-                        groups.length === 0
-                            ? '<div class="spec-card-empty">ยังไม่มีข้อมูลสเปกที่บันทึก</div>'
-                            : `<div class="spec-card-body">${groups
-                                  .map(
-                                      (group) => `
-                            <div class="spec-group">
-                                <div class="spec-group-title">${escapeHtml(group.title)}</div>
-                                <table class="spec-list"><tbody>${group.rows
-                                    .map((row) =>
-                                        differences.has(
-                                            `${sheet.key}|${row.label}`,
-                                        )
-                                            ? `<tr><th>${escapeHtml(row.label)}</th><td class="is-diff">▲ ${escapeHtml(row.value)}</td></tr>`
-                                            : `<tr><th>${escapeHtml(row.label)}</th><td>${escapeHtml(row.value)}</td></tr>`,
-                                    )
-                                    .join('')}</tbody></table>
-                            </div>`,
-                                  )
-                                  .join('')}</div>`;
-
-                    return `
-                    <div class="spec-card ${sheet.garment === 'pants' ? 'theme-pants' : 'theme-shirt'}" data-sheet="${escapeHtml(sheet.key)}">
-                        <div class="spec-card-head">
-                            <span class="spec-card-title">${escapeHtml(sheet.title)}</span>
-                            <span class="spec-card-meta"><b>${sheet.quantity.toLocaleString('th-TH')} ตัว</b> &nbsp;|&nbsp; ไซซ์ ${escapeHtml(sheetSizeSummary(sheet))}</span>
-                        </div>
-                        ${body}
-                    </div>`;
-                })
-                .join('');
-
-            return `
-                <div class="spec-sheets">
-                    <div class="spec-sheets-head">
-                        <span>สเปกการผลิต แยกตามประเภท</span>
-                        ${differences.size > 0 ? '<span class="spec-sheets-legend"><span class="is-diff">▲ ค่าที่ไฮไลต์</span> ไม่เหมือนกันทุกตาราง ตรวจก่อนผลิต</span>' : ''}
-                    </div>
-                    ${cards}
-                </div>`;
-        };
-
-        // One block per distinct spec. A bill whose sheets are all sewn the
-        // same way still prints a single block, so the sheet it fits on is
-        // unchanged; only a bill that really does differ prints more.
-        const specBlocks = buildSpecBlocks(
-            order.spec_sections?.batches,
-            shirtRows,
-            pantsRows,
-        );
-        // Forms 1, 2 and 4 print a spec per sheet; every other bill keeps
-        // the blocks it has always printed.
-        const specTablesMarkup =
-            sportsDayMatrices.length === 0 &&
-            billUsesGarmentTables(sizeRows, order.form_mode)
-                ? renderGarmentSpecCards(
-                      buildGarmentSheets(
-                          sizeRows,
-                          order.spec_sections?.batches,
-                          shirtRows,
-                          pantsRows,
-                      ),
-                  )
-                : `<div class="spec-sections${specBlocks.length === 2 ? ' has-two' : ''}">${specBlocks
-                      .map((block) =>
-                          renderSpecSection(block.title, block.rows),
-                      )
-                      .join('')}</div>`;
         const totalQuantity = sizeRows.reduce(
             (sum, row) => sum + Number(row.quantity || 0),
             0,
@@ -4360,13 +4240,15 @@ export default function Counter({
                            below only touches it when a dense bill would otherwise
                            need a second page. */
                         :root { --artwork-h: ${PRINT_ARTWORK_FIXED_MM}mm; --artwork-col: ${PRINT_ARTWORK_FIXED_MM}mm; --size-font: ${PRINT_SIZE_FONT_PX}px; }
-                        /* Columns are at least as wide as the artwork's full height,
-                           so a square mock-up fills its box instead of sitting small
-                           in a tall grey band. Deliberately --artwork-col and not
-                           --artwork-h: the fitter trims the height on a busy sheet,
-                           and tying the width to it made the columns narrow at the
-                           same time, so the pictures shrank twice over. */
-                        .image-gallery { margin-top: 6px; display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--artwork-col), 1fr)); gap: 8px; }
+                        /* Four across, which is the count the artwork height was
+                           settled on for. It used to be auto-fit over a minimum
+                           column as wide as that height, and 58mm into the 196mm
+                           the margins leave only ever divided three ways — so the
+                           first row came out one picture short of what the rest of
+                           the sheet was measured against. The count is written out
+                           instead, and a bill with fewer pictures than that gets
+                           only the columns it fills rather than empty ones. */
+                        .image-gallery { margin-top: 6px; display: grid; grid-template-columns: repeat(${galleryColumns}, 1fr); gap: 8px; }
                         /* The cap stops a lone artwork from stretching into a banner
                            the width of the sheet with a small picture adrift in it. */
                         .image-card { border: 1px solid #d1d5db; background: #f9fafb; padding: 4px; min-height: var(--artwork-h); max-height: var(--artwork-h); max-width: calc(var(--artwork-col) * 1.6); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -4406,14 +4288,6 @@ export default function Counter({
                            whole run of specs onto the next one and left the
                            first half empty. Laid out in normal flow they break
                            between blocks, which is where a break belongs. */
-                        .spec-sections { margin-top: 4px; }
-                        .spec-section { min-width: 0; }
-                        .spec-sections > .spec-section + .spec-section { margin-top: 4px; }
-                        .spec-table { width: 100%; border-collapse: collapse; margin-top: 2px; font-size: 12px; table-layout: fixed; }
-                        .spec-table td { border: 1px solid #000000; padding: 2px 3px; vertical-align: middle; line-height: 1.1; }
-                        .spec-row td { text-align: center; }
-                        .spec-label { width: 18%; background: #e0f2fe; font-weight: 700; white-space: nowrap; }
-                        .spec-value { width: 32%; background: #ffffff; }
                         .table-title { background: #174395; color: #ffffff; font-weight: 700; text-align: center; padding: 3px; font-size: 12px; margin-top: 0; }
                         /* Two columns at all times, not only under @media print.
                            The fitter measures this window to decide how much room
@@ -4425,8 +4299,6 @@ export default function Counter({
                         /* Two specs still sit side by side: a pair fits across
                            the sheet and reads as one comparison. Three or more
                            run down the page so they can break between blocks. */
-                        .spec-sections.has-two { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-                        .spec-sections.has-two > .spec-section + .spec-section { margin-top: 0; }
                         .size-table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: var(--size-font, ${PRINT_SIZE_FONT_PX}px); }
                         .size-table th, .size-table td { border: 1px solid #000000; padding: 3px 4px; text-align: center; }
                         .size-table th { background: var(--tbl-head, #e0f2fe); font-weight: 700; }
@@ -4476,15 +4348,6 @@ export default function Counter({
                         .spec-sheets { margin-top: 6px; }
                         .spec-sheets-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 0.5mm solid #111827; padding-bottom: 2px; margin-bottom: 4px; font-size: 13px; font-weight: 800; }
                         .spec-sheets-legend { font-size: 10px; font-weight: 400; color: #374151; }
-                        .spec-card { --accent: #174395; --soft: #eef3fb; border: 0.3mm solid #94a3b8; border-left: 1.6mm solid var(--accent); break-inside: avoid; page-break-inside: avoid; }
-                        .spec-card.theme-pants { --accent: #c8161d; --soft: #fdf0f0; }
-                        .spec-card + .spec-card { margin-top: 5px; }
-                        .spec-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; background: var(--soft); padding: 3px 7px; border-bottom: 0.3mm solid #cbd5e1; }
-                        .spec-card-title { font-size: 14px; font-weight: 800; color: var(--accent); }
-                        .spec-card-meta { font-size: 11px; color: #374151; text-align: right; }
-                        .spec-card-meta b { color: #111827; }
-                        .spec-card-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 6mm; padding: 3px 7px 5px; }
-                        .spec-card-empty { padding: 6px 7px; color: #6b7280; font-style: italic; }
                         .spec-group { min-width: 0; }
                         .spec-group-title { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 0.04em; border-bottom: 0.3mm solid #cbd5e1; padding: 2px 0 1px; margin-bottom: 1px; }
                         .spec-list { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -4526,7 +4389,7 @@ export default function Counter({
                         .signature-line { width: 58%; border-bottom: 1px solid #000000; }
                         .warning-banner { margin-top: 5px; background: #E21E26; color: #ffffff; text-align: center; padding: 4px 5px; font-size: 10px; font-weight: 700; line-height: 1.15; }
                         .small { font-size: 10px; }
-                        tr, td, th, .detail-grid, .info-box, .size-table, .spec-table, .footer-table, .banner-box { page-break-inside: avoid; }
+                        tr, td, th, .detail-grid, .info-box, .size-table, .footer-table, .banner-box { page-break-inside: avoid; }
                         /* The run of size tables is free to break between them.
                            Held together it was one tall block, so a sheet that
                            needed a second page moved the whole run there and
@@ -4546,7 +4409,6 @@ export default function Counter({
 
                         /* A spec is read as a whole: its heading must not sit at
                            the foot of one page with its rows on the next. */
-                        .spec-section { break-inside: avoid; page-break-inside: avoid; }
                         /* A block that does have to break repeats its heading
                            row, so the second page is not a column of figures
                            under nothing. */
@@ -4656,8 +4518,6 @@ export default function Counter({
                             </tbody>
                         </table>`
                         }
-
-                        ${specTablesMarkup}
 
                         <table class="footer-table">
                             <tr>

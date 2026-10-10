@@ -339,99 +339,37 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('4');
     });
 
-    it('prints the shirt and pants specification that was saved', () => {
+    /**
+     * The spec is read on screen, where there is room to lay it out properly
+     * and to mark what differs between sheets. It used to print as well, and
+     * it was the one thing that could push the receipt onto a second sheet —
+     * a bill with six differing sheets printed six blocks of twenty settings.
+     *
+     * The receipt is what the customer signs for, so it carries the job, the
+     * artwork, the sizes and the money, and leaves the sewing instructions to
+     * the production sheets that the floor actually works from.
+     */
+    it('leaves the specification off the printed receipt', () => {
         const html = printedHtml();
 
-        expect(html).toContain('แพทเทิร์นมาตรฐาน');
-        expect(html).toContain('ขาว');
-        expect(html).toContain('ขาตรง');
+        // Values that are plainly on the saved spec of this bill.
+        expect(html).not.toContain('แพทเทิร์นมาตรฐาน');
+        expect(html).not.toContain('ขาตรง');
+
+        // And the headings that framed them.
+        expect(html).not.toContain('สเปกเสื้อ');
+        expect(html).not.toContain('สเปกกางเกง');
+        expect(html).not.toContain('spec-section');
+        expect(html).not.toContain('spec-card');
     });
 
-    /**
-     * The spec prints two settings to a row. The two placket colours are read
-     * as one setting, so they must share a row whatever comes before them —
-     * on screen they sit one under the other, and the paper must not split
-     * them across a row end.
-     */
-    describe('the placket colours on the printed spec', () => {
-        const spec = (labels: string[]) =>
-            labels.map((label, index) => ({ label, value: `ค่า${index}` }));
+    it('still prints everything the customer signs for', () => {
+        const html = printedHtml();
 
-        /** Each printed spec row as its labels, left cell then right cell. */
-        const printedSpecRows = (html: string): string[][] =>
-            [...html.matchAll(/<tr class="spec-row">([\s\S]*?)<\/tr>/g)].map(
-                (match) =>
-                    [
-                        ...match[1].matchAll(
-                            /<td class="spec-label">(.*?)<\/td>/g,
-                        ),
-                    ].map((cell) => cell[1]),
-            );
-
-        const shirtRowsFor = (labels: string[]) =>
-            printedSpecRows(
-                printedHtml(
-                    makeRow({
-                        details: {
-                            ...makeRow().details,
-                            spec_sections: { shirt: spec(labels), pants: [] },
-                        },
-                    }),
-                ),
-            );
-
-        it('keeps them side by side when they already start a row', () => {
-            const rows = shirtRowsFor([
-                'แพทเทิร์น',
-                'เนื้อผ้า',
-                'สีสาบ (ใน)',
-                'สีสาบ (นอก)',
-                'ปลายแขน',
-            ]);
-
-            expect(rows).toEqual([
-                ['แพทเทิร์น', 'เนื้อผ้า'],
-                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
-                ['ปลายแขน', ''],
-            ]);
-        });
-
-        it('moves the next single setting up so the pair can take a whole row', () => {
-            const rows = shirtRowsFor([
-                'แพทเทิร์น',
-                'เนื้อผ้า',
-                'แบบสาบ',
-                'สีสาบ (ใน)',
-                'สีสาบ (นอก)',
-                'ปลายแขน',
-                'สาบนอก',
-            ]);
-
-            expect(rows).toEqual([
-                ['แพทเทิร์น', 'เนื้อผ้า'],
-                ['แบบสาบ', 'ปลายแขน'],
-                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
-                ['สาบนอก', ''],
-            ]);
-        });
-
-        it('leaves the slot blank rather than split the pair when nothing can move up', () => {
-            const rows = shirtRowsFor(['แบบสาบ', 'สีสาบ (ใน)', 'สีสาบ (นอก)']);
-
-            expect(rows).toEqual([
-                ['แบบสาบ', ''],
-                ['สีสาบ (ใน)', 'สีสาบ (นอก)'],
-            ]);
-        });
-
-        it('changes nothing when only one of the two colours was saved', () => {
-            const rows = shirtRowsFor(['แบบสาบ', 'สีสาบ (ใน)', 'ปลายแขน']);
-
-            expect(rows).toEqual([
-                ['แบบสาบ', 'สีสาบ (ใน)'],
-                ['ปลายแขน', ''],
-            ]);
-        });
+        expect(html).toContain('ใบรับงาน');
+        expect(html).toContain('ลงชื่อผู้สั่งสินค้า');
+        expect(html).toContain('ลงชื่อผู้รับงาน');
+        expect(html).toContain('image-gallery');
     });
 
     it('escapes customer text instead of letting it break the markup', () => {
@@ -864,44 +802,58 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain(`297 - (${margin} * 2)`);
     });
 
-    it('prints the artwork at one fixed height on every sheet', () => {
+    it('prints the artwork at the same height on every sheet it fits on', () => {
         const html = printedHtml();
 
-        // One height on every bill, never trimmed: a receipt that needs more
-        // room takes another page rather than shrinking its picture.
+        // Every bill starts at the same height, so two receipts printed one
+        // after the other look alike rather than one carrying a poster and the
+        // next a stamp.
         expect(html).toContain('var FIXED = 58');
         expect(html).toContain('--artwork-h: 58mm');
-        expect(html).not.toContain('var MIN =');
+
+        // A bill that would run over gives this back before it gives back the
+        // figures, and only down to a size still worth looking at.
+        expect(html).toContain('var ART_MIN = 26');
         expect(html).not.toContain('var MIN_SCALE');
     });
 
     it('measures the same layout that comes out of the printer', () => {
         const html = printedHtml();
 
-        // The spec block sat in one column on screen and two under @media print.
-        // The fitter measures this window, so it sized the artwork against a
-        // block 46mm taller than the one that actually printed: the picture came
-        // out trimmed with a band of empty paper below it.
-        expect(html).toContain(
-            '.spec-sections.has-two { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }',
-        );
-        expect(html).not.toMatch(
-            /@media print \{[^}]*\.spec-sections\.has-two/s,
-        );
-        expect(html).not.toMatch(/@media print \{[^}]*\.job-value/s);
+        // The fitter measures the window it opened, so anything that only
+        // takes effect under @media print is a size it never saw. The spec
+        // block used to do exactly that — one column on screen, two on paper —
+        // and the artwork was sized against a block 46mm taller than the one
+        // that printed, so the picture came out trimmed above empty paper.
+        for (const selector of [
+            '.image-gallery',
+            '.image-card',
+            '.size-table',
+            '.job-value',
+        ]) {
+            expect(html).not.toMatch(
+                new RegExp(
+                    `@media print \\{[^}]*\\${selector.replace('.', '.')}`,
+                    's',
+                ),
+            );
+        }
     });
 
     /**
-     * A bill names a spec for every garment type it sells and all of them
-     * belong on the receipt, so a long one is allowed the pages it needs.
-     * Nothing is trimmed and nothing is scaled to avoid a page break.
+     * The sheet aims at one A4 page and trims to reach it, but only the two
+     * things that can be given back without the receipt becoming unreadable,
+     * and only as far as their floors. It is never scaled and never clipped:
+     * a bill longer than the floors can save takes the page it needs.
      */
-    it('takes another page rather than shrinking anything to avoid one', () => {
+    it('trims to stay on the page, but never scales or clips', () => {
         const html = printedHtml();
 
-        expect(html).not.toContain('while (height < FIXED)');
+        expect(html).toContain('var ART_MIN');
+        expect(html).toContain('var FONT_MIN');
         expect(html).not.toContain('page.style.transform');
         expect(html).not.toContain("document.body.style.overflow = 'hidden'");
+        expect(html).not.toContain('style.zoom');
     });
 
     const rosterRow = () =>
@@ -1295,24 +1247,44 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('/house-b.webp');
     });
 
-    it('keeps the columns at least as wide as the artwork is tall', () => {
-        const html = printedHtml();
+    it('fits four pictures across the first row', () => {
+        const html = printedHtml(
+            makeRow({
+                details: {
+                    ...makeRow().details,
+                    shirt_artwork_urls: ['/a.webp', '/b.webp', '/c.webp'],
+                    pants_artwork_urls: ['/d.webp', '/e.webp', '/f.webp'],
+                },
+            }),
+        );
 
-        // With a 140px minimum, six artworks squeezed into five columns 38mm
-        // wide and printed at 36x31mm inside a 58mm tall box -- mostly grey.
-        // Tying the minimum to the artwork height gives three columns and a
-        // 56x48mm picture on exactly the same amount of paper.
-        expect(html).toContain(
+        // The artwork height was settled on at four across. The columns were
+        // auto-fit over a minimum as wide as that height, and 58mm into the
+        // 196mm the margins leave only ever divided three ways — so the row
+        // came out one picture short of what it was measured for. This bill
+        // has six, which is more than a row.
+        expect(html).toContain('grid-template-columns: repeat(4, 1fr)');
+        expect(html).not.toContain(
             'grid-template-columns: repeat(auto-fit, minmax(var(--artwork-col), 1fr))',
         );
-        // --artwork-col stays at the full height while --artwork-h is trimmed:
-        // tying the width to the trimmed height narrowed the columns at the same
-        // time, so a busy sheet shrank the pictures twice over.
-        expect(html).toContain('--artwork-col: 58mm');
         expect(html).not.toContain('minmax(140px, 1fr)');
+
         // And a bill with a single artwork must not stretch it into a banner
         // the width of the sheet.
         expect(html).toContain('max-width: calc(var(--artwork-col) * 1.6)');
+    });
+
+    it('gives a bill with fewer pictures only the columns it fills', () => {
+        expect(
+            printedHtml(
+                makeRow({
+                    details: {
+                        ...makeRow().details,
+                        shirt_artwork_urls: ['/a.webp', '/b.webp'],
+                    },
+                }),
+            ),
+        ).toContain('grid-template-columns: repeat(2, 1fr)');
     });
 
     it('gives every picture the same height whatever its proportions', () => {
@@ -1819,13 +1791,14 @@ describe('counter work-sheet PDF', () => {
         });
     });
 
-    it('never tightens the size table to buy room', () => {
+    it('tightens the size table only after the artwork has given way', () => {
         const html = printedHtml();
 
-        // Figures on a receipt are read by a customer. They keep one size
-        // however long the bill runs.
-        expect(html).not.toContain('var FONT_MIN');
-        expect(html).not.toContain('tight > FONT_MIN');
+        // Figures on a receipt are read by a customer, so they are the last
+        // thing to give and they stop while they are still legible — the
+        // picture is only a reminder of what was ordered and goes first.
+        expect(html).toContain('var FONT_MIN = 8');
+        expect(html).toMatch(/art > ART_MIN[\s\S]*small > FONT_MIN/);
     });
 
     it('merges the job and payment details into one block', () => {
