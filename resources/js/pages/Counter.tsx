@@ -1429,6 +1429,17 @@ function buildGarmentLines(
 
         return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
     };
+    // The length each line is cut at decides where it sits, before its size
+    // does: every short sleeve together, then every long one, then the
+    // sleeveless — and short legs before long. The label tables are already
+    // written in that order, so the order is read from them rather than
+    // repeated here. A line from before lengths were recorded has no label and
+    // sorts after the ones that do.
+    const styleRanks = new Map(
+        Object.values(styleLabels).map((label, index) => [label, index]),
+    );
+    const styleRankOf = (label: string): number =>
+        styleRanks.get(label) ?? Number.MAX_SAFE_INTEGER;
 
     const lines = new Map<string, GarmentPrintLine>();
 
@@ -1469,9 +1480,10 @@ function buildGarmentLines(
 
     return [...lines.values()].sort(
         (left, right) =>
+            styleRankOf(left.styleLabel) - styleRankOf(right.styleLabel) ||
             rankOf(left.sizeLabel) - rankOf(right.sizeLabel) ||
             left.sizeLabel.localeCompare(right.sizeLabel, 'th') ||
-            left.styleLabel.localeCompare(right.styleLabel, 'th'),
+            left.unitPrice - right.unitPrice,
     );
 }
 

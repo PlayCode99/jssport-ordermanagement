@@ -643,6 +643,99 @@ describe('a Form 2 bill on the printed receipt', () => {
         ]);
     });
 
+    /**
+     * The floor cuts a run of one length at a time, and a customer reading the
+     * receipt is counting how many of each. Sorting by size first interleaved
+     * them — M long, M short, L long, L short — so the receipt gathers every
+     * short sleeve, then every long one, then the sleeveless, and sizes run in
+     * order inside each. Trousers do the same with short legs before long.
+     */
+    it('gathers the shirts by length, short first, then by size', () => {
+        const [shirtCells] = printedTables(
+            printedHtml(
+                form2Bill([
+                    person({ size_label: 'L', shirt_style: 'long' }),
+                    person({ size_label: 'M', shirt_style: 'sleeveless' }),
+                    person({ size_label: 'L', shirt_style: 'short' }),
+                    person({ size_label: 'M', shirt_style: 'long' }),
+                    person({ size_label: 'M', shirt_style: 'short' }),
+                    person({ size_label: 'L', shirt_style: 'sleeveless' }),
+                ]),
+            ),
+        );
+
+        const listed = shirtCells
+            .slice(5)
+            .reduce<Array<[string, string]>>((pairs, _cell, index, cells) => {
+                if (index % 5 === 0 && cells[index + 1] !== undefined) {
+                    pairs.push([cells[index], cells[index + 1]]);
+                }
+
+                return pairs;
+            }, [])
+            .filter(([size]) => size === 'M' || size === 'L');
+
+        expect(listed).toEqual([
+            ['M', 'แขนสั้น'],
+            ['L', 'แขนสั้น'],
+            ['M', 'แขนยาว'],
+            ['L', 'แขนยาว'],
+            ['M', 'แขนกุด'],
+            ['L', 'แขนกุด'],
+        ]);
+    });
+
+    it('gathers the trousers the same way, short legs first', () => {
+        const [, pantsCells] = printedTables(
+            printedHtml(
+                form2Bill([
+                    person({
+                        item_type: 'pants',
+                        size_label: 'L',
+                        shirt_style: null,
+                        pants_style: 'long',
+                    }),
+                    person({
+                        item_type: 'pants',
+                        size_label: 'M',
+                        shirt_style: null,
+                        pants_style: 'long',
+                    }),
+                    person({
+                        item_type: 'pants',
+                        size_label: 'L',
+                        shirt_style: null,
+                        pants_style: 'short',
+                    }),
+                    person({
+                        item_type: 'pants',
+                        size_label: 'M',
+                        shirt_style: null,
+                        pants_style: 'short',
+                    }),
+                ]),
+            ),
+        );
+
+        const listed = pantsCells
+            .slice(5)
+            .reduce<Array<[string, string]>>((pairs, _cell, index, cells) => {
+                if (index % 5 === 0 && cells[index + 1] !== undefined) {
+                    pairs.push([cells[index], cells[index + 1]]);
+                }
+
+                return pairs;
+            }, [])
+            .filter(([size]) => size === 'M' || size === 'L');
+
+        expect(listed).toEqual([
+            ['M', 'ขาสั้น'],
+            ['L', 'ขาสั้น'],
+            ['M', 'ขายาว'],
+            ['L', 'ขายาว'],
+        ]);
+    });
+
     it('keeps two lengths of one size apart, and two prices apart', () => {
         const shirtCells = printedTables(
             printedHtml(
@@ -659,14 +752,11 @@ describe('a Form 2 bill on the printed receipt', () => {
             ),
         )[0];
 
-        // Same size, but three things to bill: two short at 250, one long at
-        // 280, one short at 300.
+        // Same size, but three things to bill: two short at 250, one short at
+        // 300, one long at 280. The short sleeves come first and stay together
+        // — length decides the order before size or price does — and the two
+        // short lines stay apart because they are billed differently.
         expect(shirtCells.slice(5, 20)).toEqual([
-            'M',
-            'แขนยาว',
-            '1',
-            '280.00',
-            '280.00',
             'M',
             'แขนสั้น',
             '2',
@@ -677,6 +767,11 @@ describe('a Form 2 bill on the printed receipt', () => {
             '1',
             '300.00',
             '300.00',
+            'M',
+            'แขนยาว',
+            '1',
+            '280.00',
+            '280.00',
         ]);
     });
 
