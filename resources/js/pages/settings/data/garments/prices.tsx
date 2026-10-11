@@ -149,6 +149,22 @@ export default function GarmentPricesPage() {
      * on the way here — which category, which length, which garment — is shown
      * back rather than asked again.
      */
+    /**
+     * What a long one is called for the garment in hand. Shirts and trousers
+     * are priced apart — one row of this list belongs to one garment type —
+     * so a shirt has no legs to name and a pair of trousers has no sleeves.
+     * Both words together were written when a row covered either.
+     *
+     * Where a list is showing both, neither word is right and the garment's own
+     * column says which it is, so it is called a long one and left at that.
+     */
+    const longPriceLabel = (category: 'SHIRT' | 'PANTS' | null): string =>
+        category === 'PANTS'
+            ? 'ขายาว'
+            : category === 'SHIRT'
+              ? 'แขนยาว'
+              : 'แบบยาว';
+
     const focusedGarment = useMemo(() => {
         if (!selectedGarmentTypeId || !selectedGarmentTypeName) {
             return null;
@@ -176,6 +192,30 @@ export default function GarmentPricesPage() {
     const backHref = focusedGarment
         ? `/settings/data/garments/types?category=${focusedGarment.category}&style=${selectedGarmentTypeStyle ?? 'short'}`
         : '/settings/data/garments/types';
+
+    /**
+     * The garment the form is writing a price for: the one the page was opened
+     * on, or the one picked in the form when it was not.
+     */
+    const formGarmentCategory = useMemo<'SHIRT' | 'PANTS' | null>(() => {
+        if (selectedGarmentTypeId) {
+            return (
+                (selectedGarmentTypeCategory as 'SHIRT' | 'PANTS' | null) ??
+                null
+            );
+        }
+
+        const chosen = typeOptions.find(
+            (type) => String(type.id) === form.garment_type_id,
+        );
+
+        return (chosen?.category as 'SHIRT' | 'PANTS' | undefined) ?? null;
+    }, [
+        form.garment_type_id,
+        selectedGarmentTypeCategory,
+        selectedGarmentTypeId,
+        typeOptions,
+    ]);
 
     const filteredRows = useMemo(() => {
         const keyword = searchTerm.trim().toLowerCase();
@@ -593,19 +633,33 @@ export default function GarmentPricesPage() {
                                         ลำดับ
                                     </th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                                        ประเภทเสื้อ
+                                        {categoryFilter === 'PANTS'
+                                            ? 'ประเภทกางเกง'
+                                            : categoryFilter === 'SHIRT'
+                                              ? 'ประเภทเสื้อ'
+                                              : 'ประเภทงาน'}
                                     </th>
                                     <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">
                                         เด็ก ราคา
                                     </th>
                                     <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">
-                                        เด็ก แขนยาว/ขายาว
+                                        เด็ก{' '}
+                                        {longPriceLabel(
+                                            categoryFilter === 'all'
+                                                ? null
+                                                : categoryFilter,
+                                        )}
                                     </th>
                                     <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">
                                         ผู้ใหญ่ ราคา
                                     </th>
                                     <th className="w-[120px] px-4 py-3 text-left font-semibold text-slate-700">
-                                        ผู้ใหญ่ แขนยาว/ขายาว
+                                        ผู้ใหญ่{' '}
+                                        {longPriceLabel(
+                                            categoryFilter === 'all'
+                                                ? null
+                                                : categoryFilter,
+                                        )}
                                     </th>
                                     <th className="w-[160px] px-4 py-3 text-left font-semibold text-slate-700">
                                         สถานะ
@@ -831,7 +885,8 @@ export default function GarmentPricesPage() {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-slate-700">
-                                    ราคาเด็ก แขนยาว/ขายาว
+                                    ราคาเด็ก{' '}
+                                    {longPriceLabel(formGarmentCategory)}
                                 </label>
                                 <Input
                                     type="number"
@@ -852,7 +907,8 @@ export default function GarmentPricesPage() {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-slate-700">
-                                    ราคาผู้ใหญ่ แขนยาว/ขายาว
+                                    ราคาผู้ใหญ่{' '}
+                                    {longPriceLabel(formGarmentCategory)}
                                 </label>
                                 <Input
                                     type="number"
