@@ -798,34 +798,6 @@ export function buildPrintFitScript(): string {
                 // set it. A bill long enough to need another page has no spare
                 // room to push anything into, and closes under its last table.
 
-                // One runner per page, each at the foot of its own page, so a
-                // receipt that runs to three sheets says so on every one of
-                // them. The runners are out of flow, so placing them cannot
-                // push the sheet onto another page.
-                var template = document.querySelector('.print-runner');
-
-                if (template) {
-                    var runnerHeight = template.offsetHeight;
-                    var total = Math.max(1, Math.ceil(page.scrollHeight / limit));
-                    template.remove();
-
-                    for (var i = 0; i < total; i += 1) {
-                        var copy = template.cloneNode(true);
-                        copy.style.top = ((i + 1) * limit - runnerHeight) + 'px';
-                        var slot = copy.querySelector('.print-runner-page');
-
-                        if (slot) {
-                            // A single page needs no numbering; more than one
-                            // does, so the customer can see none is missing.
-                            slot.textContent = total > 1
-                                ? ('หน้า ' + (i + 1) + '/' + total)
-                                : '';
-                        }
-
-                        page.appendChild(copy);
-                    }
-                }
-
                 window.__printFitted = true;
                 window.print();
             }
@@ -4462,26 +4434,30 @@ export default function Counter({
                         /* The signatures and the warning close the document;
                            they belong together wherever they land. */
                         .footer-table, .warning-banner, .sheet-foot { break-inside: avoid; page-break-inside: avoid; }
-                        /* Every page says which bill it belongs to, so a sheet
-                           that gets separated from the rest can be put back. */
+                        /* The bill names itself once, under the signatures,
+                           where it closes. It used to be repeated at the foot
+                           of every page, drawn out of the flow at a position
+                           worked out from the page height — and the flow knew
+                           nothing about it, so on a bill carrying every size it
+                           was painted over four size rows, and a white
+                           background meant those figures were simply not on the
+                           paper. There is no way to reserve a strip at the foot
+                           of every page of a flow that CSS can honour, and
+                           Chrome counts pages only inside @page rules it does
+                           not support, so the strip is gone rather than wrong. */
                         .page { position: relative; }
-                        .print-runner {
-                            position: absolute;
-                            left: 0;
-                            right: 0;
+                        .sheet-mark {
                             display: flex;
                             justify-content: space-between;
                             gap: 8px;
+                            margin-top: 4px;
                             border-top: 1px solid ${branchHeaderColor};
                             padding: 2px 1px 0;
                             font-size: 9px;
                             color: #4b5563;
-                            background: #ffffff;
                         }
-                        .print-runner strong { color: #111827; }
-                        /* Room for the runner at the foot of every page. */
-                        .page { padding-bottom: 6mm; }
-                        .print-runner-page { font-weight: 700; color: #111827; }
+                        .sheet-mark strong { color: #111827; }
+                        .sheet-mark-end { font-weight: 700; color: #111827; }
                     </style>
                 </head>
                 <body>
@@ -4587,11 +4563,11 @@ export default function Counter({
                         </table>
 
                         <div class="warning-banner">*** หมายเหตุ งานเพิ่มจำนวนไม่ถึง 20 ตัว ไม่ลด % และต้องชำระค่าชุด ที่เพิ่มเติมทั้งหมดก่อนเปิดออเดอร์ ***</div>
-                        </div>
-                        <div class="print-runner">
-                            <span>ใบรับงาน <strong>${escapeHtml(order.order_code)}</strong></span>
-                            <span>${escapeHtml(order.job_name || '-')}</span>
-                            <span class="print-runner-page"></span>
+                            <div class="sheet-mark">
+                                <span>ใบรับงาน <strong>${escapeHtml(order.order_code)}</strong></span>
+                                <span>${escapeHtml(order.job_name || '-')}</span>
+                                <span class="sheet-mark-end">— จบเอกสาร —</span>
+                            </div>
                         </div>
                     </div>
                     <script>${buildPrintFitScript()}<\u002Fscript>

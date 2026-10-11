@@ -2164,17 +2164,46 @@ describe('counter work-sheet PDF', () => {
         );
     });
 
-    it('numbers the pages of a receipt that runs to more than one', () => {
+    /**
+     * The bill used to name itself at the foot of every page, drawn out of the
+     * flow at a position worked out from the page height. The flow knew
+     * nothing about it: on a bill carrying every size in all three ranges it
+     * was painted over four size rows, measured at four to nine pixels of
+     * overlap, and a white background meant those figures were not on the
+     * paper at all.
+     *
+     * There is no way to reserve a strip at the foot of every page of a
+     * continuous flow that CSS will honour — a page margin wide enough to hold
+     * it is a margin the browser will not draw into — and Chrome counts pages
+     * only inside @page rules it does not implement. So the strip is gone
+     * rather than wrong, and the bill names itself once where it closes.
+     */
+    it('names the bill once at the close, not over every page', () => {
         const html = printedHtml();
 
-        // Every page says which bill it belongs to; a receipt of several says
-        // which page of how many, so a customer can see none is missing. A
-        // single page needs no numbering and gets none.
-        expect(html).toContain('class="print-runner"');
-        expect(html).toContain("'หน้า ' + (i + 1) + '/' + total");
-        expect(html).toContain('total > 1');
-        // Out of flow, so placing them cannot itself add a page.
-        expect(html).toContain('position: absolute;');
+        expect(html).toContain('class="sheet-mark"');
+        expect(html).toContain('— จบเอกสาร —');
+
+        // Nothing is drawn at a position worked out from the page height any
+        // more, which is what put it on top of the rows.
+        expect(html).not.toContain('print-runner');
+        expect(html).not.toContain("'หน้า ' + (i + 1) + '/' + total");
+    });
+
+    /**
+     * It closes the document, so it belongs with the signatures and the
+     * warning — inside the block that is held at the foot of the sheet, not
+     * loose after it.
+     */
+    it('keeps the closing mark with the signatures it closes', () => {
+        const html = printedHtml();
+        const foot = html.indexOf('class="sheet-foot"');
+        const mark = html.indexOf('class="sheet-mark"');
+        const footEnds = html.indexOf('</div>', html.indexOf('warning-banner'));
+
+        expect(foot).toBeGreaterThan(-1);
+        expect(mark).toBeGreaterThan(foot);
+        expect(mark).toBeGreaterThan(footEnds - 1);
     });
 
     it('never clips rows off an order too large to fit one page', () => {
