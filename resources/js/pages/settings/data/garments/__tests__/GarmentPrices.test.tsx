@@ -7,11 +7,19 @@ import GarmentPricesPage from '@/pages/settings/data/garments/prices';
 type InertiaModule = typeof InertiaModuleImport;
 
 /**
- * Shirts and trousers are priced apart — a row of this list belongs to one
- * garment type — so a shirt has no legs to name and a pair of trousers has no
- * sleeves. The long-price boxes said "แขนยาว/ขายาว" whatever was being priced,
- * which was written when one row covered either, and left a trouser row headed
- * with a word about sleeves.
+ * An operation used to carry a second rate per size group, for when the garment
+ * was a long one, and this page had a box and a column for each. It was added
+ * while one garment type covered both lengths.
+ *
+ * A garment type carries its own length now, and the order form will only offer
+ * a long one for a long sheet — so a short type's long rate could never be
+ * read, and a long type's ordinary rate could never be read either, because the
+ * costing looked at the long column first. Two columns describing one thing,
+ * and a zero typed into the live one silently replaced a real price beside it
+ * and costed a whole sheet at nothing.
+ *
+ * One rate per size group is what is left, and the heading over the garment
+ * still names whichever kind is being listed.
  */
 const garmentTypes = [
     { id: 1, name: 'เสื้อโปโล', category: 'SHIRT', style: 'short' },
@@ -24,12 +32,11 @@ const rows = [
         id: 11,
         garment_type_id: 1,
         garment_type_name: 'เสื้อโปโล',
+        garment_type_code: 'S-1',
         category: 'SHIRT',
         name: 'เย็บคอ',
         child_price: '10.00',
         adult_price: '20.00',
-        child_price_long: null,
-        adult_price_long: null,
         display_order: 1,
         is_active: true,
     },
@@ -37,18 +44,16 @@ const rows = [
         id: 12,
         garment_type_id: 3,
         garment_type_name: 'กางเกงขาสั้น',
+        garment_type_code: 'P-1',
         category: 'PANTS',
         name: 'เย็บขา',
         child_price: '8.00',
         adult_price: '15.00',
-        child_price_long: null,
-        adult_price_long: null,
         display_order: 2,
         is_active: true,
     },
 ];
 
-/** The page as it arrives, with whatever the reader opened it for. */
 const pageProps = (over: Record<string, unknown> = {}) => ({
     garmentTypes,
     rows,
@@ -92,33 +97,37 @@ const headings = (): string[] =>
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim() ?? '');
 
-describe('the price list headings', () => {
-    it('name neither sleeves nor legs while both are listed', () => {
+describe('the price list', () => {
+    it('offers one rate per size group and no second one for a long garment', () => {
         renderPage();
 
-        expect(headings()).toContain('เด็ก แบบยาว');
-        expect(headings()).toContain('ผู้ใหญ่ แบบยาว');
+        expect(headings()).toContain('เด็ก ราคา');
+        expect(headings()).toContain('ผู้ใหญ่ ราคา');
+
+        for (const gone of [
+            'แขนยาว',
+            'ขายาว',
+            'แบบยาว',
+            'แขนยาว/ขายาว',
+            'เท่าราคาสั้น',
+        ]) {
+            expect(screen.queryByText(gone)).not.toBeInTheDocument();
+        }
+    });
+
+    /**
+     * The garment column still says which kind it is listing: a trouser row
+     * under a heading about shirts was the same mistake, one column over.
+     */
+    it('names the garment it is listing', () => {
+        renderPage();
         expect(headings()).toContain('ประเภทงาน');
-        // The word that belongs to the other garment is nowhere in the row.
-        expect(headings().join(' ')).not.toContain('แขนยาว/ขายาว');
-    });
 
-    it('name sleeves when the list is showing shirts', () => {
         renderPage({ selectedCategory: 'SHIRT' });
-
-        expect(headings()).toContain('เด็ก แขนยาว');
-        expect(headings()).toContain('ผู้ใหญ่ แขนยาว');
         expect(headings()).toContain('ประเภทเสื้อ');
-        expect(headings().join(' ')).not.toContain('ขายาว');
-    });
 
-    it('name legs when the list is showing trousers', () => {
         renderPage({ selectedCategory: 'PANTS' });
-
-        expect(headings()).toContain('เด็ก ขายาว');
-        expect(headings()).toContain('ผู้ใหญ่ ขายาว');
         expect(headings()).toContain('ประเภทกางเกง');
-        expect(headings().join(' ')).not.toContain('แขนยาว');
     });
 });
 
@@ -135,7 +144,7 @@ describe('the price form', () => {
         );
     };
 
-    it('names the sleeves of the shirt it was opened for', () => {
+    it('asks for a child rate and an adult rate, and nothing more', () => {
         renderPage({
             selectedGarmentTypeId: 2,
             selectedGarmentTypeName: 'เสื้อประตู',
@@ -144,12 +153,14 @@ describe('the price form', () => {
         });
         openForm();
 
-        expect(priceLabels()).toContain('ราคาเด็ก แขนยาว');
-        expect(priceLabels()).toContain('ราคาผู้ใหญ่ แขนยาว');
-        expect(priceLabels().join(' ')).not.toContain('ขายาว');
+        expect(priceLabels()).toEqual(['ราคาเด็ก', 'ราคาผู้ใหญ่']);
     });
 
-    it('names the legs of the trousers it was opened for', () => {
+    /**
+     * Even on a garment that is itself a long one: its rate is the rate for
+     * the length it is cut at, so there is nothing else to ask.
+     */
+    it('asks no more of a long garment than of a short one', () => {
         renderPage({
             selectedGarmentTypeId: 3,
             selectedGarmentTypeName: 'กางเกงขาสั้น',
@@ -158,20 +169,23 @@ describe('the price form', () => {
         });
         openForm();
 
-        expect(priceLabels()).toContain('ราคาเด็ก ขายาว');
-        expect(priceLabels()).toContain('ราคาผู้ใหญ่ ขายาว');
-        expect(priceLabels().join(' ')).not.toContain('แขนยาว');
+        const shortFormLabels = priceLabels();
+
+        expect(shortFormLabels).toEqual(['ราคาเด็ก', 'ราคาผู้ใหญ่']);
+        expect(shortFormLabels.join(' ')).not.toContain('ยาว');
     });
 
     /**
-     * Opened on nothing in particular, the form picks the first garment on the
-     * list for itself — so it still has one, and still knows what to call it.
+     * The warning that a zero in the long box costs a whole sheet nothing goes
+     * with the box it was about.
      */
-    it('names whatever garment it picked when it was opened on none', () => {
+    it('no longer warns about a box that is not there', () => {
         renderPage({ selectedCategory: 'PANTS' });
         openForm();
 
-        expect(priceLabels()).toContain('ราคาเด็ก ขายาว');
-        expect(priceLabels().join(' ')).not.toContain('แขนยาว');
+        expect(
+            screen.queryByText(/ไม่คิดค่าแรงเลยเมื่อเป็นแบบยาว/),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByText(/เว้นว่าง = เท่าราคาสั้น/)).toBeNull();
     });
 });

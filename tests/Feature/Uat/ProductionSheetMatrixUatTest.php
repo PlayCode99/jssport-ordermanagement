@@ -75,7 +75,6 @@ class ProductionSheetMatrixUatTest extends TestCase
         $this->shirtType->operations()->create([
             'name' => 'ตัดเย็บเสื้อ',
             'child_price' => 10, 'adult_price' => 20,
-            'child_price_long' => 14, 'adult_price_long' => 26,
             'is_active' => true, 'display_order' => 1,
         ]);
 
@@ -86,7 +85,6 @@ class ProductionSheetMatrixUatTest extends TestCase
         $this->pantsType->operations()->create([
             'name' => 'ตัดเย็บกางเกง',
             'child_price' => 8, 'adult_price' => 15,
-            'child_price_long' => 11, 'adult_price_long' => 19,
             'is_active' => true, 'display_order' => 1,
         ]);
 
@@ -250,23 +248,31 @@ class ProductionSheetMatrixUatTest extends TestCase
         $this->assertSame(100, array_sum($this->sheetQuantities($order)));
     }
 
-    public function test_each_sheet_is_priced_at_its_own_length(): void
+    /**
+     * Each sheet is costed at the rate on the garment type it is cut from, and
+     * the two lengths here are cut from one type, so they cost the same per
+     * garment and differ only by how many are on them. An operation used to
+     * carry a second rate for the long version and the costing picked between
+     * them by the sheet's style; a garment type carries its own length now, so
+     * the rate on it is already the rate for the length being cut.
+     */
+    public function test_each_sheet_is_priced_at_the_rate_of_the_type_it_is_cut_from(): void
     {
         $order = $this->openBill('matrix', $this->fullLengthMatrixItems());
 
-        // Long sleeves 14/26 against 10/20, long legs 11/19 against 8/15.
+        // Shirts 10 a child and 20 an adult, trousers 8 and 15, whatever length.
         $this->assertSame([
             'shirt_kids_short' => 120.0,   // 12 x 10
-            'shirt_kids_long' => 112.0,    // 8 x 14
+            'shirt_kids_long' => 80.0,     // 8 x 10
             'shirt_adults_short' => 400.0, // 20 x 20
-            'shirt_adults_long' => 260.0,  // 10 x 26
+            'shirt_adults_long' => 200.0,  // 10 x 20
             'pants_kids_short' => 96.0,    // 12 x 8
-            'pants_kids_long' => 88.0,     // 8 x 11
+            'pants_kids_long' => 64.0,     // 8 x 8
             'pants_adults_short' => 300.0, // 20 x 15
-            'pants_adults_long' => 190.0,  // 10 x 19
+            'pants_adults_long' => 150.0,  // 10 x 15
         ], $this->sheetSubtotals($order));
 
-        $this->assertSame(1566.0, round((float) $this->summary($order)['grand_total'], 2));
+        $this->assertSame(1410.0, round((float) $this->summary($order)['grand_total'], 2));
     }
 
     public function test_form_one_in_one_length_only_prints_four_sheets(): void

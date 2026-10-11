@@ -96,8 +96,6 @@ const pricingWithoutBatches = (id: number) => ({
                 name: 'ตัดเย็บ',
                 child_price: 10,
                 adult_price: 25,
-                child_price_long: null,
-                adult_price_long: null,
             },
         ],
         pants_components: [],

@@ -7,7 +7,7 @@ use App\Models\GarmentOperation;
 class ListGarmentOperationsAction
 {
     /**
-     * @return array<int, array{id: int, garment_type_id: int, category: string, garment_type_code: string, garment_type_name: string, name: string, child_price: string, adult_price: string, child_price_long: string|null, adult_price_long: string|null, is_active: bool, display_order: int, created_at: string, updated_at: string}>
+     * @return array<int, array{id: int, garment_type_id: int, category: string, garment_type_code: string, garment_type_name: string, name: string, child_price: string, adult_price: string, is_active: bool, display_order: int, created_at: string, updated_at: string}>
      */
     public function execute(?int $garmentTypeId = null, ?string $category = null): array
     {
@@ -35,8 +35,6 @@ class ListGarmentOperationsAction
                 'name' => (string) $operation->name,
                 'child_price' => (string) $operation->child_price,
                 'adult_price' => (string) $operation->adult_price,
-                'child_price_long' => $operation->child_price_long === null ? null : (string) $operation->child_price_long,
-                'adult_price_long' => $operation->adult_price_long === null ? null : (string) $operation->adult_price_long,
                 'is_active' => (bool) $operation->is_active,
                 'display_order' => (int) $operation->display_order,
                 'created_at' => $operation->created_at?->toIso8601String() ?? now()->toIso8601String(),

@@ -18,8 +18,6 @@ class UpsertGarmentOperationAction
             'name' => trim((string) $data['name']),
             'child_price' => number_format((float) $data['child_price'], 2, '.', ''),
             'adult_price' => number_format((float) $data['adult_price'], 2, '.', ''),
-            'child_price_long' => $this->optionalPrice($data['child_price_long'] ?? null),
-            'adult_price_long' => $this->optionalPrice($data['adult_price_long'] ?? null),
             'is_active' => (bool) ($data['is_active'] ?? true),
             'display_order' => (int) ($data['display_order'] ?? 0),
         ]);

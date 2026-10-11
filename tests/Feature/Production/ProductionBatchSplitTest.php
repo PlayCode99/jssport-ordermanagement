@@ -31,7 +31,7 @@ class ProductionBatchSplitTest extends TestCase
         return ++$this->sequence;
     }
 
-    private function garmentType(string $category, float $childPrice, float $adultPrice, ?float $childLong = null, ?float $adultLong = null): GarmentType
+    private function garmentType(string $category, float $childPrice, float $adultPrice): GarmentType
     {
         $type = GarmentType::create([
             'category' => $category,
@@ -45,8 +45,6 @@ class ProductionBatchSplitTest extends TestCase
             'name' => 'ตัด',
             'child_price' => $childPrice,
             'adult_price' => $adultPrice,
-            'child_price_long' => $childLong,
-            'adult_price_long' => $adultLong,
             'is_active' => true,
             'display_order' => 1,
         ]);
@@ -227,9 +225,17 @@ class ProductionBatchSplitTest extends TestCase
         $this->assertSame(1, (int) $this->summary($order)['group_count']);
     }
 
-    public function test_long_sleeves_are_costed_at_their_own_rate(): void
+    /**
+     * An operation used to carry a second rate for when the garment was long,
+     * and the costing chose between them by the sheet's style. A garment type
+     * carries its own length now and the form will only offer a long one for a
+     * long sheet, so the rate on the operation is already the rate for the
+     * length being cut: both sheets of one type cost the same, and a longer cut
+     * costs more by being a type with a higher rate on it.
+     */
+    public function test_both_lengths_of_one_type_are_costed_at_that_type_s_rate(): void
     {
-        $shirt = $this->garmentType('SHIRT', 10, 20, childLong: 14, adultLong: 26);
+        $shirt = $this->garmentType('SHIRT', 10, 20);
         $pants = $this->garmentType('PANTS', 5, 15);
 
         $order = $this->order([
@@ -240,26 +246,35 @@ class ProductionBatchSplitTest extends TestCase
         $groups = collect($this->summary($order)['groups'])->keyBy('key');
 
         $this->assertSame(20.0, (float) $groups['shirt_adults_short']['unit_total']);
-        $this->assertSame(26.0, (float) $groups['shirt_adults_long']['unit_total']);
+        $this->assertSame(20.0, (float) $groups['shirt_adults_long']['unit_total']);
         $this->assertSame(200.0, (float) $groups['shirt_adults_short']['subtotal']);
-        $this->assertSame(130.0, (float) $groups['shirt_adults_long']['subtotal']);
-        $this->assertSame(330.0, (float) $this->summary($order)['grand_total']);
+        $this->assertSame(100.0, (float) $groups['shirt_adults_long']['subtotal']);
+        $this->assertSame(300.0, (float) $this->summary($order)['grand_total']);
     }
 
-    public function test_an_operation_without_a_long_rate_costs_the_same_either_way(): void
+    /**
+     * The rate belongs to the garment type, so a sheet cut long from a type
+     * that costs more simply costs more — nothing reads the sheet's style to
+     * decide which of two numbers to use.
+     */
+    public function test_a_dearer_type_costs_more_at_the_same_length(): void
     {
-        // Most operations do not change with sleeve length, so the shop leaves
-        // the long price empty rather than typing the same number twice.
-        $shirt = $this->garmentType('SHIRT', 10, 20);
+        $plain = $this->garmentType('SHIRT', 10, 20);
+        $dearer = $this->garmentType('SHIRT', 14, 26);
         $pants = $this->garmentType('PANTS', 5, 15);
 
-        $order = $this->order([
+        $cheap = $this->summary($this->order([
             ['item_type' => 'shirt', 'size_group' => 'adults', 'size_label' => 'L', 'shirt_style' => 'long', 'quantity' => 5, 'unit_price' => 120],
-        ], $shirt->id, $pants->id);
+        ], $plain->id, $pants->id));
+        $costly = $this->summary($this->order([
+            ['item_type' => 'shirt', 'size_group' => 'adults', 'size_label' => 'L', 'shirt_style' => 'long', 'quantity' => 5, 'unit_price' => 120],
+        ], $dearer->id, $pants->id));
 
-        $groups = collect($this->summary($order)['groups'])->keyBy('key');
+        $unit = fn (array $summary): float => (float) collect($summary['groups'])
+            ->keyBy('key')['shirt_adults_long']['unit_total'];
 
-        $this->assertSame(20.0, (float) $groups['shirt_adults_long']['unit_total']);
+        $this->assertSame(20.0, $unit($cheap));
+        $this->assertSame(26.0, $unit($costly));
     }
 
     public function test_splitting_a_batch_never_changes_what_the_bill_costs(): void
@@ -305,7 +320,7 @@ class ProductionBatchSplitTest extends TestCase
             ],
         ])->save();
 
-        $shirt->operations()->update(['adult_price' => 99, 'adult_price_long' => 150]);
+        $shirt->operations()->update(['adult_price' => 99]);
 
         $groups = collect($this->summary($order->fresh())['groups'])->keyBy('key');
 

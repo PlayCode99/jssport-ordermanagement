@@ -12,8 +12,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $name
  * @property string $child_price
  * @property string $adult_price
- * @property string|null $child_price_long
- * @property string|null $adult_price_long
  * @property bool $is_active
  * @property int $display_order
  * @property-read GarmentType|null $garmentType
@@ -30,8 +28,6 @@ class GarmentOperation extends Model
         'name',
         'child_price',
         'adult_price',
-        'child_price_long',
-        'adult_price_long',
         'is_active',
         'display_order',
     ];
@@ -42,8 +38,6 @@ class GarmentOperation extends Model
             'garment_type_id' => 'integer',
             'child_price' => 'decimal:2',
             'adult_price' => 'decimal:2',
-            'child_price_long' => 'decimal:2',
-            'adult_price_long' => 'decimal:2',
             'is_active' => 'boolean',
             'display_order' => 'integer',
             'created_at' => 'datetime',

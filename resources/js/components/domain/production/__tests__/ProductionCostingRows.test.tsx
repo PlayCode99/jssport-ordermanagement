@@ -73,8 +73,6 @@ const operations = (count: number) =>
         name,
         child_price: 1 + index,
         adult_price: 2 + index,
-        child_price_long: null,
-        adult_price_long: null,
     }));
 
 const sum = (rows: { adult_price: number }[]) =>
