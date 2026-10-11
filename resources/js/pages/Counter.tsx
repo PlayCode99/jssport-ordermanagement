@@ -4637,8 +4637,31 @@ export default function Counter({
                             type="button"
                             className="h-9 bg-[#E21E26] text-xs text-white hover:bg-[#C91820]"
                             onClick={() => {
-                                handlePrintDocument(justSavedOrder);
+                                // Close first, open second, and let the browser
+                                // paint in between.
+                                //
+                                // The print window shares this page's renderer,
+                                // and the print dialog it raises blocks the lot.
+                                // On a bill with no artwork there is nothing to
+                                // wait for, so the window printed the instant it
+                                // was written — inside this handler, before the
+                                // line below had run. Everything froze with this
+                                // dialog still on the screen and neither of its
+                                // buttons answering, until someone dismissed the
+                                // printer. A bill carrying pictures waited for
+                                // them to load and closed cleanly, which is why
+                                // it only happened to some bills.
                                 setPrintOfferDismissed(true);
+                                // Two frames: the first is the one React's
+                                // close is committed into, the second runs once
+                                // it has actually been painted. One frame
+                                // leaves the dialog still drawn on a screen
+                                // that is about to stop repainting.
+                                requestAnimationFrame(() => {
+                                    requestAnimationFrame(() => {
+                                        handlePrintDocument(justSavedOrder);
+                                    });
+                                });
                             }}
                         >
                             <Printer className="size-4" />

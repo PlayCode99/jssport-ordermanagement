@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Counter from '@/pages/Counter';
@@ -1804,6 +1810,57 @@ describe('counter work-sheet PDF', () => {
         expect(
             screen.getByRole('button', { name: /พิมพ์ PDF/ }),
         ).toBeInTheDocument();
+    });
+
+    /**
+     * The print window shares this page's renderer, and the print dialog it
+     * raises blocks the lot. On a bill with no artwork there is nothing to wait
+     * for, so the window printed the instant it was written — inside the click
+     * handler, before the line that closes this dialog had run. Everything
+     * froze with the dialog still on the screen and neither of its buttons
+     * answering, until somebody dismissed the printer. A bill carrying pictures
+     * waited for them to load and closed cleanly, which is why it only happened
+     * to some bills.
+     *
+     * So the dialog goes first and the window is opened after, once the browser
+     * has had a frame to take it off the screen.
+     */
+    it('closes the saved-order dialog before it opens the print window', async () => {
+        renderCounter(makeRow() as never, { savedOrderCode: 'ORD-2026-00042' });
+
+        let dialogWhenTheWindowOpened: boolean | null = null;
+
+        vi.spyOn(window, 'open').mockImplementation(() => {
+            dialogWhenTheWindowOpened = Boolean(
+                screen.queryByText('บันทึกใบสั่งผลิตสำเร็จ'),
+            );
+
+            return null;
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /พิมพ์ PDF/ }));
+
+        // Gone from the screen as soon as the click is handled.
+        expect(
+            screen.queryByText('บันทึกใบสั่งผลิตสำเร็จ'),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+            expect(dialogWhenTheWindowOpened).not.toBeNull();
+        });
+
+        // And gone before the window that may freeze everything was opened.
+        expect(dialogWhenTheWindowOpened).toBe(false);
+    });
+
+    it('closes the dialog when the counter says not yet', () => {
+        renderCounter(makeRow() as never, { savedOrderCode: 'ORD-2026-00042' });
+
+        fireEvent.click(screen.getByRole('button', { name: 'ยังไม่พิมพ์' }));
+
+        expect(
+            screen.queryByText('บันทึกใบสั่งผลิตสำเร็จ'),
+        ).not.toBeInTheDocument();
     });
 
     it('stays quiet when the redirect carries no saved order', () => {
