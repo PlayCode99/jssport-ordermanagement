@@ -34,8 +34,6 @@ class UpdateGarmentOperationRequest extends FormRequest
             ],
             'child_price' => ['required', 'numeric', 'min:0', 'max:999999.99'],
             'adult_price' => ['required', 'numeric', 'min:0', 'max:999999.99'],
-            // Left empty when the operation costs the same either way, which is
-            // most of them, so the shop only fills in what really differs.
             'is_active' => ['sometimes', 'boolean'],
             'display_order' => ['nullable', 'integer', 'min:0'],
         ];
