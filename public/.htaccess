@@ -1,3 +1,48 @@
+# The files that configure the server are not content. Apache hides .htaccess
+# on its own in most builds but says nothing about .user.ini, and the limits in
+# it are no secret yet are nobody's business either. nginx needs the same thing
+# said in its own site file, which this cannot reach.
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+# The same limits as .user.ini, for Apache with mod_php — which does not read
+# .user.ini. Guarded, because a server running PHP as FastCGI has no php_value
+# directive and would answer every request with a 500 if these were loose.
+# Why these numbers, and what they cannot reach, is written in .user.ini.
+<IfModule mod_php.c>
+    php_value upload_max_filesize 16M
+    php_value post_max_size 128M
+    php_value max_file_uploads 100
+    php_value max_input_vars 5000
+    php_value memory_limit 512M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+    php_flag display_errors Off
+    php_flag display_startup_errors Off
+    php_flag log_errors On
+</IfModule>
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 16M
+    php_value post_max_size 128M
+    php_value max_file_uploads 100
+    php_value max_input_vars 5000
+    php_value memory_limit 512M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+    php_flag display_errors Off
+    php_flag display_startup_errors Off
+    php_flag log_errors On
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
