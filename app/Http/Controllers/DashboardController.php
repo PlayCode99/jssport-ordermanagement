@@ -1071,6 +1071,7 @@ class DashboardController extends Controller
                 'routings.screenTeam:id,team_name',
                 'routings.heatPressMachine:id,machine_name',
                 'items',
+                'charges',
                 'specification',
                 'latestDueDateChange',
                 'dueDateChanges.changedBy:id,name',
@@ -1129,6 +1130,10 @@ class DashboardController extends Controller
                     // "เลื่อนส่ง": whether this user may move the date, the date
                     // it moved from last, and every move for the timeline.
                     'can_reschedule' => $actor->can('reschedule', $order),
+                    // "อัปเดตรูป": wider than editing on purpose — pictures keep
+                    // changing after the floor has started, and a finished job
+                    // often gets a photograph of what actually shipped.
+                    'can_update_artwork' => $actor->can('updateArtwork', $order),
                     'postponed_from' => $order->postponed_from,
                     'due_date_changes' => $order->dueDateChanges
                         ->map(fn (OrderDueDateChange $change): array => $change->toDisplay())
@@ -1147,7 +1152,16 @@ class DashboardController extends Controller
                         'line_fb' => $order->customer?->line_fb,
                     ],
                     'pricing' => [
+                        // Gross includes "คิดเงินเพิ่มเติม": the discount is
+                        // taken off the garments and those together.
                         'total_amount' => (float) $order->total_amount,
+                        'charges' => $order->charges
+                            ->map(fn ($charge): array => [
+                                'label' => (string) $charge->label,
+                                'amount' => (float) $charge->amount,
+                            ])
+                            ->values()
+                            ->all(),
                         'discount_percent' => (float) $order->discount_percent,
                         'discount_amount' => (float) $order->discount_amount,
                         'net_amount' => (float) $order->net_amount,

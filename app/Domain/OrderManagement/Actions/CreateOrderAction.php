@@ -15,6 +15,8 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Receipt;
 use App\Models\User;
+use App\Support\Orders\ArtworkMediaStore;
+use App\Support\Orders\OrderCharges;
 use App\Support\Orders\TypedSpecMasterData;
 use App\Support\Production\ProductionRateSnapshotBuilder;
 use Illuminate\Http\UploadedFile;
@@ -27,6 +29,8 @@ use Throwable;
 
 class CreateOrderAction
 {
+    public function __construct(private readonly ArtworkMediaStore $artworkStore = new ArtworkMediaStore) {}
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -89,9 +93,15 @@ class CreateOrderAction
                     ))),
                 ]);
 
+                // "คิดเงินเพิ่มเติม" is part of what the bill is worth, so
+                // it joins the garments BEFORE the discount: the shop
+                // discounts a bill as one figure, not garment by garment.
+                $charges = OrderCharges::normalize($data['charges'] ?? []);
+                $grossAmount = $subTotalAmount + OrderCharges::total($charges);
+
                 $discountPercent = (float) ($data['discount_percent'] ?? 0);
-                $discountAmount = ($subTotalAmount * $discountPercent) / 100;
-                $netAmount = max(0, $subTotalAmount - $discountAmount);
+                $discountAmount = ($grossAmount * $discountPercent) / 100;
+                $netAmount = max(0, $grossAmount - $discountAmount);
 
                 $customerId = $this->resolveCustomerId($data);
                 $openedAt = now('Asia/Bangkok');
@@ -107,7 +117,7 @@ class CreateOrderAction
                     'shipping_address' => isset($data['shipping_address']) ? (string) $data['shipping_address'] : null,
                     'order_date' => $openedAt,
                     'due_date' => (string) $data['due_date'],
-                    'total_amount' => $subTotalAmount,
+                    'total_amount' => $grossAmount,
                     'discount_percent' => $discountPercent,
                     'discount_amount' => $discountAmount,
                     'net_amount' => $netAmount,
@@ -145,15 +155,15 @@ class CreateOrderAction
                 }
 
                 if (($data['design_artwork'] ?? null) instanceof UploadedFile) {
-                    $order->addMedia($data['design_artwork'])->toMediaCollection('artwork');
+                    $this->artworkStore->store($order, $data['design_artwork'], 'artwork');
                 }
 
                 foreach (Arr::wrap($data['shirt_artwork'] ?? []) as $shirtArtworkFile) {
-                    $this->storeArtworkAsWebpIfPresent($order, $shirtArtworkFile, 'shirt_artwork');
+                    $this->storeArtwork($order, $shirtArtworkFile, 'shirt_artwork');
                 }
 
                 foreach (Arr::wrap($data['pants_artwork'] ?? []) as $pantsArtworkFile) {
-                    $this->storeArtworkAsWebpIfPresent($order, $pantsArtworkFile, 'pants_artwork');
+                    $this->storeArtwork($order, $pantsArtworkFile, 'pants_artwork');
                 }
 
                 // Artwork drawn for one production batch only. The batch is
@@ -163,16 +173,18 @@ class CreateOrderAction
                     foreach (Arr::wrap($data[$collection.'_scoped'] ?? []) as $batch => $batchFiles) {
                         $normalizedBatch = Order::normalizeArtworkBatch($batch, $collection);
 
+                        $properties = $normalizedBatch === null
+                            ? []
+                            : [Order::ARTWORK_BATCH_PROPERTY => $normalizedBatch];
+
                         foreach (Arr::wrap($batchFiles) as $batchFile) {
-                            $this->storeArtworkAsWebpIfPresent($order, $batchFile, $collection, $normalizedBatch);
+                            $this->storeArtwork($order, $batchFile, $collection, $properties);
                         }
                     }
                 }
 
                 foreach (Arr::wrap($data['reference_designs'] ?? []) as $referenceDesign) {
-                    if ($referenceDesign instanceof UploadedFile) {
-                        $order->addMedia($referenceDesign)->toMediaCollection('reference_designs');
-                    }
+                    $this->storeArtwork($order, $referenceDesign, 'reference_designs');
                 }
 
                 // Form 3 (กีฬาสี): files arrive keyed by colour house index. The
@@ -184,13 +196,12 @@ class CreateOrderAction
                     }
 
                     foreach (Arr::wrap($groupFiles) as $groupFile) {
-                        if (! $groupFile instanceof UploadedFile) {
-                            continue;
-                        }
-
-                        $order->addMedia($groupFile)
-                            ->withCustomProperties(['sports_day_group' => (int) $groupIndex])
-                            ->toMediaCollection('sports_day_artwork');
+                        $this->storeArtwork(
+                            $order,
+                            $groupFile,
+                            'sports_day_artwork',
+                            ['sports_day_group' => (int) $groupIndex],
+                        );
                     }
                 }
 
@@ -202,15 +213,16 @@ class CreateOrderAction
                     }
 
                     foreach (Arr::wrap($tableFiles) as $tableFile) {
-                        if (! $tableFile instanceof UploadedFile) {
-                            continue;
-                        }
-
-                        $order->addMedia($tableFile)
-                            ->withCustomProperties(['pe_table' => $tableType])
-                            ->toMediaCollection('pe_uniform_artwork');
+                        $this->storeArtwork(
+                            $order,
+                            $tableFile,
+                            'pe_uniform_artwork',
+                            ['pe_table' => $tableType],
+                        );
                     }
                 }
+
+                OrderCharges::replace($order, $charges);
 
                 // "เปิดบิลอีกครั้ง": the browser can only re-send files the user
                 // picked just now, so the source order's already-saved artwork is
@@ -382,71 +394,19 @@ class CreateOrderAction
         return $normalized;
     }
 
-    private function storeArtworkAsWebpIfPresent(Order $order, mixed $file, string $collection, ?string $batch = null): void
+    /**
+     * Stores one artwork file, skipping anything that is not an upload: the
+     * form sends a mix of new files and placeholders for saved ones.
+     *
+     * @param  array<string, mixed>  $properties
+     */
+    private function storeArtwork(Order $order, mixed $file, string $collection, array $properties = []): void
     {
         if (! $file instanceof UploadedFile) {
             return;
         }
 
-        $properties = $batch === null ? [] : [Order::ARTWORK_BATCH_PROPERTY => $batch];
-        $webpBinary = $this->convertUploadedImageToWebpBinary($file);
-
-        if ($webpBinary === null) {
-            if (strtolower((string) $file->getClientOriginalExtension()) === 'webp') {
-                $order->addMedia($file)
-                    ->withCustomProperties($properties)
-                    ->toMediaCollection($collection);
-
-                return;
-            }
-
-            throw new RuntimeException(sprintf('Unable to convert %s to webp before persistence.', $collection));
-        }
-
-        $baseName = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = trim((string) $baseName) !== '' ? (string) $baseName : 'artwork';
-
-        $order->addMediaFromString($webpBinary)
-            ->usingFileName($safeBaseName.'.webp')
-            ->usingName($safeBaseName)
-            ->withCustomProperties($properties)
-            ->toMediaCollection($collection);
-    }
-
-    private function convertUploadedImageToWebpBinary(UploadedFile $file): ?string
-    {
-        $mimeType = strtolower((string) $file->getMimeType());
-
-        if (! str_starts_with($mimeType, 'image/')) {
-            return null;
-        }
-
-        if (! function_exists('imagecreatefromstring') || ! function_exists('imagewebp')) {
-            return null;
-        }
-
-        $contents = @file_get_contents($file->getRealPath());
-
-        if ($contents === false) {
-            return null;
-        }
-
-        $image = @imagecreatefromstring($contents);
-
-        if ($image === false) {
-            return null;
-        }
-
-        ob_start();
-        $written = @imagewebp($image, null, 82);
-        $binary = ob_get_clean();
-        imagedestroy($image);
-
-        if ($written !== true || ! is_string($binary) || $binary === '') {
-            return null;
-        }
-
-        return $binary;
+        $this->artworkStore->store($order, $file, $collection, $properties);
     }
 
     /**

@@ -10,6 +10,7 @@ import {
     Copy,
     Factory,
     FilePlus2,
+    Image as ImageIcon,
     MoreHorizontal,
     Package,
     Pencil,
@@ -25,6 +26,8 @@ import type { RescheduleTarget } from '@/components/domain/counter/RescheduleDel
 import RescheduleDeliveryDialog, {
     thaiDate,
 } from '@/components/domain/counter/RescheduleDeliveryDialog';
+import type { ArtworkTarget } from '@/components/domain/counter/UpdateArtworkDialog';
+import { UpdateArtworkDialog } from '@/components/domain/counter/UpdateArtworkDialog';
 import type {
     ArtworkGalleryEntry,
     LabelledArtwork,
@@ -198,7 +201,10 @@ export interface OrderTableRow {
             line_fb: string | null;
         };
         pricing: {
+            /** Goods AND "คิดเงินเพิ่มเติม": what the discount comes off. */
             total_amount: number;
+            /** The extra charges, each on its own line as the counter typed it. */
+            charges?: Array<{ label: string; amount: number }>;
             discount_percent: number;
             discount_amount: number;
             net_amount: number;
@@ -273,6 +279,7 @@ export interface OrderTableRow {
         artwork_gallery?: ArtworkGalleryEntry[];
         /** Whether this user may move the delivery date ("เลื่อนส่ง"). */
         can_reschedule?: boolean;
+        can_update_artwork?: boolean;
         /** The date it was due before its latest move, when it moved. */
         postponed_from?: string | null;
         /** Every move of the delivery date, oldest first. */
@@ -2228,6 +2235,7 @@ function OrderActionMenu({
     onDuplicate,
     onDelete,
     onReschedule,
+    onUpdateArtwork,
     triggerClassName,
     iconClassName,
 }: {
@@ -2238,6 +2246,7 @@ function OrderActionMenu({
     onDuplicate: (row: OrderTableRow) => void;
     onDelete: (row: OrderTableRow) => void;
     onReschedule: (row: OrderTableRow) => void;
+    onUpdateArtwork: (row: OrderTableRow) => void;
     triggerClassName: string;
     iconClassName: string;
 }) {
@@ -2267,6 +2276,27 @@ function OrderActionMenu({
                 >
                     <Pencil className="size-4" />
                     แก้ไข
+                </DropdownMenuItem>
+                {/* Wider than แก้ไข on purpose: the sizes and prices must stop
+                    moving once the floor starts cutting, but the pictures are
+                    the one part that legitimately keeps changing — a corrected
+                    logo mid-run, and a photograph of what actually shipped
+                    once the job is done. */}
+                <DropdownMenuItem
+                    disabled={!row.details?.can_update_artwork}
+                    title={
+                        row.details?.can_update_artwork
+                            ? 'เพิ่ม ลบ หรือย้ายรูปของบิลนี้'
+                            : 'อัปเดตรูปได้เฉพาะบิลที่ยังไม่ยกเลิก'
+                    }
+                    onSelect={() => {
+                        if (row.details?.can_update_artwork) {
+                            onUpdateArtwork(row);
+                        }
+                    }}
+                >
+                    <ImageIcon className="size-4" />
+                    อัปเดตรูป
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onDuplicate(row)}>
                     <Copy className="size-4" />
@@ -2324,6 +2354,7 @@ function OrdersTable({
     onDuplicate,
     onDelete,
     onReschedule,
+    onUpdateArtwork,
 }: {
     rows: OrderTableRow[];
     pagination?: CounterPagination;
@@ -2335,6 +2366,7 @@ function OrdersTable({
     onDuplicate: (row: OrderTableRow) => void;
     onDelete: (row: OrderTableRow) => void;
     onReschedule: (row: OrderTableRow) => void;
+    onUpdateArtwork: (row: OrderTableRow) => void;
 }) {
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -2602,6 +2634,9 @@ function OrdersTable({
                                                     onDuplicate={onDuplicate}
                                                     onDelete={onDelete}
                                                     onReschedule={onReschedule}
+                                                    onUpdateArtwork={
+                                                        onUpdateArtwork
+                                                    }
                                                     triggerClassName="size-9 shrink-0 border border-slate-200 text-slate-600 hover:text-[#E21E26]"
                                                     iconClassName="size-4"
                                                 />
@@ -2747,6 +2782,9 @@ function OrdersTable({
                                                             onDelete={onDelete}
                                                             onReschedule={
                                                                 onReschedule
+                                                            }
+                                                            onUpdateArtwork={
+                                                                onUpdateArtwork
                                                             }
                                                             triggerClassName="size-7 text-slate-500 hover:text-[#E21E26]"
                                                             iconClassName="size-3.5"
@@ -2923,6 +2961,18 @@ export default function Counter({
             orderCode: row.order_code,
             dueDate: (row.due_date ?? '').slice(0, 10),
             quantity: row.order_item_count ?? 0,
+            jobName: row.details?.job_name ?? null,
+        });
+
+    // "อัปเดตรูป". The dialog fetches the bill's pictures itself when it
+    // opens, so the row only has to name which bill.
+    const [artworkTarget, setArtworkTarget] = useState<ArtworkTarget | null>(
+        null,
+    );
+    const artworkRow = (row: OrderTableRow) =>
+        setArtworkTarget({
+            id: row.id,
+            orderCode: row.order_code,
             jobName: row.details?.job_name ?? null,
         });
 
@@ -4616,6 +4666,12 @@ export default function Counter({
                                 <div><span class="label">จัดส่ง:</span> ${escapeHtml(order.delivery_method ? (order.delivery_method === 'shipping' ? 'ขนส่ง' : order.delivery_method === 'onsite' ? 'หน้างาน' : order.delivery_method === 'pickup' ? 'รับหน้าร้าน' : order.delivery_method) : '-')}</div>
                                 ${order.delivery_method && ['shipping', 'onsite'].includes(order.delivery_method) ? `<div class="span-4"><span class="label">รายละเอียด:</span> ${escapeHtml(order.shipping_address || '-')}</div>` : ''}
                                 <div><span class="label">รวมเป็นเงิน:</span> ${formatMoney(order.pricing.total_amount)}</div>
+                                ${(order.pricing.charges ?? [])
+                                    .map(
+                                        (charge) =>
+                                            `<div><span class="label">${escapeHtml(charge.label)}:</span> ${formatMoney(charge.amount)}</div>`,
+                                    )
+                                    .join('')}
                                 <div><span class="label">ส่วนลด ${order.pricing.discount_percent}%:</span> ${formatMoney(order.pricing.discount_amount)}</div>
                                 <div><span class="label">ยอดรวมหลังลด:</span> <span class="green">${formatMoney(order.pricing.net_amount)}</span></div>
                                 <div><span class="label">ชำระแล้ว:</span> <span class="blue">${formatMoney(order.pricing.paid_amount)}</span></div>
@@ -4788,6 +4844,14 @@ export default function Counter({
                 loads={deliveryDateLoads}
                 dailyCapacity={dailyProductionCapacity}
                 onClose={() => setRescheduleTarget(null)}
+            />
+
+            {/* Keyed by bill: opening a second one starts from its own
+                pictures rather than the previous bill's unsaved edits. */}
+            <UpdateArtworkDialog
+                key={artworkTarget?.id ?? 'none'}
+                target={artworkTarget}
+                onClose={() => setArtworkTarget(null)}
             />
 
             <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -5032,6 +5096,7 @@ export default function Counter({
                             onDuplicate={handleDuplicateOrder}
                             onDelete={setPendingDelete}
                             onReschedule={rescheduleRow}
+                            onUpdateArtwork={artworkRow}
                         />
                     </section>
                 </div>
@@ -5266,6 +5331,24 @@ export default function Counter({
                                                     )}
                                                 </span>
                                             </div>
+                                            {(
+                                                selectedOrder.details.pricing
+                                                    .charges ?? []
+                                            ).map((charge, index) => (
+                                                <div
+                                                    key={`${charge.label}-${index}`}
+                                                    className="flex justify-between text-slate-600"
+                                                >
+                                                    <span className="truncate pr-2">
+                                                        {charge.label}
+                                                    </span>
+                                                    <span>
+                                                        {formatMoney(
+                                                            charge.amount,
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            ))}
                                             <div className="flex justify-between">
                                                 <span>ส่วนลด %</span>
                                                 <span className="font-semibold">

@@ -51,7 +51,7 @@ class OwnerDashboardController extends Controller
         }
 
         $orders = $this->filteredOrders($filters, $actor)
-            ->with(['items', 'specification', 'routings'])
+            ->with(['items', 'charges', 'specification', 'routings'])
             ->get();
 
         $garmentTypesByCategory = GarmentType::query()
@@ -219,6 +219,20 @@ class OwnerDashboardController extends Controller
             $orderCount++;
             $orderNet = (float) $order->net_amount;
             $orderGross = (float) $order->items->sum(fn ($item): float => (float) $item->total_price);
+
+            // "คิดเงินเพิ่มเติม" is money on the bill but not money for a
+            // garment, so it is held back from the split below. Spreading a
+            // delivery charge across the shirts would report shirt revenue
+            // the shop never earned on shirts.
+            $orderCharges = (float) $order->charges->sum(fn ($charge): float => (float) $charge->amount);
+            $chargeShare = $orderNet > 0.0 && $orderGross + $orderCharges > 0.0
+                ? $orderNet * ($orderCharges / ($orderGross + $orderCharges))
+                : 0.0;
+
+            if ($chargeShare > 0.0) {
+                $buckets['unspecified'] += $chargeShare;
+                $orderNet -= $chargeShare;
+            }
 
             $net += $orderNet;
             $gross += $orderGross;

@@ -11,8 +11,8 @@ use App\Enums\SizeTier;
 use App\Models\Order;
 use App\Models\Receipt;
 use App\Models\User;
+use App\Support\Orders\OrderCharges;
 use App\Support\Orders\TypedSpecMasterData;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -20,6 +20,8 @@ use Throwable;
 
 class UpdateOrderAction
 {
+    public function __construct(private readonly SyncOrderArtworkAction $artwork = new SyncOrderArtworkAction) {}
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -27,12 +29,14 @@ class UpdateOrderAction
     {
         try {
             return DB::transaction(function () use ($order, $data, $actorUserId): Order {
+                $actor = User::query()->whereKey($actorUserId)->first();
+
                 // A spec name typed rather than picked is filed as master data
                 // here, inside the bill's own transaction, so a bill that fails
                 // to save files nothing.
                 if (is_array($data['specification'] ?? null)) {
                     $data['specification'] = (new TypedSpecMasterData(
-                        User::query()->whereKey($actorUserId)->value('name'),
+                        $actor?->name,
                     ))->apply($data['specification']);
                 }
 
@@ -127,212 +131,32 @@ class UpdateOrderAction
                     $subtotal += (float) $item->total_price;
                 }
 
+                // "คิดเงินเพิ่มเติม" joins the garments before the discount,
+                // exactly as it does when the bill is first opened.
+                $charges = OrderCharges::normalize($data['charges'] ?? []);
+                OrderCharges::replace($order, $charges);
+                $grossAmount = $subtotal + OrderCharges::total($charges);
+
                 $discountPercent = (float) ($data['discount_percent'] ?? $order->discount_percent ?? 0);
-                $discountAmount = ($subtotal * $discountPercent) / 100;
-                $netAmount = max(0.0, $subtotal - $discountAmount);
+                $discountAmount = ($grossAmount * $discountPercent) / 100;
+                $netAmount = max(0.0, $grossAmount - $discountAmount);
 
                 $order->update([
-                    'total_amount' => $subtotal,
+                    'total_amount' => $grossAmount,
                     'discount_amount' => $discountAmount,
                     'net_amount' => $netAmount,
                     'order_status' => $order->order_status ?? OrderStatus::Draft,
                 ]);
 
-                $this->removeArtworkMedia($order, $data['removed_media_ids'] ?? []);
+                // Every change to the bill's pictures goes through the one
+                // action the counter's "อัปเดตรูป" also uses, so the two paths
+                // file artwork onto its sheets the same way.
+                $this->artwork->execute($order, $data, $actor);
 
-                if (($data['design_artwork'] ?? null) instanceof UploadedFile) {
-                    $order->clearMediaCollection('artwork');
-                    $order->addMedia($data['design_artwork'])->toMediaCollection('artwork');
-                }
-
-                // Shirt/pants artwork support multiple images per order. Saving
-                // appends the newly selected files; images the user removed are
-                // deleted above, by media id.
-                foreach (Arr::wrap($data['shirt_artwork'] ?? []) as $shirtArtworkFile) {
-                    if ($shirtArtworkFile instanceof UploadedFile) {
-                        $order->addMedia($shirtArtworkFile)->toMediaCollection('shirt_artwork');
-                    }
-                }
-
-                foreach (Arr::wrap($data['pants_artwork'] ?? []) as $pantsArtworkFile) {
-                    if ($pantsArtworkFile instanceof UploadedFile) {
-                        $order->addMedia($pantsArtworkFile)->toMediaCollection('pants_artwork');
-                    }
-                }
-
-                // Artwork drawn for one production batch only. The batch rides
-                // on the media itself, so only that batch's sheet takes it.
-                foreach (Order::batchedArtworkCollections() as $collection) {
-                    foreach (Arr::wrap($data[$collection.'_scoped'] ?? []) as $batch => $batchFiles) {
-                        $normalizedBatch = Order::normalizeArtworkBatch($batch, $collection);
-                        $properties = $normalizedBatch === null
-                            ? []
-                            : [Order::ARTWORK_BATCH_PROPERTY => $normalizedBatch];
-
-                        foreach (Arr::wrap($batchFiles) as $batchFile) {
-                            if ($batchFile instanceof UploadedFile) {
-                                $order->addMedia($batchFile)
-                                    ->withCustomProperties($properties)
-                                    ->toMediaCollection($collection);
-                            }
-                        }
-                    }
-                }
-
-                $this->pinArtworkBatches($order, $data['artwork_scopes'] ?? []);
-                $this->refileSportsDayArtwork($order, $data['sports_day_artwork_houses'] ?? []);
-
-                // Form 3 (กีฬาสี): files arrive keyed by colour house index. The
-                // index is stored on the media itself so the artwork can be
-                // handed back to the right house on the printed sheet.
-                foreach (Arr::wrap($data['sports_day_artwork'] ?? []) as $groupIndex => $groupFiles) {
-                    if (! is_numeric($groupIndex)) {
-                        continue;
-                    }
-
-                    foreach (Arr::wrap($groupFiles) as $groupFile) {
-                        if (! $groupFile instanceof UploadedFile) {
-                            continue;
-                        }
-
-                        $order->addMedia($groupFile)
-                            ->withCustomProperties(['sports_day_group' => (int) $groupIndex])
-                            ->toMediaCollection('sports_day_artwork');
-                    }
-                }
-
-                // ชุดพละ: files arrive keyed by size table, and the table is stored on
-                // the media so each table gets its own gallery back on the form.
-                foreach (Arr::wrap($data['pe_uniform_artwork'] ?? []) as $tableType => $tableFiles) {
-                    if ($tableType !== 'kids' && $tableType !== 'adults') {
-                        continue;
-                    }
-
-                    foreach (Arr::wrap($tableFiles) as $tableFile) {
-                        if (! $tableFile instanceof UploadedFile) {
-                            continue;
-                        }
-
-                        $order->addMedia($tableFile)
-                            ->withCustomProperties(['pe_table' => $tableType])
-                            ->toMediaCollection('pe_uniform_artwork');
-                    }
-                }
-
-                foreach (Arr::wrap($data['reference_designs'] ?? []) as $referenceDesign) {
-                    if ($referenceDesign instanceof UploadedFile) {
-                        $order->addMedia($referenceDesign)->toMediaCollection('reference_designs');
-                    }
-                }
-
-                return $order->refresh()->load(['items', 'specification', 'routings', 'receipts']);
+                return $order->refresh()->load(['items', 'charges', 'specification', 'routings', 'receipts']);
             });
         } catch (Throwable $exception) {
             throw new RuntimeException('Failed to update order.', previous: $exception);
         }
-    }
-
-    /**
-     * Deletes artwork the user removed while editing. Every id is checked to
-     * belong to this order and to an artwork collection before anything is
-     * touched, so a stray or hand-crafted id can never delete another order's
-     * images -- or any non-artwork media.
-     */
-    /**
-     * Re-pins artwork already on file: to one production batch, or back to
-     * every sheet of its garment when the batch is empty.
-     *
-     * Only this order's own shirt and trouser artwork can be re-pinned, so a
-     * crafted request cannot reach another bill's images.
-     *
-     * @param  mixed  $scopes  batch keyed by media id
-     */
-    /**
-     * Form 3 files a house's pictures by the house's position on the bill. A
-     * house removed ahead of another moves it up, so each saved picture is
-     * filed again under the position its house holds now.
-     */
-    private function refileSportsDayArtwork(Order $order, mixed $houses): void
-    {
-        $positions = [];
-
-        foreach (Arr::wrap($houses) as $mediaId => $house) {
-            if (is_numeric($mediaId) && is_numeric($house)) {
-                $positions[(int) $mediaId] = (int) $house;
-            }
-        }
-
-        if ($positions === []) {
-            return;
-        }
-
-        // Read fresh rather than from the loaded relation, which still holds
-        // pictures deleted earlier in this same save.
-        foreach ($order->media()->where('collection_name', 'sports_day_artwork')->get() as $media) {
-            $position = $positions[(int) $media->id] ?? null;
-
-            if ($position === null || $media->getCustomProperty('sports_day_group') === $position) {
-                continue;
-            }
-
-            $media->setCustomProperty('sports_day_group', $position);
-            $media->save();
-        }
-    }
-
-    private function pinArtworkBatches(Order $order, mixed $scopes): void
-    {
-        $requested = [];
-
-        foreach (Arr::wrap($scopes) as $mediaId => $batch) {
-            if (is_numeric($mediaId)) {
-                $requested[(int) $mediaId] = $batch;
-            }
-        }
-
-        if ($requested === []) {
-            return;
-        }
-
-        foreach (Order::batchedArtworkCollections() as $collection) {
-            foreach ($order->getMedia($collection) as $media) {
-                if (! array_key_exists((int) $media->id, $requested)) {
-                    continue;
-                }
-
-                $batch = Order::normalizeArtworkBatch($requested[(int) $media->id], $collection);
-                $properties = $media->custom_properties;
-
-                if ($batch === null) {
-                    unset($properties[Order::ARTWORK_BATCH_PROPERTY]);
-                } else {
-                    $properties[Order::ARTWORK_BATCH_PROPERTY] = $batch;
-                }
-
-                $media->custom_properties = $properties;
-                $media->save();
-            }
-        }
-    }
-
-    private function removeArtworkMedia(Order $order, mixed $removedMediaIds): void
-    {
-        $ids = array_values(array_filter(
-            array_map(
-                static fn ($id): int => is_numeric($id) ? (int) $id : 0,
-                Arr::wrap($removedMediaIds),
-            ),
-            static fn (int $id): bool => $id > 0,
-        ));
-
-        if ($ids === []) {
-            return;
-        }
-
-        $order->media()
-            ->whereIn('id', $ids)
-            ->whereIn('collection_name', Order::artworkCollections())
-            ->get()
-            ->each(static fn ($media) => $media->delete());
     }
 }

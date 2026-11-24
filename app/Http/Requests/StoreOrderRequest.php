@@ -4,16 +4,19 @@ namespace App\Http\Requests;
 
 use App\Enums\RoutingStationName;
 use App\Enums\SizeTier;
+use App\Http\Requests\Concerns\RefusesTruncatedUploads;
 use App\Models\Order;
+use App\Support\Orders\OrderCharges;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Validator;
 
 class StoreOrderRequest extends FormRequest
 {
+    use RefusesTruncatedUploads;
+
     public function authorize(): bool
     {
         return (bool) $this->user()?->can('create', Order::class);
@@ -40,7 +43,10 @@ class StoreOrderRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        foreach (['items', 'line_items'] as $key) {
+        // 'charges' joins them: each line is a name and an amount, so a
+        // handful of them is a handful of POST variables the multipart
+        // limit would otherwise count against the bill's size rows.
+        foreach (['items', 'line_items', 'charges'] as $key) {
             $value = $this->input($key);
 
             if (! is_string($value)) {
@@ -156,6 +162,13 @@ class StoreOrderRequest extends FormRequest
                 }
             }],
             'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+
+            // "คิดเงินเพิ่มเติม": money for something that is not a
+            // garment. Never negative — the bill has one discount field
+            // with a limit on it, and this must not become a second one.
+            'charges' => ['sometimes', 'array', 'max:'.OrderCharges::MAX_LINES],
+            'charges.*.label' => ['nullable', 'string', 'max:'.OrderCharges::MAX_LABEL_LENGTH],
+            'charges.*.amount' => ['nullable', 'numeric', 'min:0', 'max:9999999.99'],
             'deposit_amount' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['nullable', 'string', Rule::in(['cash', 'transfer'])],
             'design_artwork' => ['nullable', 'file', 'mimes:webp,png,jpg,pdf', 'max:5120'],
@@ -240,91 +253,6 @@ class StoreOrderRequest extends FormRequest
 
             'routings' => ['sometimes', 'array', 'min:1'],
             'routings.*' => ['required', 'string', Rule::in(array_column(RoutingStationName::cases(), 'value'))],
-        ];
-    }
-
-    /**
-     * Counts every file that actually reached PHP, however it was nested.
-     */
-    private function uploadedFileCount(): int
-    {
-        $count = 0;
-        // Held in a variable first: array_walk_recursive takes its subject by
-        // reference, so the result of a call cannot be passed straight in.
-        $files = $this->allFiles();
-
-        array_walk_recursive(
-            $files,
-            function (mixed $file) use (&$count): void {
-                if ($file !== null) {
-                    $count++;
-                }
-            },
-        );
-
-        return $count;
-    }
-
-    /**
-     * PHP accepts `max_file_uploads` files per request — twenty by default —
-     * and throws the rest away at startup without raising anything the
-     * application can catch. A bill with more artwork than that would have been
-     * saved looking complete while some of its images had simply vanished.
-     *
-     * The browser says how many it attached, so a shortfall is visible here and
-     * the bill is refused instead of stored short.
-     */
-    public function withValidator(Validator $validator): void
-    {
-        $validator->after(function (Validator $validator): void {
-            $claimed = $this->input('artwork_file_count');
-
-            if (! is_numeric($claimed)) {
-                return;
-            }
-
-            $arrived = $this->uploadedFileCount();
-
-            if ($arrived >= (int) $claimed) {
-                return;
-            }
-
-            $validator->errors()->add('artwork_file_count', sprintf(
-                'แนบรูปมา %d ไฟล์ แต่ระบบรับได้เพียง %d ไฟล์ '
-                .'เซิร์ฟเวอร์จำกัดจำนวนไฟล์ต่อการบันทึกหนึ่งครั้ง '
-                .'กรุณาลดจำนวนรูป แล้วบันทึกอีกครั้ง (ยังไม่มีการบันทึกข้อมูล)',
-                (int) $claimed,
-                $arrived,
-            ));
-        });
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'design_artwork.mimes' => 'ไฟล์ Art Work ทั่วไปต้องเป็นชนิด webp, png, jpg หรือ pdf เท่านั้น',
-            'design_artwork.max' => 'ไฟล์ Art Work ทั่วไปต้องมีขนาดไม่เกิน 5MB',
-            'shirt_artwork.*.image' => 'ไฟล์ Art Work เสื้อ ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'shirt_artwork.*.mimes' => 'ไฟล์ Art Work เสื้อ ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'shirt_artwork.*.max' => 'ไฟล์ Art Work เสื้อ ต้องมีขนาดไม่เกิน 5MB',
-            'pants_artwork.*.image' => 'ไฟล์ Art Work กางเกง ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'pants_artwork.*.mimes' => 'ไฟล์ Art Work กางเกง ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'pants_artwork.*.max' => 'ไฟล์ Art Work กางเกง ต้องมีขนาดไม่เกิน 5MB',
-            'shirt_artwork_scoped.*.*.image' => 'ไฟล์ Art Work เสื้อ ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'shirt_artwork_scoped.*.*.mimes' => 'ไฟล์ Art Work เสื้อ ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'shirt_artwork_scoped.*.*.max' => 'ไฟล์ Art Work เสื้อ ต้องมีขนาดไม่เกิน 5MB',
-            'pants_artwork_scoped.*.*.image' => 'ไฟล์ Art Work กางเกง ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'pants_artwork_scoped.*.*.mimes' => 'ไฟล์ Art Work กางเกง ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'pants_artwork_scoped.*.*.max' => 'ไฟล์ Art Work กางเกง ต้องมีขนาดไม่เกิน 5MB',
-            'sports_day_artwork.*.*.image' => 'ไฟล์ Art Work คณะสี ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'sports_day_artwork.*.*.mimes' => 'ไฟล์ Art Work คณะสี ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'sports_day_artwork.*.*.max' => 'ไฟล์ Art Work คณะสี ต้องมีขนาดไม่เกิน 5MB',
-            'pe_uniform_artwork.*.*.image' => 'ไฟล์ Art Work ชุดพละ ต้องเป็นไฟล์รูปภาพเท่านั้น',
-            'pe_uniform_artwork.*.*.mimes' => 'ไฟล์ Art Work ชุดพละ ต้องเป็นชนิด webp, png หรือ jpg เท่านั้น',
-            'pe_uniform_artwork.*.*.max' => 'ไฟล์ Art Work ชุดพละ ต้องมีขนาดไม่เกิน 5MB',
         ];
     }
 }

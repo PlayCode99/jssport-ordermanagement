@@ -141,6 +141,28 @@ class Order extends Model implements HasMedia
     }
 
     /**
+     * "คิดเงินเพิ่มเติม": money charged for something that is not a garment,
+     * in the order the counter typed it — which is the order the receipt
+     * prints it in.
+     *
+     * @return HasMany<OrderCharge, $this>
+     */
+    public function charges(): HasMany
+    {
+        return $this->hasMany(OrderCharge::class)->orderBy('position')->orderBy('id');
+    }
+
+    /**
+     * What the extra charges come to. Part of the bill's gross, so the
+     * discount is taken off the garments and these together — a bill is
+     * discounted as one figure, not garment by garment.
+     */
+    public function getChargesTotalAttribute(): float
+    {
+        return (float) $this->charges->sum(fn (OrderCharge $charge): float => (float) $charge->amount);
+    }
+
+    /**
      * @return HasMany<OrderStatusHistory, $this>
      */
     public function statusHistories(): HasMany
@@ -337,20 +359,7 @@ class Order extends Model implements HasMedia
 
         foreach (self::artworkCollections() as $collection) {
             foreach ($this->getMedia($collection) as $media) {
-                $place = match ($collection) {
-                    'sports_day_artwork' => is_numeric($media->getCustomProperty('sports_day_group'))
-                        ? 'sports_day_'.(int) $media->getCustomProperty('sports_day_group')
-                        : 'all',
-                    'pe_uniform_artwork' => 'pe_'.(string) $media->getCustomProperty('pe_table'),
-                    'shirt_artwork', 'pants_artwork' => (function () use ($media, $collection): string {
-                        $batch = $media->getCustomProperty(self::ARTWORK_BATCH_PROPERTY);
-
-                        return is_string($batch) && trim($batch) !== ''
-                            ? $batch
-                            : ($collection === 'pants_artwork' ? 'pants' : 'shirt');
-                    })(),
-                    default => 'all',
-                };
+                $place = self::artworkPlaceOf($media, $collection);
                 $fingerprint = $media->name.'|'.$media->size;
 
                 if (! isset($gallery[$fingerprint])) {
@@ -364,6 +373,34 @@ class Order extends Model implements HasMedia
         }
 
         return array_values($gallery);
+    }
+
+    /**
+     * The sheet one stored picture belongs to, as a place key.
+     *
+     * 'shirt' / 'pants' mean every sheet of that garment, a batch key such as
+     * 'shirt_kids_short' means that one sheet, 'sports_day_0' a colour house,
+     * 'pe_kids' an old ชุดพละ table, and 'all' the whole bill.
+     *
+     * Read by the gallery on the receipt and by "อัปเดตรูป" on the counter, so
+     * a picture is shown in the same place wherever it is listed.
+     */
+    public static function artworkPlaceOf(Media $media, string $collection): string
+    {
+        return match ($collection) {
+            'sports_day_artwork' => is_numeric($media->getCustomProperty('sports_day_group'))
+                ? 'sports_day_'.(int) $media->getCustomProperty('sports_day_group')
+                : 'all',
+            'pe_uniform_artwork' => 'pe_'.(string) $media->getCustomProperty('pe_table'),
+            'shirt_artwork', 'pants_artwork' => (function () use ($media, $collection): string {
+                $batch = $media->getCustomProperty(self::ARTWORK_BATCH_PROPERTY);
+
+                return is_string($batch) && trim($batch) !== ''
+                    ? $batch
+                    : ($collection === 'pants_artwork' ? 'pants' : 'shirt');
+            })(),
+            default => 'all',
+        };
     }
 
     /**

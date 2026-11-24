@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GarmentPricingController;
+use App\Http\Controllers\OrderArtworkController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\OrderDueDateController;
 use App\Http\Controllers\OwnerDashboardController;
@@ -41,6 +42,11 @@ Route::middleware(['auth'])->group(function () {
     Route::get('orders/{order}/duplicate', [OrderController::class, 'duplicate'])->name('orders.duplicate');
     Route::put('orders/{order}', [OrderController::class, 'update'])->name('orders.update');
     Route::post('orders/{order}/due-date', [OrderDueDateController::class, 'update'])->name('orders.due-date.update');
+    // "อัปเดตรูป" on the counter: artwork alone, so a bill already on the floor
+    // can have its pictures brought up to date without its sizes or prices
+    // being reopened. Separate from orders.update for exactly that reason.
+    Route::get('orders/{order}/artwork', [OrderArtworkController::class, 'show'])->name('orders.artwork.show');
+    Route::post('orders/{order}/artwork', [OrderArtworkController::class, 'update'])->name('orders.artwork.update');
     Route::delete('orders/{order}', [OrderController::class, 'destroy'])->name('orders.destroy');
     Route::get('orders', [OrderController::class, 'index'])->name('orders.index');
     Route::post('orders', [OrderController::class, 'store'])->name('orders.store');

@@ -382,6 +382,13 @@ type OrderCreateFormData = {
     due_date: string;
     delivery_method: DeliveryMethod;
     shipping_address: string;
+    /**
+     * "คิดเงินเพิ่มเติม": money for something that is not a garment.
+     * Kept as typed, blanks included, so a half-filled row does not
+     * vanish under the counter's cursor; the blanks are dropped when
+     * the bill is posted.
+     */
+    charges: ExtraChargeForm[];
     discount_percent: string;
     deposit_amount: number;
     payment_method: PaymentMethod;
@@ -463,6 +470,10 @@ type EditOrderPayload = {
     due_date?: string | null;
     delivery_method?: string | null;
     shipping_address?: string | null;
+    charges?: Array<{
+        label?: string | null;
+        amount?: number | string | null;
+    }> | null;
     discount_percent?: string | number | null;
     deposit_amount?: number | string | null;
     payment_method?: string | null;
@@ -612,6 +623,39 @@ function snapshotSpecLabels(
     });
 
     return labels;
+}
+
+/**
+ * One line of "คิดเงินเพิ่มเติม" while it is being typed.
+ *
+ * Both fields are strings because both are being typed: an amount held as a
+ * number turns a half-typed "1" into 1 and fights the counter's cursor on
+ * the way to "150". They are read as money only when the bill is posted.
+ */
+export type ExtraChargeForm = {
+    id: string;
+    label: string;
+    amount: string;
+};
+
+/** The lines worth sending: a line needs both a name and money on it. */
+export function billableCharges(
+    charges: readonly ExtraChargeForm[],
+): Array<{ label: string; amount: number }> {
+    return charges
+        .map((charge) => ({
+            label: charge.label.trim(),
+            amount: Math.max(toNumber(charge.amount), 0),
+        }))
+        .filter((charge) => charge.label !== '' && charge.amount > 0);
+}
+
+/** What the filled-in lines come to, for the live summary. */
+export function chargesTotal(charges: readonly ExtraChargeForm[]): number {
+    return billableCharges(charges).reduce(
+        (sum, charge) => sum + charge.amount,
+        0,
+    );
 }
 
 function uid(prefix: string): string {
@@ -2396,6 +2440,7 @@ export function buildEditInitialFormData(
             due_date: '',
             delivery_method: 'pickup',
             shipping_address: '',
+            charges: [],
             discount_percent: '0',
             deposit_amount: 0,
             payment_method: 'cash',
@@ -2767,6 +2812,13 @@ export function buildEditInitialFormData(
         due_date: order.due_date ?? '',
         delivery_method: (order.delivery_method as DeliveryMethod) ?? 'pickup',
         shipping_address: order.shipping_address ?? '',
+        charges: Array.isArray(order.charges)
+            ? order.charges.map((charge) => ({
+                  id: uid('charge'),
+                  label: toStringValue(charge.label),
+                  amount: toStringValue(charge.amount),
+              }))
+            : [],
         discount_percent: toStringValue(order.discount_percent) || '0',
         deposit_amount: toNumberValue(order.deposit_amount),
         payment_method: (order.payment_method as PaymentMethod) ?? 'cash',
@@ -4065,11 +4117,16 @@ export default function OrderCreatePage({
         : sizeFormMode === 'sports_day'
           ? sportsDayGrossAmount
           : individualGrossAmount;
+    // "คิดเงินเพิ่มเติม" joins the garments before the discount: the shop
+    // discounts a bill as one figure, so a delivery charge is discounted
+    // along with the shirts. The server does the same sum again.
+    const extraChargesAmount = chargesTotal(data.charges);
+    const chargedAmount = grossAmount + extraChargesAmount;
     const discountPercent = Math.max(
         Math.min(toNumber(data.discount_percent), 50),
         0,
     );
-    const discountAmount = (grossAmount * discountPercent) / 100;
+    const discountAmount = (chargedAmount * discountPercent) / 100;
     const derivedLineItems = useMemo(() => {
         if (usesSizeTables(sizeFormMode)) {
             return usesLegacySizeRows(data.size_tables)
@@ -4100,8 +4157,37 @@ export default function OrderCreatePage({
         data.individual_include_pants,
     ]);
 
-    const netAmount = Math.max(grossAmount - discountAmount, 0);
+    const netAmount = Math.max(chargedAmount - discountAmount, 0);
     const remainingAmount = Math.max(netAmount - data.deposit_amount, 0);
+
+    // The row just added, so the cursor lands in its name box: the counter
+    // adds a line in order to type into it.
+    const [focusChargeId, setFocusChargeId] = useState<string | null>(null);
+
+    const addCharge = () => {
+        const charge: ExtraChargeForm = {
+            id: uid('charge'),
+            label: '',
+            amount: '',
+        };
+
+        setFocusChargeId(charge.id);
+        setData('charges', [...data.charges, charge]);
+    };
+
+    const updateCharge = (id: string, key: 'label' | 'amount', value: string) =>
+        setData(
+            'charges',
+            data.charges.map((charge) =>
+                charge.id === id ? { ...charge, [key]: value } : charge,
+            ),
+        );
+
+    const removeCharge = (id: string) =>
+        setData(
+            'charges',
+            data.charges.filter((charge) => charge.id !== id),
+        );
     const sizeOptionsByGroup = useMemo(
         () => ({
             kids: resolvedKidsSizes,
@@ -6445,6 +6531,11 @@ export default function OrderCreatePage({
             data.garment_tables,
         );
 
+        // Half-typed lines are dropped here rather than refused: the counter
+        // adds a row before it knows what to call it, and a blank row left on
+        // screen must not block a bill that is otherwise complete.
+        const requestCharges = billableCharges(data.charges);
+
         if (requestItems.length === 0) {
             setValidationErrors(['จำนวนและราคาสินค้าอย่างน้อย 1 รายการ']);
             setShowValidationModal(true);
@@ -6710,6 +6801,10 @@ export default function OrderCreatePage({
                 // and its spec missing, and was refused for fields that were
                 // filled in. The server unpacks these before validating.
                 items: JSON.stringify(requestItems),
+                // Short list, but a name and an amount each: JSON for the
+                // same reason the size rows are, so it never eats into
+                // the multipart variable budget.
+                charges: JSON.stringify(requestCharges),
                 routings,
                 specification: {
                     pattern_id: catalogIdOrName(activeSpecValues.pattern_id),
@@ -11301,6 +11396,126 @@ export default function OrderCreatePage({
                                                 ฿ {formatMoney(grossAmount)}
                                             </span>
                                         </div>
+
+                                        {/*
+                                            "คิดเงินเพิ่มเติม" sits between the
+                                            goods and the discount because that
+                                            is the order the money is worked
+                                            out in: it is added to the goods,
+                                            and the discount comes off both.
+                                            Folded away to a single button
+                                            until it is used — most bills
+                                            charge for nothing but garments.
+                                        */}
+                                        <div className="rounded-lg border border-yellow-200/80 bg-white/60 p-2.5">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-xs font-semibold text-slate-700">
+                                                    คิดเงินเพิ่มเติม
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={addCharge}
+                                                    className="h-7 bg-white px-2 text-[11px]"
+                                                >
+                                                    <Plus className="size-3.5" />
+                                                    เพิ่มรายการ
+                                                </Button>
+                                            </div>
+
+                                            {data.charges.length === 0 ? (
+                                                <p className="mt-1 text-[11px] text-slate-400">
+                                                    เช่น ค่าจัดส่ง ค่าออกแบบ
+                                                    ค่าทำด่วน
+                                                </p>
+                                            ) : (
+                                                <div className="mt-2 grid gap-1.5">
+                                                    {data.charges.map(
+                                                        (charge) => (
+                                                            <div
+                                                                key={charge.id}
+                                                                className="flex items-center gap-1.5"
+                                                            >
+                                                                <Input
+                                                                    autoFocus={
+                                                                        charge.id ===
+                                                                        focusChargeId
+                                                                    }
+                                                                    value={
+                                                                        charge.label
+                                                                    }
+                                                                    onChange={(
+                                                                        event,
+                                                                    ) =>
+                                                                        updateCharge(
+                                                                            charge.id,
+                                                                            'label',
+                                                                            event
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    placeholder="ชื่อรายการ"
+                                                                    aria-label="ชื่อรายการที่คิดเงินเพิ่ม"
+                                                                    className="h-8 flex-1 bg-white text-xs md:text-xs"
+                                                                />
+                                                                <Input
+                                                                    type="number"
+                                                                    inputMode="decimal"
+                                                                    onWheel={
+                                                                        blurOnWheel
+                                                                    }
+                                                                    min={0}
+                                                                    step="0.01"
+                                                                    value={
+                                                                        charge.amount
+                                                                    }
+                                                                    onChange={(
+                                                                        event,
+                                                                    ) =>
+                                                                        updateCharge(
+                                                                            charge.id,
+                                                                            'amount',
+                                                                            event
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    placeholder="0.00"
+                                                                    aria-label="จำนวนเงินที่คิดเพิ่ม"
+                                                                    className="h-8 w-24 bg-white text-right text-xs tabular-nums md:text-xs"
+                                                                />
+                                                                <Button
+                                                                    type="button"
+                                                                    size="icon"
+                                                                    variant="ghost"
+                                                                    onClick={() =>
+                                                                        removeCharge(
+                                                                            charge.id,
+                                                                        )
+                                                                    }
+                                                                    aria-label={`ลบรายการ ${charge.label.trim() || 'ที่ยังไม่ได้ตั้งชื่อ'}`}
+                                                                    className="size-8 shrink-0 text-slate-400 hover:text-[#E21E26]"
+                                                                >
+                                                                    <X className="size-4" />
+                                                                </Button>
+                                                            </div>
+                                                        ),
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {extraChargesAmount > 0 && (
+                                            <div className="flex items-center justify-between border-t border-yellow-200 pt-2.5 text-slate-600">
+                                                <span>รวมก่อนหักส่วนลด</span>
+                                                <span className="font-semibold text-slate-900">
+                                                    ฿{' '}
+                                                    {formatMoney(chargedAmount)}
+                                                </span>
+                                            </div>
+                                        )}
 
                                         <div className="grid grid-cols-[90px_1fr] items-center gap-2">
                                             <span className="text-slate-600">

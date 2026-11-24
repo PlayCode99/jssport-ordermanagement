@@ -361,7 +361,7 @@ class OrderController extends Controller
 
         $orderPayload = null;
         if ($order !== null) {
-            $order->loadMissing(['customer', 'branch', 'items', 'specification', 'receipts']);
+            $order->loadMissing(['customer', 'branch', 'items', 'charges', 'specification', 'receipts']);
 
             $specification = $order->specification;
             $screenPrintDetail = $specification?->screen_print_detail;
@@ -430,6 +430,16 @@ class OrderController extends Controller
                         'quantity' => (int) $item->quantity,
                         'unit_price' => (float) $item->unit_price,
                         'total_price' => (float) $item->total_price,
+                    ])
+                    ->values()
+                    ->all(),
+                // "คิดเงินเพิ่มเติม" carries over to a duplicate as well:
+                // re-ordering the same job usually means the same delivery
+                // charge, and the counter can clear a line it does not want.
+                'charges' => $order->charges
+                    ->map(fn ($charge): array => [
+                        'label' => (string) $charge->label,
+                        'amount' => (float) $charge->amount,
                     ])
                     ->values()
                     ->all(),

@@ -66,6 +66,33 @@ class OrderPolicy
     }
 
     /**
+     * Updating a bill's pictures is deliberately wider than editing it.
+     *
+     * Editing closes as soon as the floor starts cutting, because the sizes
+     * and prices under the work must stop moving. The pictures are the one
+     * part that legitimately keeps changing after that: a customer sends a
+     * corrected logo mid-run, and once the job is finished the counter
+     * replaces the mock-up with a photograph of what actually shipped, so the
+     * bill shows the real thing when it is re-ordered.
+     *
+     * So this stays open at every status, and the designer — who holds the
+     * artwork files — is allowed in alongside the people who write bills. A
+     * cancelled bill is the exception: nothing about it should move again.
+     */
+    public function updateArtwork(User $user, Order $order): bool
+    {
+        if (! in_array($user->role, [UserRole::Admin, UserRole::Sales, UserRole::Designer], true)) {
+            return false;
+        }
+
+        if (! UserAccessControl::canAccessBranch($user, (int) $order->branch_id)) {
+            return false;
+        }
+
+        return $order->order_status !== OrderStatus::Cancelled;
+    }
+
+    /**
      * Deleting is deliberately stricter than editing: only an admin may do it,
      * and only while the order has not entered the production line. Once any
      * required routing is in progress or completed, the shop floor has already

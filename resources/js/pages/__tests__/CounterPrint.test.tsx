@@ -336,6 +336,66 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('1,000');
     });
 
+    /**
+     * "คิดเงินเพิ่มเติม" is money the customer is asked to pay, so the
+     * receipt has to say what it was for. One line each, named — a bill whose
+     * total is 1,700 larger than its garments with nothing to explain it is a
+     * bill the counter has to defend from memory.
+     */
+    it('names every extra charge on the sheet', () => {
+        const html = printedHtml(
+            makeRow({
+                details: {
+                    pricing: {
+                        total_amount: 4700,
+                        charges: [
+                            { label: 'ค่าจัดส่ง EMS', amount: 500 },
+                            { label: 'ค่าทำด่วน', amount: 1200 },
+                        ],
+                        discount_percent: 10,
+                        discount_amount: 470,
+                        net_amount: 4230,
+                        paid_amount: 1000,
+                    },
+                },
+            }) as never,
+        );
+
+        expect(html).toContain('ค่าจัดส่ง EMS');
+        expect(html).toContain('ค่าทำด่วน');
+        expect(html).toContain('1,200');
+    });
+
+    it('prints nothing extra on a bill that charges only for garments', () => {
+        expect(printedHtml()).not.toContain('ค่าจัดส่ง');
+    });
+
+    /**
+     * The label is whatever the counter typed, and it goes into a string of
+     * HTML. Escaped like every other piece of customer text on the sheet.
+     */
+    it('escapes a charge label instead of letting it break the markup', () => {
+        const html = printedHtml(
+            makeRow({
+                details: {
+                    pricing: {
+                        total_amount: 3500,
+                        charges: [
+                            { label: '<script>alert(1)</script>', amount: 500 },
+                        ],
+                        discount_percent: 0,
+                        discount_amount: 0,
+                        net_amount: 3500,
+                        paid_amount: 0,
+                    },
+                },
+            }) as never,
+        );
+
+        expect(html).not.toContain('<script>alert(1)</script>');
+        expect(html).toContain('&lt;script&gt;');
+    });
+
     it('lists every ordered line with its size and quantity', () => {
         const html = printedHtml();
 

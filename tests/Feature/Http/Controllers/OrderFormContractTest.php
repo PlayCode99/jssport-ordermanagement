@@ -188,6 +188,52 @@ class OrderFormContractTest extends TestCase
     }
 
     /**
+     * "คิดเงินเพิ่มเติม" travels the same way, and for the same reason: each
+     * line is two more multipart variables, and the bill has no room to
+     * spare. What the browser builds is what is tested here — the arithmetic
+     * itself is covered in OrderExtraChargesTest.
+     */
+    public function test_charges_posted_as_a_json_string_are_read_as_lines(): void
+    {
+        $payload = $this->formPayload();
+        $payload['discount_percent'] = 10;
+        $payload['charges'] = json_encode([
+            ['label' => 'ค่าจัดส่ง', 'amount' => 500],
+            ['label' => 'ค่าทำด่วน', 'amount' => 1000],
+        ], JSON_THROW_ON_ERROR);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $order = Order::query()->firstOrFail();
+        $goods = (float) $order->items()->sum('total_price');
+
+        $this->assertSame(
+            ['ค่าจัดส่ง', 'ค่าทำด่วน'],
+            $order->charges->pluck('label')->all(),
+        );
+        // Charged on top of the goods, then discounted as one figure.
+        $this->assertSame($goods + 1500.0, (float) $order->total_amount);
+        $this->assertSame(
+            round(($goods + 1500.0) * 0.9, 2),
+            round((float) $order->net_amount, 2),
+        );
+    }
+
+    public function test_a_bill_posted_with_no_charges_at_all_still_saves(): void
+    {
+        $payload = $this->formPayload();
+        unset($payload['charges']);
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $this->assertCount(0, Order::query()->firstOrFail()->charges);
+    }
+
+    /**
      * Unpacking happens before the rules, not instead of them.
      */
     public function test_a_json_string_of_items_is_still_checked_row_by_row(): void
