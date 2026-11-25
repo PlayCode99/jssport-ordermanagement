@@ -592,10 +592,26 @@ export default function GarmentPricesPage() {
                                                 {index + 1}
                                             </td>
                                             <td className="px-4 py-3 align-top text-slate-700">
-                                                <div className="font-medium text-slate-900">
-                                                    {row.garment_type_name}
-                                                </div>
-                                                <div className="text-slate-600">
+                                                {/*
+                                                    The row IS a stitch point,
+                                                    so it reads as one line
+                                                    with the garment in front
+                                                    of it. Split over two
+                                                    lines, the stitch point sat
+                                                    underneath in the dimmer
+                                                    grey and the garment read
+                                                    as the heading of a group
+                                                    that was not there.
+                                                */}
+                                                <div className="text-base leading-snug font-semibold text-slate-900">
+                                                    {/*
+                                                        One string, so the
+                                                        spaces around the colon
+                                                        survive formatting.
+                                                    */}
+                                                    <span className="font-medium text-slate-500">
+                                                        {`${row.garment_type_name} : `}
+                                                    </span>
                                                     {row.name}
                                                 </div>
                                             </td>
