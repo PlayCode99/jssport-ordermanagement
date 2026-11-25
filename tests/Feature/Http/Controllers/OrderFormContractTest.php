@@ -234,6 +234,47 @@ class OrderFormContractTest extends TestCase
     }
 
     /**
+     * The shop gives garments away: a replacement for one it got wrong, a
+     * sample, the extra shirt thrown in on a big order. The floor still cuts
+     * and sews them, so they belong on the bill and on the sheet at ฿0.
+     */
+    public function test_a_garment_given_away_is_billed_at_nothing(): void
+    {
+        $payload = $this->formPayload();
+        $payload['items'][0]['unit_price'] = 0;
+        $payload['items'][1]['unit_price'] = 0;
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasNoErrors();
+
+        $order = Order::query()->firstOrFail();
+
+        // Both lines are on the bill, at nothing, with their counts intact —
+        // not quietly missing because nobody was charged for them.
+        $this->assertSame(2, $order->items()->count());
+        $this->assertSame(
+            [0.0, 0.0],
+            $order->items()->orderBy('id')->pluck('unit_price')->map(fn ($p) => (float) $p)->all(),
+        );
+        $this->assertSame(14, (int) $order->items()->sum('quantity'));
+    }
+
+    /**
+     * A count of nothing is still refused: it is the count, not the price,
+     * that says there is something to make.
+     */
+    public function test_a_line_counting_nothing_is_still_refused(): void
+    {
+        $payload = $this->formPayload();
+        $payload['items'][0]['quantity'] = 0;
+
+        $this->actingAs($this->owner)
+            ->post('/orders', $payload)
+            ->assertSessionHasErrors(['items.0.quantity']);
+    }
+
+    /**
      * Unpacking happens before the rules, not instead of them.
      */
     public function test_a_json_string_of_items_is_still_checked_row_by_row(): void

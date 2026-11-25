@@ -105,15 +105,20 @@ describe('a garment-table row that cannot be billed as typed', () => {
         );
     });
 
-    it('is stopped when it has a quantity and no price, instead of dropping off the bill', () => {
+    it('is allowed through at ฿0, which is a price the shop does charge', () => {
         renderForm();
         type('จำนวนเสื้อ แถวที่ 1', '20');
+        type('ไซซ์เสื้อ แถวที่ 1', 'M');
         save();
 
-        expect(missingList()).toContain('• ราคาของรายการที่กรอกจำนวนไว้');
+        // Twenty shirts given away — a replacement, a sample, the extra on a
+        // big order. The floor still cuts and sews them, so the bill takes
+        // them at ฿0 rather than refusing to save. The counter decides what
+        // a garment costs, not this form.
+        expect(missingList()).not.toContain('• ราคาของรายการที่กรอกจำนวนไว้');
         expect(
             screen.getByLabelText('ราคาต่อตัวเสื้อ แถวที่ 1').className,
-        ).toContain('border-red-500');
+        ).not.toContain('border-red-500');
     });
 
     it('lets rows that only carry the linked price stay blank', () => {
@@ -380,7 +385,7 @@ describe('Form 2, the list of people', () => {
         expect(isMarked(screen.getByLabelText('ไซซ์คนที่ 2'))).toBe(false);
     });
 
-    it('stops trousers counted and left unpriced, which would drop off the bill', () => {
+    it('takes trousers counted and left unpriced at ฿0, rather than holding the bill', () => {
         openForm('รายตัว (Form 2)');
         fireEvent.click(screen.getByLabelText('สั่งกางเกงด้วย'));
         typeName(1, 'สมชาย');
@@ -390,11 +395,15 @@ describe('Form 2, the list of people', () => {
         });
         save();
 
-        expect(missingList()).toContain(
+        // They used to drop off the bill and off the floor's sheet without a
+        // word, so the form demanded a price. They are billed at ฿0 now, so
+        // there is nothing left to demand and no box to mark.
+        expect(missingList()).not.toContain(
             '• ราคากางเกงของคนที่กรอกจำนวนกางเกงไว้',
         );
-        // Linked: the price is typed on the first person.
-        expect(isMarked(screen.getByLabelText('ราคากางเกงคนที่ 1'))).toBe(true);
+        expect(isMarked(screen.getByLabelText('ราคากางเกงคนที่ 1'))).toBe(
+            false,
+        );
         expect(isMarked(screen.getByLabelText('ราคากางเกงคนที่ 2'))).toBe(
             false,
         );
@@ -438,20 +447,28 @@ describe('Form 2, the list of people', () => {
 });
 
 describe('a bill with rows counted but nothing billable yet', () => {
-    it('points at the row that is short, not at an empty first row (Form 3)', async () => {
+    it('bills a Form 3 row counted but not priced, instead of holding the bill', () => {
         openForm('กีฬาสี (Form 3)');
-        const quantity = screen.getByLabelText(
-            'จำนวนเสื้อแถวที่ 2 ของคณะที่ 1',
+        fireEvent.change(
+            screen.getByLabelText('จำนวนเสื้อแถวที่ 2 ของคณะที่ 1'),
+            { target: { value: '8' } },
         );
-        fireEvent.change(quantity, { target: { value: '8' } });
+        save();
+
+        // Eight shirts for a colour house that is not being charged for them
+        // is a bill, not an empty one.
+        expect(missingList()).not.toContain(
+            '• จำนวนและราคาสินค้าอย่างน้อย 1 รายการ',
+        );
+    });
+
+    it('still points at the first box when nothing at all was counted (Form 3)', async () => {
+        openForm('กีฬาสี (Form 3)');
         save();
 
         expect(missingList()).toContain(
             '• จำนวนและราคาสินค้าอย่างน้อย 1 รายการ',
         );
-        expect(
-            isMarked(screen.getByLabelText('จำนวนเสื้อแถวที่ 1 ของคณะที่ 1')),
-        ).toBe(false);
 
         await act(async () => {
             fireEvent.click(
@@ -463,7 +480,7 @@ describe('a bill with rows counted but nothing billable yet', () => {
 
         await waitFor(() =>
             expect(document.activeElement).toBe(
-                screen.getByLabelText('ราคาเสื้อแถวที่ 1 ของคณะที่ 1'),
+                screen.getByLabelText('จำนวนเสื้อแถวที่ 1 ของคณะที่ 1'),
             ),
         );
     });

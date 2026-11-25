@@ -509,15 +509,20 @@ export type GarmentTableItem = {
 
 /**
  * The lines a bill is sent to the server as. A row with nothing in it is not a
- * line, and a row priced at nothing is not something to bill for — both would
- * otherwise reach production as a sheet with no work on it.
+ * line.
+ *
+ * A price of nothing IS a line. The shop gives garments away — a replacement
+ * for one it got wrong, a sample, the extra shirt thrown in on a big order —
+ * and the floor still has to cut and sew them, so they belong on the bill and
+ * on the sheet at ฿0. Reading an unpriced row as no row at all meant the
+ * counter typed it, saw it in the table, and watched it vanish on save.
  */
 export function buildItemsFromGarmentTables(
     tables: GarmentTable[],
 ): GarmentTableItem[] {
     return tables.flatMap((table) =>
         table.rows
-            .filter((row) => row.quantity > 0 && row.unit_price > 0)
+            .filter((row) => row.quantity > 0)
             .map((row) => ({
                 item_type:
                     table.garment === 'pants'

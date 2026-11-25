@@ -108,19 +108,40 @@ describe('the lines a bill is sent as', () => {
         expect(line.shirt_style).toBeUndefined();
     });
 
-    it('leaves out a row nobody is billed for', () => {
+    it('leaves out a row with nothing counted on it', () => {
         const items = buildItemsFromGarmentTables([
             shirtTable('kids', 'short', [
                 row('', 0, 0),
-                row('JS', 5, 0),
                 row('JM', 0, 100),
                 row('JL', 3, 120),
             ]),
         ]);
 
-        // Only the row with both a count and a price is something to make.
+        // A count is what makes a row something to cut and sew. A row priced
+        // but never counted is a rate somebody typed, not an order.
         expect(items).toHaveLength(1);
         expect(items[0].size_label).toBe('JL');
+    });
+
+    it('bills a row the shop is giving away, rather than dropping it', () => {
+        const items = buildItemsFromGarmentTables([
+            shirtTable('kids', 'short', [row('JS', 5, 0), row('JL', 3, 120)]),
+        ]);
+
+        // Five shirts at ฿0 — a replacement, a sample, the extra thrown in on
+        // a big order. The floor still cuts and sews them, so they belong on
+        // the bill and on the sheet. Read as no row at all, the counter typed
+        // them, saw them in the table and watched them vanish on save.
+        expect(
+            items.map((item) => [
+                item.size_label,
+                item.quantity,
+                item.unit_price,
+            ]),
+        ).toEqual([
+            ['JS', 5, 0],
+            ['JL', 3, 120],
+        ]);
     });
 });
 

@@ -940,11 +940,7 @@ export function resolveIndividualArtworkBatches(
             );
         }
 
-        if (
-            includePants &&
-            row.pants_quantity > 0 &&
-            row.pants_unit_price > 0
-        ) {
+        if (includePants && row.pants_quantity > 0) {
             add('pants', row.size_group, row.pants_style, row.pants_quantity);
         }
     });
@@ -1973,7 +1969,7 @@ export function buildRequestItemsFromSportsDay(
             const sizeLabel = row.size_label || '-';
             const items: RequestOrderItem[] = [];
 
-            if (row.shirt_qty > 0 && row.shirt_price > 0) {
+            if (row.shirt_qty > 0) {
                 items.push({
                     item_type: 'shirt',
                     size_group: pricingGroupForTier(row.size_group),
@@ -1984,7 +1980,7 @@ export function buildRequestItemsFromSportsDay(
                 });
             }
 
-            if (row.pants_qty > 0 && row.pants_price > 0) {
+            if (row.pants_qty > 0) {
                 items.push({
                     item_type: 'pants',
                     size_group: pricingGroupForTier(row.size_group),
@@ -2161,7 +2157,7 @@ function buildLineItemsFromMatrix(
             const setBundleCount = getSetBundleCount(row);
             const items: OrderLineItemPayload[] = [];
 
-            if (setBundleCount > 0 && row.set_price > 0) {
+            if (setBundleCount > 0) {
                 items.push({
                     quantity: setBundleCount,
                     unit_price: Math.max(row.set_price, 0),
@@ -2169,7 +2165,7 @@ function buildLineItemsFromMatrix(
                 });
             }
 
-            if (row.separate_shirt_qty > 0 && row.separate_shirt_price > 0) {
+            if (row.separate_shirt_qty > 0) {
                 items.push({
                     quantity: row.separate_shirt_qty,
                     unit_price: Math.max(row.separate_shirt_price, 0),
@@ -2177,7 +2173,7 @@ function buildLineItemsFromMatrix(
                 });
             }
 
-            if (row.separate_pants_qty > 0 && row.separate_pants_price > 0) {
+            if (row.separate_pants_qty > 0) {
                 items.push({
                     quantity: row.separate_pants_qty,
                     unit_price: Math.max(row.separate_pants_price, 0),
@@ -2213,7 +2209,7 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
             const setBundleCount = getSetBundleCount(row);
             const items: RequestOrderItem[] = [];
 
-            if (setBundleCount > 0 && row.set_price > 0) {
+            if (setBundleCount > 0) {
                 items.push({
                     // A real set: one shirt plus one pair of pants at a set price.
                     // 'garment' is left to mean "recorded before the garment was
@@ -2228,7 +2224,7 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
                 });
             }
 
-            if (row.separate_shirt_qty > 0 && row.separate_shirt_price > 0) {
+            if (row.separate_shirt_qty > 0) {
                 items.push({
                     item_type: 'separate_shirt',
                     size_group: sizeGroup,
@@ -2239,7 +2235,7 @@ function buildRequestItems(sizeTables: SizeTableForm[]): RequestOrderItem[] {
                 });
             }
 
-            if (row.separate_pants_qty > 0 && row.separate_pants_price > 0) {
+            if (row.separate_pants_qty > 0) {
                 items.push({
                     item_type: 'separate_pants',
                     size_group: sizeGroup,
@@ -2309,11 +2305,7 @@ export function buildRequestItemsFromIndividual(
 
         // Pants ride along on the same person's row, priced separately, exactly
         // like the separate columns of Form 1.
-        if (
-            includePants &&
-            row.pants_quantity > 0 &&
-            row.pants_unit_price > 0
-        ) {
+        if (includePants && row.pants_quantity > 0) {
             items.push({
                 item_type: 'pants',
                 size_group: row.size_group,
@@ -5692,23 +5684,13 @@ export default function OrderCreatePage({
         const unsizedRows = tableRows.filter(
             (row) => row.quantity > 0 && row.size_label.trim() === '',
         );
-        const unpricedRows = tableRows.filter(
-            (row) => row.quantity > 0 && row.unit_price <= 0,
-        );
-
+        // No price is asked for. A garment given away — a replacement, a
+        // sample, the extra shirt on a big order — is still cut and sewn, so
+        // it belongs on the bill and on the sheet at ฿0, and the counter is
+        // the one who decides that, not this form.
         unsizedRows.forEach((row) =>
             fields.add(`garment_row.${row.id}.size_label`),
         );
-        unpricedRows.forEach((row) =>
-            fields.add(`garment_row.${row.id}.unit_price`),
-        );
-
-        if (unpricedRows.length > 0) {
-            need(
-                'ราคาของรายการที่กรอกจำนวนไว้',
-                `garment_row.${unpricedRows[0].id}.unit_price`,
-            );
-        }
 
         // Scoped to the two size-table forms: the others keep their own
         // (hidden) size_tables state, and an untouched hidden table must not
@@ -5889,41 +5871,11 @@ export default function OrderCreatePage({
                 );
             }
 
-            // Trousers are only billed with a price, so trousers counted and
-            // left unpriced would drop off the bill — and off the floor's
-            // sheet — without a word. A linked price is typed on the first
-            // person, so that is the box to fix.
-            if (data.individual_include_pants) {
-                const firstPerson = data.personalization_rows[0];
-                const unpricedPantsBoxes: string[] = [];
-
-                people.forEach((row) => {
-                    if (row.pants_quantity <= 0 || row.pants_unit_price > 0) {
-                        return;
-                    }
-
-                    const sourceRow =
-                        firstPerson &&
-                        row.id !== firstPerson.id &&
-                        isIndividualColumnLinked('pants_unit_price')
-                            ? firstPerson
-                            : row;
-                    const box = `person.${sourceRow.id}.pants_unit_price`;
-
-                    if (!unpricedPantsBoxes.includes(box)) {
-                        unpricedPantsBoxes.push(box);
-                    }
-                });
-
-                unpricedPantsBoxes.forEach((box) => fields.add(box));
-
-                if (unpricedPantsBoxes.length > 0) {
-                    need(
-                        'ราคากางเกงของคนที่กรอกจำนวนกางเกงไว้',
-                        unpricedPantsBoxes[0],
-                    );
-                }
-            }
+            // Trousers counted and left unpriced used to drop off the bill
+            // and off the floor's sheet without a word, so the form demanded
+            // a price. They are billed at ฿0 now instead of being dropped,
+            // which is what the counter meant by typing nothing, so there is
+            // nothing left to demand.
         }
 
         // Which spec is required follows what the bill orders, not the tab
