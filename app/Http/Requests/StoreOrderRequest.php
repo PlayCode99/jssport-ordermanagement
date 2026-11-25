@@ -6,6 +6,7 @@ use App\Enums\RoutingStationName;
 use App\Enums\SizeTier;
 use App\Http\Requests\Concerns\RefusesTruncatedUploads;
 use App\Models\Order;
+use App\Support\Orders\GarmentStyles;
 use App\Support\Orders\OrderCharges;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -229,8 +230,11 @@ class StoreOrderRequest extends FormRequest
             'items.*.size_tier' => ['nullable', 'string', Rule::in(SizeTier::values())],
             'items.*.size_label' => ['required', 'string', 'max:50'],
             // A shirt can be cut sleeveless; a pair of trousers cannot.
-            'items.*.shirt_style' => ['nullable', 'string', Rule::in(['short', 'long', 'sleeveless'])],
-            'items.*.pants_style' => ['nullable', 'string', Rule::in(['short', 'long'])],
+            // The lengths the shop sells, not three words: a bill may name
+            // any length on file, including one switched off since, because
+            // an old bill being edited still has to save.
+            'items.*.shirt_style' => ['nullable', 'string', Rule::in(GarmentStyles::codes('SHIRT'))],
+            'items.*.pants_style' => ['nullable', 'string', Rule::in(GarmentStyles::codes('PANTS'))],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
 

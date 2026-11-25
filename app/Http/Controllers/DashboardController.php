@@ -16,6 +16,7 @@ use App\Models\OrderRouting;
 use App\Models\TeamInvitation;
 use App\Support\Orders\DeliveryCalendarBuilder;
 use App\Support\Orders\DeliveryDateLoads;
+use App\Support\Orders\GarmentStyles;
 use App\Support\Orders\OrderCompletion;
 use App\Support\UserAccessControl;
 use Carbon\CarbonImmutable;
@@ -378,7 +379,10 @@ class DashboardController extends Controller
     /** Sleeve or leg length as saved on a person row, '' when the bill has none. */
     private function personalizationStyle(mixed $style): string
     {
-        return in_array($style, ['short', 'long', 'sleeveless'], true) ? (string) $style : '';
+        return in_array($style, GarmentStyles::codes('SHIRT'), true)
+            || in_array($style, GarmentStyles::codes('PANTS'), true)
+            ? (string) $style
+            : '';
     }
 
     private function mapPersonalizationRows(array $specification): array

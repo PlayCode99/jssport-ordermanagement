@@ -1,4 +1,5 @@
 import { sizeRank } from './counterGarmentSheets';
+import { stylesFor } from './Orders/garmentTables';
 
 /**
  * The order a name list is read in, and what it adds up to.
@@ -17,7 +18,7 @@ import { sizeRank } from './counterGarmentSheets';
 /** Only the fields the order and the summary need; each sheet carries more. */
 export type RosterPerson = {
     size_group?: string | null;
-    /** 'short' | 'long' | 'sleeveless'; a bill saved before lengths has none. */
+    /** A length code out of the shop's own list; a bill saved before lengths has none. */
     shirt_style?: string | null;
     size?: string | null;
     number?: string | null;
@@ -57,10 +58,29 @@ const LENGTH_RANK: Record<string, number> = {
     long: 2,
 };
 
+/**
+ * A length the shop added itself — a three-quarter sleeve — is still one press
+ * setup, so it gets a block of its own after the three the floor has always
+ * set up for, in the order the shop listed it. The three keep the order the
+ * press already reads, so a roster printed before the shop had its own list
+ * comes out in the same order it always did.
+ */
 function lengthRank(person: RosterPerson): number {
     const style = (person.shirt_style ?? '').trim().toLowerCase();
 
-    return LENGTH_RANK[style] ?? 0;
+    if (style === '') {
+        return LENGTH_RANK.short;
+    }
+
+    const known = LENGTH_RANK[style];
+
+    if (known !== undefined) {
+        return known;
+    }
+
+    const listed = stylesFor('shirt').indexOf(style);
+
+    return Object.keys(LENGTH_RANK).length + (listed === -1 ? 0 : listed);
 }
 
 function sizeKey(person: RosterPerson): string {

@@ -3,6 +3,7 @@
 namespace App\Domain\OrderManagement\Actions\GarmentPricing;
 
 use App\Models\GarmentType;
+use App\Support\Orders\GarmentStyles;
 
 class UpsertGarmentTypeAction
 {
@@ -28,16 +29,19 @@ class UpsertGarmentTypeAction
     }
 
     /**
-     * The length this garment is made to. A pair of trousers is never
-     * sleeveless, so that answer falls back to the base length rather than
-     * being stored as a cut the floor cannot make.
+     * The length this garment is made to, checked against the lengths the
+     * shop actually keeps. A length that belongs to the other category — or
+     * one that has been deleted — falls back to the category's first rather
+     * than being stored as a cut the floor cannot make.
      */
     private function style(mixed $category, mixed $style): string
     {
-        $allowed = (string) $category === 'PANTS'
-            ? ['short', 'long']
-            : ['short', 'long', 'sleeveless'];
+        $allowed = GarmentStyles::codes((string) $category);
 
-        return in_array($style, $allowed, true) ? (string) $style : 'short';
+        if (in_array($style, $allowed, true)) {
+            return (string) $style;
+        }
+
+        return $allowed[0] ?? 'short';
     }
 }

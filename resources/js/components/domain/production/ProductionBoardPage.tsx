@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { resolveBranchHeaderColor } from '@/lib/branchHeaderColor';
 import { houseColorTheme, normalizeHouseColor } from '@/lib/houseColors';
+import { productionStyleLabel, stylesFor } from '@/pages/Orders/garmentTables';
 import {
     rosterGroupLine,
     rosterSummary,
@@ -103,7 +104,7 @@ type ConfirmDialogState = {
 type ProductionGroupGarment = 'shirt' | 'pants';
 type ProductionGroupSizeTier = 'kids' | 'junior' | 'adults';
 /** Sleeve or leg length. 'unspecified' is for rows saved before we recorded it. */
-type ProductionGroupStyle = 'short' | 'long' | 'sleeveless' | 'unspecified';
+type ProductionGroupStyle = string;
 type ProductionGroupBaseKey =
     `${ProductionGroupGarment}_${ProductionGroupSizeTier}`;
 /** One batch, which is one printed sheet on the production floor. */
@@ -187,26 +188,6 @@ const PRODUCTION_UNSPECIFIED_THEME: ProductionGroupTheme = {
     borderColor: '#334155',
 };
 
-const PRODUCTION_STYLE_LABELS: Record<
-    ProductionGroupGarment,
-    Record<ProductionGroupStyle, string>
-> = {
-    shirt: {
-        short: 'แขนสั้น',
-        long: 'แขนยาว',
-        sleeveless: 'แขนกุด',
-        unspecified: 'ไม่ระบุแขน',
-    },
-    // Trousers are never sleeveless, so the label would name a sheet that
-    // cannot exist. It is spelled out rather than left missing.
-    pants: {
-        short: 'ขาสั้น',
-        long: 'ขายาว',
-        sleeveless: 'ขาสั้น',
-        unspecified: 'ไม่ระบุขา',
-    },
-};
-
 const PRODUCTION_GROUP_BASE_LABELS: Record<ProductionGroupBaseKey, string> = {
     shirt_kids: 'เสื้อไซต์เด็ก',
     shirt_junior: 'เสื้อไซต์ประถม - มัธยมต้น',
@@ -217,22 +198,30 @@ const PRODUCTION_GROUP_BASE_LABELS: Record<ProductionGroupBaseKey, string> = {
 };
 
 /**
- * The lengths a garment can be cut in, and so the sheets it can print. A pair
- * of trousers is never sleeveless.
+ * The lengths a garment can be cut in, and so the sheets it can print — the
+ * shop's own list, plus the catch-all for lines recorded before lengths were.
  */
 function productionStylesFor(
     garment: ProductionGroupGarment,
 ): readonly ProductionGroupStyle[] {
-    return garment === 'pants'
-        ? (['short', 'long', 'unspecified'] as const)
-        : (['short', 'long', 'sleeveless', 'unspecified'] as const);
+    return [...stylesFor(garment), 'unspecified'];
 }
 
+/**
+ * The length a line was sold at, as a sheet key.
+ *
+ * This used to recognise exactly three words, so the first length the shop
+ * added itself was filed as "ไม่ระบุแขน" — a bill of thirty three-quarter
+ * sleeves printed a sheet that would not say what to cut.
+ */
 function normalizeProductionStyle(
     style: string | null | undefined,
 ): ProductionGroupStyle {
-    return style === 'short' || style === 'long' || style === 'sleeveless'
-        ? style
+    const code = (style ?? '').trim();
+
+    return code !== '' &&
+        (stylesFor('shirt').includes(code) || stylesFor('pants').includes(code))
+        ? code
         : 'unspecified';
 }
 const PRODUCTION_ARTWORK_CONTAINER_HEIGHT = '70mm';
@@ -545,7 +534,15 @@ function resolveProductionGroupTheme(
         return PRODUCTION_UNSPECIFIED_THEME;
     }
 
-    return PRODUCTION_GROUP_THEME_MAP[baseKey][style];
+    const family = PRODUCTION_GROUP_THEME_MAP[baseKey];
+    const shades: Record<string, ProductionGroupTheme | undefined> = family;
+
+    // Colour says garment and size group; length only picks the shade. A
+    // length the shop added itself has no shade of its own, so it keeps its
+    // family's primary one rather than falling to the neutral grey, which the
+    // floor reads as a sheet whose length nobody wrote down. The heading
+    // always spells the length out, so the shade is never the only signal.
+    return shades[style] ?? family.short;
 }
 
 type SpecRowList = Array<{
@@ -3538,7 +3535,7 @@ export function ProductionBoardPage({
                                                 return {
                                                     key: `${baseKey}_${style}` as ProductionGroupKey,
                                                     baseKey,
-                                                    label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${PRODUCTION_STYLE_LABELS[garment][style]}`,
+                                                    label: `${PRODUCTION_GROUP_BASE_LABELS[baseKey]} ${productionStyleLabel(garment, style)}`,
                                                     garment,
                                                     // Which sheet this prints...
                                                     sizeTier,

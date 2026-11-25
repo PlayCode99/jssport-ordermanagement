@@ -9,6 +9,7 @@ use App\Enums\SizeTier;
 use App\Models\GarmentOperation;
 use App\Models\GarmentType;
 use App\Models\Order;
+use App\Support\Orders\GarmentStyles;
 use Illuminate\Support\Collection;
 
 /**
@@ -265,26 +266,22 @@ trait ProductionCostCalculation
     }
 
     /**
-     * Production splits the work by sleeve and leg length as well as by garment
-     * and size group, so each batch gets its own sheet on the floor. Rows saved
-     * before order_items carried a style land in 'unspecified' rather than being
-     * guessed into one of the real batches.
-     *
-     * @var list<string>
-     */
-    private const PRODUCTION_GROUP_STYLES = ['short', 'long', 'sleeveless', 'unspecified'];
-
-    /**
-     * The lengths a garment can be cut in. Trousers are never sleeveless, and
-     * carrying the batch would offer the floor a sheet nobody can sew.
+     * The lengths a garment can be cut in, read from the shop's own list.
+     * Production splits the work by length as well as by garment and size
+     * group, so each one gets its own sheet on the floor; a line saved
+     * before lengths were recorded lands in 'unspecified' rather than
+     * being guessed into a real batch.
      *
      * @return list<string>
      */
     private function productionStylesFor(string $garment): array
     {
-        return $garment === 'pants'
-            ? ['short', 'long', 'unspecified']
-            : self::PRODUCTION_GROUP_STYLES;
+        // Whatever lengths the shop sells for this garment, plus the catch-all
+        // for lines recorded before lengths existed.
+        return [
+            ...GarmentStyles::codes($garment === 'pants' ? 'PANTS' : 'SHIRT'),
+            'unspecified',
+        ];
     }
 
     /** @var array<string, string> */
@@ -295,12 +292,6 @@ trait ProductionCostCalculation
         'pants_kids' => 'กางเกงเด็ก',
         'pants_junior' => 'กางเกงประถม - มัธยมต้น',
         'pants_adults' => 'กางเกงผู้ใหญ่',
-    ];
-
-    /** @var array<string, array<string, string>> */
-    private const PRODUCTION_STYLE_LABELS = [
-        'shirt' => ['short' => 'แขนสั้น', 'long' => 'แขนยาว', 'sleeveless' => 'แขนกุด', 'unspecified' => 'ไม่ระบุแขน'],
-        'pants' => ['short' => 'ขาสั้น', 'long' => 'ขายาว', 'unspecified' => 'ไม่ระบุขา'],
     ];
 
     /**
@@ -355,7 +346,10 @@ trait ProductionCostCalculation
     {
         $normalized = mb_strtolower(trim((string) $style));
 
-        return in_array($normalized, ['short', 'long', 'sleeveless'], true) ? $normalized : 'unspecified';
+        return in_array($normalized, GarmentStyles::codes('SHIRT'), true)
+            || in_array($normalized, GarmentStyles::codes('PANTS'), true)
+            ? $normalized
+            : 'unspecified';
     }
 
     /**
@@ -509,19 +503,17 @@ trait ProductionCostCalculation
 
                     $groups[] = [
                         'key' => $key,
-                        // The steps this sheet is made of. The costing table on
-                        // a sleeveless sheet must not list a sleeve being
-                        // attached, so each sheet carries its own list rather
-                        // than sharing one per garment.
-                        // The steps this sheet is made of, so a sheet's costing
-                        // table is read against the work it actually names.
+                        // The steps this sheet is made of. A แขนกุด sheet's
+                        // costing table must not list a sleeve being attached,
+                        // so each sheet carries its own list rather than
+                        // sharing one per garment.
                         'components' => $batchComponents->all(),
                         // What the floor is making on this sheet, which is not
                         // always what the rest of the bill is making.
                         'garment_type_name' => $batchRate['type_name']
                             ?? ($garment === 'pants' ? $pantsTypeName : $shirtTypeName),
                         'label' => self::PRODUCTION_GROUP_BASE_LABELS[$garment.'_'.$tier->value]
-                            .' '.self::PRODUCTION_STYLE_LABELS[$garment][$style],
+                            .' '.GarmentStyles::label($garment, $style),
                         'garment' => $garment,
                         // Which sheet this batch prints on...
                         'size_tier' => $tier->value,

@@ -50,12 +50,13 @@ class GarmentTypeStyleTest extends TestCase
             'style' => 'sleeveless',
             'code' => 'PT-ODD',
             'name' => 'กางเกงแปลก',
-        ]);
+        ])->assertSessionHasErrors('style');
 
-        // Never stored as a cut nobody can sew: the answer falls back to the
-        // base length rather than being kept.
-        $this->assertSame(
-            'short',
+        // Never stored as a cut nobody can sew. The lengths are the shop's
+        // own list per category now, so asking for a sleeve on a pair of
+        // trousers is refused outright rather than quietly turned into
+        // something else and saved.
+        $this->assertNull(
             GarmentType::query()->where('code', 'PT-ODD')->value('style'),
         );
     }

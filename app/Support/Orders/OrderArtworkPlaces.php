@@ -177,7 +177,7 @@ final class OrderArtworkPlaces
 
             $tier = SizeTier::forItem($item->size_tier, $item->size_group)?->value ?? SizeTier::Adults->value;
             $style = $garment === 'pants' ? $item->pants_style : $item->shirt_style;
-            $allowed = $garment === 'pants' ? ['short', 'long'] : ['short', 'long', 'sleeveless'];
+            $allowed = GarmentStyles::codes($garment === 'pants' ? 'PANTS' : 'SHIRT');
             // A line saved before lengths were recorded has none, and the
             // floor files it under 'unspecified' rather than guessing short.
             $length = in_array($style, $allowed, true) ? (string) $style : 'unspecified';

@@ -1,6 +1,6 @@
 import {
-    PANTS_STYLE_LABELS,
-    SHIRT_STYLE_LABELS,
+    pantsStyleLabels,
+    shirtStyleLabels,
     SIZE_TIER_LABELS,
 } from '@/pages/Orders/garmentTables';
 import type { GarmentStyle, SizeTier } from '@/pages/Orders/garmentTables';
@@ -60,8 +60,8 @@ export function artworkPlaceLabel(
         const style = sheet[3] as GarmentStyle;
         const length =
             garment === 'pants'
-                ? PANTS_STYLE_LABELS[style]
-                : SHIRT_STYLE_LABELS[style];
+                ? pantsStyleLabels()[style]
+                : shirtStyleLabels()[style];
         const name = `${GARMENT_NAMES[garment]}${SIZE_TIER_LABELS[sheet[2]]}`;
 
         return length ? `${name} · ${length}` : name;

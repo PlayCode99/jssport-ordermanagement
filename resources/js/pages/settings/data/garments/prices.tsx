@@ -18,6 +18,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { styleLabelsOf } from '@/pages/Orders/garmentTables';
 
 type GarmentCategory = 'SHIRT' | 'PANTS';
 
@@ -151,8 +152,8 @@ export default function GarmentPricesPage() {
         const category = selectedGarmentTypeCategory ?? 'SHIRT';
         const isPants = category === 'PANTS';
         const labels: Record<string, string> = isPants
-            ? { short: 'ขาสั้น', long: 'ขายาว' }
-            : { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' };
+            ? styleLabelsOf('pants')
+            : styleLabelsOf('shirt');
 
         return {
             category,

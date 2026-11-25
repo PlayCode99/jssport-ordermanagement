@@ -221,4 +221,3 @@ describe('the colour a house is painted in', () => {
         ]);
     });
 });
-

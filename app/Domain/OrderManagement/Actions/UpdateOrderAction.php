@@ -11,6 +11,7 @@ use App\Enums\SizeTier;
 use App\Models\Order;
 use App\Models\Receipt;
 use App\Models\User;
+use App\Support\Orders\GarmentStyles;
 use App\Support\Orders\OrderCharges;
 use App\Support\Orders\TypedSpecMasterData;
 use Illuminate\Support\Arr;
@@ -63,10 +64,10 @@ class UpdateOrderAction
                         'size_tier' => SizeTier::forItem($item['size_tier'] ?? null, $item['size_group'] ?? null)?->value,
                         'size_label' => (string) ($item['size_label'] ?? 'M'),
                         // Sleeveless is a shirt cut; trousers have only the two.
-                        'shirt_style' => in_array($item['shirt_style'] ?? null, ['short', 'long', 'sleeveless'], true)
+                        'shirt_style' => in_array($item['shirt_style'] ?? null, GarmentStyles::codes('SHIRT'), true)
                             ? (string) $item['shirt_style']
                             : null,
-                        'pants_style' => in_array($item['pants_style'] ?? null, ['short', 'long'], true)
+                        'pants_style' => in_array($item['pants_style'] ?? null, GarmentStyles::codes('PANTS'), true)
                             ? (string) $item['pants_style']
                             : null,
                         'quantity' => (int) ($item['quantity'] ?? 0),

@@ -16,6 +16,7 @@ use App\Models\Order;
 use App\Models\Receipt;
 use App\Models\User;
 use App\Support\Orders\ArtworkMediaStore;
+use App\Support\Orders\GarmentStyles;
 use App\Support\Orders\OrderCharges;
 use App\Support\Orders\TypedSpecMasterData;
 use App\Support\Production\ProductionRateSnapshotBuilder;
@@ -410,22 +411,16 @@ class CreateOrderAction
     }
 
     /**
-     * @param  array<string, mixed>  $data
-     * @param  array<string, mixed>  $context
-     */
-    /**
-     * A shirt takes short, long or sleeveless; trousers take the first two.
-     * Anything else means the row was
-     * recorded without a stated style and is stored as null.
-     */
-    /**
-     * A length the floor can actually cut. Sleeveless belongs to shirts alone,
-     * and a row that names anything else keeps no length at all rather than
-     * being guessed into one — the sheet says so instead.
+     * A length the floor can actually cut, read off the shop's own list.
+     *
+     * A shirt's lengths and a pair of trousers' are separate lists — แขนกุด
+     * belongs to shirts alone — and a row that names a length the shop does
+     * not keep stores none at all rather than being guessed into one. The
+     * sheet then says so instead of naming a cut nobody can make.
      */
     private function garmentStyle(mixed $value, string $garment = 'shirt'): ?string
     {
-        $allowed = $garment === 'pants' ? ['short', 'long'] : ['short', 'long', 'sleeveless'];
+        $allowed = GarmentStyles::codes($garment === 'pants' ? 'PANTS' : 'SHIRT');
 
         return in_array($value, $allowed, true) ? (string) $value : null;
     }

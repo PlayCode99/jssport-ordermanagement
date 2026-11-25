@@ -1,9 +1,9 @@
 import {
-    PANTS_STYLE_LABELS,
     readSizeTier,
-    SHIRT_STYLE_LABELS,
     SIZE_TIER_LABELS,
     SIZE_TIERS,
+    styleLabelsOf,
+    stylesFor,
 } from './Orders/garmentTables';
 import type { GarmentKind, SizeTier } from './Orders/garmentTables';
 
@@ -40,10 +40,15 @@ export type GarmentSheetLine = {
 };
 
 /**
- * A line saved before lengths were recorded has none, and production files it
- * under 'unspecified' rather than guessing short — the bill never said.
+ * The length a sheet is cut to: a code out of the shop's own list of lengths,
+ * or 'unspecified'. A line saved before lengths were recorded has none, and
+ * production files it under 'unspecified' rather than guessing short — the
+ * bill never said.
  */
-export type SheetLength = 'short' | 'long' | 'sleeveless' | 'unspecified';
+export type SheetLength = string;
+
+/** The sheet for lines whose bill never recorded a length. */
+const UNSPECIFIED: SheetLength = 'unspecified';
 
 export type GarmentSheet = {
     key: string;
@@ -61,12 +66,15 @@ export type GarmentSheet = {
 const SHIRT_ITEM_TYPES = ['separate_shirt', 'shirt'];
 const PANTS_ITEM_TYPES = ['separate_pants', 'pants'];
 
-const LENGTH_ORDER: readonly SheetLength[] = [
-    'short',
-    'long',
-    'sleeveless',
-    'unspecified',
-];
+/**
+ * Sheets come out in the order the shop lists its lengths, with the ones whose
+ * bill never said last. Read off the list rather than spelled out here, so a
+ * length the shop adds takes the place the shop gave it instead of sorting to
+ * the front as something unrecognised.
+ */
+function lengthOrder(garment: GarmentKind): readonly SheetLength[] {
+    return [...stylesFor(garment), UNSPECIFIED];
+}
 
 /** Kids' sizes run before adults', so a junior sheet using both reads in order. */
 const SIZE_ORDER = [
@@ -98,11 +106,14 @@ function garmentOf(itemType: string | undefined): GarmentKind | null {
 }
 
 function lengthOf(garment: GarmentKind, style: unknown): SheetLength {
-    const known = garment === 'pants' ? ['short', 'long'] : LENGTH_ORDER;
+    const code = typeof style === 'string' ? style.trim() : '';
 
-    return typeof style === 'string' && known.includes(style as SheetLength)
-        ? (style as SheetLength)
-        : 'unspecified';
+    // Checked against the shop's list for this garment, so a leg length never
+    // names a shirt's sheet, and a length the shop added gets a sheet of its
+    // own instead of being folded in with the lines that never said.
+    return code !== '' && stylesFor(garment).includes(code)
+        ? code
+        : UNSPECIFIED;
 }
 
 function sheetTitle(
@@ -112,11 +123,7 @@ function sheetTitle(
 ): string {
     const name = `${garment === 'pants' ? 'กางเกง' : 'เสื้อ'}${SIZE_TIER_LABELS[tier]}`;
     const lengthLabel =
-        length === 'unspecified'
-            ? undefined
-            : garment === 'pants'
-              ? PANTS_STYLE_LABELS[length]
-              : SHIRT_STYLE_LABELS[length];
+        length === UNSPECIFIED ? undefined : styleLabelsOf(garment)[length];
 
     return lengthLabel ? `${name} · ${lengthLabel}` : name;
 }
@@ -206,11 +213,18 @@ export function buildGarmentSheets(
         sheet.amount += total;
     }
 
-    const rankOf = (sheet: GarmentSheet): number[] => [
-        sheet.garment === 'pants' ? 1 : 0,
-        SIZE_TIERS.indexOf(sheet.tier),
-        LENGTH_ORDER.indexOf(sheet.length),
-    ];
+    const rankOf = (sheet: GarmentSheet): number[] => {
+        const order = lengthOrder(sheet.garment);
+        const byLength = order.indexOf(sheet.length);
+
+        return [
+            sheet.garment === 'pants' ? 1 : 0,
+            SIZE_TIERS.indexOf(sheet.tier),
+            // A length no longer on the shop's list sorts after the ones that
+            // are, rather than ahead of everything as an unfound -1 would.
+            byLength === -1 ? order.length : byLength,
+        ];
+    };
 
     return [...sheets.values()]
         .map((sheet) => ({

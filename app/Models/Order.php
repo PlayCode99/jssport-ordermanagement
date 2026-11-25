@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\OrderStatus;
 use App\Enums\SizeTier;
+use App\Support\Orders\GarmentStyles;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -446,7 +447,7 @@ class Order extends Model implements HasMedia
         // artwork has to be pinnable to. Trousers have no such cut.
         $styles = $garment === 'pants'
             ? ['short', 'long', 'unspecified']
-            : ['short', 'long', 'sleeveless', 'unspecified'];
+            : [...GarmentStyles::codes('SHIRT'), 'unspecified'];
 
         // One key per tier, not per pricing group: ประถม - มัธยมต้น is sewn to
         // its own pattern and so prints its own sheet, which artwork has to be

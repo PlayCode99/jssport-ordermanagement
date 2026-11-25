@@ -41,13 +41,31 @@ type GarmentTypeRow = {
     updated_at: string;
 };
 
+/**
+ * One length a garment is cut to, as the shop keeps it. `code` is what bills
+ * store and what production sheets are keyed by; the counts say what is
+ * holding the length in place, so the page can explain a refused delete
+ * before the user asks for one.
+ */
+type GarmentStyleRow = {
+    id: number;
+    category: GarmentCategory;
+    code: string;
+    name: string;
+    display_order: number;
+    is_active: boolean;
+    garment_type_count: number;
+    billed_line_count: number;
+};
+
 type PageProps = {
     rows: GarmentTypeRow[];
+    styles: GarmentStyleRow[];
     selectedCategory?: GarmentCategory | null;
     selectedStyle?: string | null;
 };
 
-type GarmentStyle = 'short' | 'long' | 'sleeveless';
+type GarmentStyle = string;
 
 type FormState = {
     category: GarmentCategory;
@@ -68,34 +86,33 @@ const INITIAL_FORM: FormState = {
 };
 
 /**
- * The length a garment is made to, which is what decides the work: a
- * sleeveless shirt has no sleeve to attach and no cuff to hem, and it has an
- * armhole to bind that the others do not. Trousers are never sleeveless.
+ * The lengths of one category, in the order the shop reads them.
+ *
+ * They used to be three words written here. A shop that starts selling a
+ * three-quarter sleeve could not add one without a developer, which is what
+ * this list being data rather than code fixes.
  */
-const STYLE_OPTIONS: Record<
-    GarmentCategory,
-    Array<{
-        value: GarmentStyle;
-        label: string;
-    }>
-> = {
-    SHIRT: [
-        { value: 'short', label: 'แขนสั้น' },
-        { value: 'long', label: 'แขนยาว' },
-        { value: 'sleeveless', label: 'แขนกุด' },
-    ],
-    PANTS: [
-        { value: 'short', label: 'ขาสั้น' },
-        { value: 'long', label: 'ขายาว' },
-    ],
-};
-
-const styleLabel = (
+function stylesOf(
+    styles: GarmentStyleRow[],
     category: GarmentCategory,
-    style: string | null | undefined,
-): string =>
-    STYLE_OPTIONS[category].find((option) => option.value === style)?.label ??
-    '—';
+): GarmentStyleRow[] {
+    return styles.filter((style) => style.category === category);
+}
+
+function styleLabelFrom(
+    styles: GarmentStyleRow[],
+    category: GarmentCategory,
+    code: string | null | undefined,
+): string {
+    return (
+        stylesOf(styles, category).find((style) => style.code === code)?.name ??
+        '—'
+    );
+}
+
+/** The word a category calls its lengths by. */
+const lengthWord = (category: GarmentCategory): string =>
+    category === 'PANTS' ? 'ขา' : 'แขน';
 
 function csrfToken(): string {
     return (
@@ -122,9 +139,13 @@ function generateCode(category: GarmentCategory, name: string): string {
 export default function GarmentTypesPage() {
     const {
         rows: initialRows,
+        styles: initialStyles,
         selectedCategory,
         selectedStyle,
     } = usePage<PageProps>().props;
+    const [styles, setStyles] = useState<GarmentStyleRow[]>(
+        initialStyles ?? [],
+    );
     const [rows, setRows] = useState<GarmentTypeRow[]>(initialRows);
     const [searchTerm, setSearchTerm] = useState('');
     const [categoryFilter, setCategoryFilter] = useState<
@@ -155,7 +176,8 @@ export default function GarmentTypesPage() {
      */
     const factsAreSettled = drilled && editId === null;
     const drilledTitle = drilled
-        ? styleLabel(
+        ? styleLabelFrom(
+              styles,
               selectedCategory as GarmentCategory,
               selectedStyle === 'all' ? null : selectedStyle,
           )
@@ -353,6 +375,8 @@ export default function GarmentTypesPage() {
             <StyleIndex
                 category={selectedCategory}
                 rows={rows.filter((row) => row.category === selectedCategory)}
+                styles={stylesOf(styles, selectedCategory)}
+                onStylesChange={setStyles}
             />
         );
     }
@@ -547,7 +571,8 @@ export default function GarmentTypesPage() {
                                                             : 'กางเกง'}
                                                     </td>
                                                     <td className="px-4 py-3 align-top text-slate-700">
-                                                        {styleLabel(
+                                                        {styleLabelFrom(
+                                                            styles,
                                                             row.category,
                                                             row.style,
                                                         )}
@@ -665,12 +690,13 @@ export default function GarmentTypesPage() {
                                             // Trousers are never sleeveless, so
                                             // switching to them cannot leave that
                                             // answer sitting in the field.
-                                            style: STYLE_OPTIONS[value].some(
+                                            style: stylesOf(styles, value).some(
                                                 (option) =>
-                                                    option.value === prev.style,
+                                                    option.code === prev.style,
                                             )
                                                 ? prev.style
-                                                : 'short',
+                                                : (stylesOf(styles, value)[0]
+                                                      ?.code ?? ''),
                                         }))
                                     }
                                 >
@@ -695,7 +721,11 @@ export default function GarmentTypesPage() {
                             </label>
                             {factsAreSettled ? (
                                 <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                                    {styleLabel(form.category, form.style)}
+                                    {styleLabelFrom(
+                                        styles,
+                                        form.category,
+                                        form.style,
+                                    )}
                                 </p>
                             ) : (
                                 <Select
@@ -711,13 +741,13 @@ export default function GarmentTypesPage() {
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {STYLE_OPTIONS[form.category].map(
+                                        {stylesOf(styles, form.category).map(
                                             (option) => (
                                                 <SelectItem
-                                                    key={option.value}
-                                                    value={option.value}
+                                                    key={option.code}
+                                                    value={option.code}
                                                 >
-                                                    {option.label}
+                                                    {option.name}
                                                 </SelectItem>
                                             ),
                                         )}
@@ -806,21 +836,26 @@ GarmentTypesPage.layout = (props: {
 function StyleIndex({
     category,
     rows,
+    styles,
+    onStylesChange,
 }: {
     category: GarmentCategory;
     rows: GarmentTypeRow[];
+    styles: GarmentStyleRow[];
+    onStylesChange: (styles: GarmentStyleRow[]) => void;
 }) {
     const [keyword, setKeyword] = useState('');
-    const word = category === 'PANTS' ? 'ขา' : 'แขน';
+    const word = lengthWord(category);
     const title =
         category === 'PANTS' ? 'เซทราคาใบงานกางเกง' : 'เซทราคาใบงานเสื้อ';
 
-    const buckets = STYLE_OPTIONS[category].map((option) => {
-        const items = rows.filter((row) => row.style === option.value);
+    const buckets = styles.map((option) => {
+        const items = rows.filter((row) => row.style === option.code);
 
         return {
-            key: option.value as string,
-            label: option.label,
+            key: option.code,
+            label: option.name,
+            style: option,
             items,
             // Only a type that is switched on is offered when a bill is
             // opened. Counting the switched-off ones in with the rest read as
@@ -836,18 +871,159 @@ function StyleIndex({
                   row.name.toLowerCase().includes(keyword.trim().toLowerCase()),
               );
 
+    // Adding, renaming and retiring the lengths themselves. The shop sells a
+    // three-quarter sleeve the week it decides to, without a developer.
+    const [styleDialogOpen, setStyleDialogOpen] = useState(false);
+    const [editingStyle, setEditingStyle] = useState<GarmentStyleRow | null>(
+        null,
+    );
+    const [styleName, setStyleName] = useState('');
+    const [styleActive, setStyleActive] = useState(true);
+    const [styleError, setStyleError] = useState<string | null>(null);
+    const [savingStyle, setSavingStyle] = useState(false);
+    const [pendingDelete, setPendingDelete] = useState<GarmentStyleRow | null>(
+        null,
+    );
+
+    const openAddStyle = () => {
+        setEditingStyle(null);
+        setStyleName('');
+        setStyleActive(true);
+        setStyleError(null);
+        setStyleDialogOpen(true);
+    };
+
+    const openEditStyle = (style: GarmentStyleRow) => {
+        setEditingStyle(style);
+        setStyleName(style.name);
+        setStyleActive(style.is_active);
+        setStyleError(null);
+        setStyleDialogOpen(true);
+    };
+
+    const sendStyle = async (
+        url: string,
+        method: 'POST' | 'PUT' | 'DELETE',
+        body?: Record<string, unknown>,
+    ): Promise<boolean> => {
+        setSavingStyle(true);
+        setStyleError(null);
+
+        try {
+            const response = await fetch(url, {
+                method,
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                body: body ? JSON.stringify(body) : undefined,
+            });
+
+            const payload = (await response.json().catch(() => null)) as {
+                styles?: GarmentStyleRow[];
+                message?: string;
+                errors?: Record<string, string[]>;
+            } | null;
+
+            if (!response.ok) {
+                // The server refuses a delete that would strand bills, and
+                // says how many. That sentence is the whole answer, so it is
+                // shown rather than a generic failure.
+                setStyleError(
+                    Object.values(payload?.errors ?? {})[0]?.[0] ??
+                        payload?.message ??
+                        'บันทึกไม่สำเร็จ กรุณาลองใหม่',
+                );
+
+                return false;
+            }
+
+            if (payload?.styles) {
+                onStylesChange(payload.styles);
+            }
+
+            return true;
+        } catch {
+            setStyleError('เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่');
+
+            return false;
+        } finally {
+            setSavingStyle(false);
+        }
+    };
+
+    const saveStyle = async () => {
+        if (styleName.trim() === '') {
+            setStyleError(`กรุณากรอกชื่อ${word}`);
+
+            return;
+        }
+
+        const ok = editingStyle
+            ? await sendStyle(
+                  `/settings/data/garments/styles/${editingStyle.id}`,
+                  'PUT',
+                  {
+                      name: styleName.trim(),
+                      display_order: editingStyle.display_order,
+                      is_active: styleActive,
+                  },
+              )
+            : await sendStyle('/settings/data/garments/styles', 'POST', {
+                  category,
+                  name: styleName.trim(),
+                  display_order: styles.length + 1,
+                  is_active: styleActive,
+              });
+
+        if (ok) {
+            setStyleDialogOpen(false);
+        }
+    };
+
+    const toggleStyle = (style: GarmentStyleRow) =>
+        void sendStyle(`/settings/data/garments/styles/${style.id}`, 'PUT', {
+            name: style.name,
+            display_order: style.display_order,
+            is_active: !style.is_active,
+        });
+
+    const confirmDelete = async () => {
+        if (!pendingDelete) {
+            return;
+        }
+
+        const ok = await sendStyle(
+            `/settings/data/garments/styles/${pendingDelete.id}`,
+            'DELETE',
+        );
+
+        if (ok) {
+            setPendingDelete(null);
+        }
+    };
+
     return (
         <>
             <Head title={title} />
 
             <div className="flex h-full flex-1 flex-col gap-4 p-4 md:gap-5 md:p-6">
-                <div>
-                    <h1 className="text-xl font-bold text-slate-900">
-                        {title}
-                    </h1>
-                    <p className="mt-0.5 text-sm text-slate-500">
-                        เลือก{word}ที่ต้องการ แล้วเข้าไปตั้งขั้นตอนงานและราคา
-                    </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h1 className="text-xl font-bold text-slate-900">
+                            {title}
+                        </h1>
+                        <p className="mt-0.5 text-sm text-slate-500">
+                            เลือก{word}ที่ต้องการ
+                            แล้วเข้าไปตั้งขั้นตอนงานและราคา
+                        </p>
+                    </div>
+                    <Button type="button" onClick={openAddStyle}>
+                        <Plus className="size-4" />
+                        เพิ่ม{word}
+                    </Button>
                 </div>
 
                 <Input
@@ -869,42 +1045,247 @@ function StyleIndex({
                                     {row.name}
                                 </span>
                                 <span className="text-xs text-slate-500">
-                                    {styleLabel(row.category, row.style)}
+                                    {styleLabelFrom(
+                                        styles,
+                                        row.category,
+                                        row.style,
+                                    )}
                                 </span>
                             </Link>
                         ))}
                     </div>
                 ) : (
                     <div className="grid gap-2.5">
+                        {buckets.length === 0 ? (
+                            <p className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                                ยังไม่มี{word} กด "เพิ่ม{word}"
+                                เพื่อสร้างรายการแรก
+                            </p>
+                        ) : null}
                         {buckets.map((bucket) => (
-                            <Link
+                            <div
                                 key={bucket.key}
-                                href={`/settings/data/garments/types?category=${category}&style=${bucket.key}`}
-                                className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4 transition hover:border-[#E21E26] hover:shadow-sm"
+                                className={`flex items-center gap-2 rounded-xl border bg-white pr-2 transition hover:shadow-sm ${
+                                    bucket.style.is_active
+                                        ? 'border-slate-200 hover:border-[#E21E26]'
+                                        : 'border-slate-200 bg-slate-50'
+                                }`}
                             >
-                                <span>
-                                    <span className="block text-[15px] font-bold text-slate-900">
-                                        {bucket.label}
+                                <Link
+                                    href={`/settings/data/garments/types?category=${category}&style=${bucket.key}`}
+                                    className="flex min-w-0 flex-1 items-center justify-between gap-4 px-4 py-4"
+                                >
+                                    <span className="min-w-0">
+                                        <span className="flex items-center gap-2">
+                                            <span className="truncate text-[15px] font-bold text-slate-900">
+                                                {bucket.label}
+                                            </span>
+                                            {!bucket.style.is_active ? (
+                                                <span className="shrink-0 rounded border border-slate-300 px-1.5 text-[11px] text-slate-500">
+                                                    ปิดใช้งาน
+                                                </span>
+                                            ) : null}
+                                        </span>
+                                        <span className="mt-0.5 block truncate text-xs text-slate-500">
+                                            {bucket.activeItems.length > 0
+                                                ? `${bucket.activeItems.length} ชิ้นงาน · ${bucket.activeItems
+                                                      .map((row) => row.name)
+                                                      .slice(0, 3)
+                                                      .join(
+                                                          ', ',
+                                                      )}${bucket.activeItems.length > 3 ? ' …' : ''}`
+                                                : bucket.items.length > 0
+                                                  ? `${bucket.items.length} ชิ้นงาน · ปิดใช้งานทั้งหมด`
+                                                  : 'ยังไม่มีชิ้นงาน'}
+                                        </span>
                                     </span>
-                                    <span className="mt-0.5 block text-xs text-slate-500">
-                                        {bucket.activeItems.length > 0
-                                            ? `${bucket.activeItems.length} ชิ้นงาน · ${bucket.activeItems
-                                                  .map((row) => row.name)
-                                                  .slice(0, 3)
-                                                  .join(
-                                                      ', ',
-                                                  )}${bucket.activeItems.length > 3 ? ' …' : ''}`
-                                            : bucket.items.length > 0
-                                              ? `${bucket.items.length} ชิ้นงาน · ปิดใช้งานทั้งหมด`
-                                              : 'ยังไม่มีชิ้นงาน'}
-                                    </span>
+                                    <ChevronRight className="size-4 shrink-0 text-slate-300" />
+                                </Link>
+
+                                <span className="flex shrink-0 items-center gap-1">
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        title={`แก้ไขชื่อ${word}`}
+                                        aria-label={`แก้ไข ${bucket.label}`}
+                                        onClick={() =>
+                                            openEditStyle(bucket.style)
+                                        }
+                                    >
+                                        <Pencil className="size-4" />
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        title={
+                                            bucket.style.is_active
+                                                ? 'ปิดการใช้งาน'
+                                                : 'เปิดการใช้งาน'
+                                        }
+                                        aria-label={`${bucket.style.is_active ? 'ปิด' : 'เปิด'}การใช้งาน ${bucket.label}`}
+                                        onClick={() =>
+                                            toggleStyle(bucket.style)
+                                        }
+                                    >
+                                        <Power
+                                            className={`size-4 ${bucket.style.is_active ? 'text-emerald-600' : 'text-slate-400'}`}
+                                        />
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        title={`ลบ${word}`}
+                                        aria-label={`ลบ ${bucket.label}`}
+                                        onClick={() =>
+                                            setPendingDelete(bucket.style)
+                                        }
+                                        className="text-slate-400 hover:text-[#E21E26]"
+                                    >
+                                        <Trash2 className="size-4" />
+                                    </Button>
                                 </span>
-                                <ChevronRight className="size-4 shrink-0 text-slate-300" />
-                            </Link>
+                            </div>
                         ))}
                     </div>
                 )}
             </div>
+
+            <Dialog open={styleDialogOpen} onOpenChange={setStyleDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {editingStyle ? `แก้ไข${word}` : `เพิ่ม${word}`}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {editingStyle
+                                ? `เปลี่ยนชื่อที่แสดง หรือปิดไม่ให้เลือก${word}นี้ในบิลใหม่`
+                                : `เช่น ${category === 'PANTS' ? 'ขาสามส่วน' : 'แขนสามส่วน'} — จะมีใบงานผลิตและราคาค่าแรงเป็นของตัวเอง`}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-3">
+                        <label className="grid gap-1.5 text-sm">
+                            <span className="font-medium text-slate-700">
+                                ชื่อ{word}
+                            </span>
+                            <Input
+                                value={styleName}
+                                onChange={(event) =>
+                                    setStyleName(event.target.value)
+                                }
+                                placeholder={
+                                    category === 'PANTS'
+                                        ? 'เช่น ขาสามส่วน'
+                                        : 'เช่น แขนสามส่วน'
+                                }
+                                className="bg-white"
+                            />
+                        </label>
+
+                        <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={styleActive}
+                                onChange={(event) =>
+                                    setStyleActive(event.target.checked)
+                                }
+                                className="size-4"
+                            />
+                            เปิดใช้งาน (ให้เลือกได้ตอนเปิดบิล)
+                        </label>
+
+                        {editingStyle ? (
+                            // The code is on every bill sold at this length
+                            // and inside every sheet key, so it is shown and
+                            // not offered for editing.
+                            <p className="text-xs text-slate-500">
+                                รหัสภายใน:{' '}
+                                <span className="font-mono">
+                                    {editingStyle.code}
+                                </span>{' '}
+                                · เปลี่ยนไม่ได้เพราะบิลเก่าอ้างอิงอยู่
+                            </p>
+                        ) : null}
+
+                        {styleError ? (
+                            <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-[#E21E26]">
+                                {styleError}
+                            </p>
+                        ) : null}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setStyleDialogOpen(false)}
+                            disabled={savingStyle}
+                        >
+                            ยกเลิก
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={saveStyle}
+                            disabled={savingStyle}
+                        >
+                            {savingStyle ? 'กำลังบันทึก…' : 'บันทึก'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={pendingDelete !== null}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPendingDelete(null);
+                        setStyleError(null);
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            ลบ{word} {pendingDelete?.name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {pendingDelete &&
+                            (pendingDelete.garment_type_count > 0 ||
+                                pendingDelete.billed_line_count > 0)
+                                ? `${word}นี้ถูกใช้อยู่ — มีชิ้นงาน ${pendingDelete.garment_type_count} รายการ และบิลที่ขายไปแล้ว ${pendingDelete.billed_line_count} รายการ ลบแล้วบิลเก่าจะอ่านไม่ออก แนะนำให้ปิดการใช้งานแทน`
+                                : `ยังไม่มีชิ้นงานหรือบิลใดใช้${word}นี้ ลบแล้วกู้คืนไม่ได้`}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {styleError ? (
+                        <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-[#E21E26]">
+                            {styleError}
+                        </p>
+                    ) : null}
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPendingDelete(null)}
+                            disabled={savingStyle}
+                        >
+                            ยกเลิก
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={confirmDelete}
+                            disabled={savingStyle}
+                            className="bg-[#E21E26] text-white hover:bg-[#C91820]"
+                        >
+                            {savingStyle ? 'กำลังลบ…' : 'ลบ'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

@@ -1,3 +1,4 @@
+import { styleLabelsOf } from './Orders/garmentTables';
 import { rosterSummary, sortRoster } from './screenRoster';
 import type { RosterPerson } from './screenRoster';
 
@@ -42,16 +43,13 @@ export type RosterSheetInput = {
     people: RosterSheetPerson[];
 };
 
-const SHIRT_STYLE_PERSON_LABELS: Record<string, string> = {
-    short: 'แขนสั้น',
-    long: 'แขนยาว',
-    sleeveless: 'แขนกุด',
-};
+/**
+ * The lengths as a person's row names them, read from the shop's own list so
+ * a length it added itself prints like the rest rather than as a dash.
+ */
+const shirtPersonLabels = (): Record<string, string> => styleLabelsOf('shirt');
 
-const PANTS_STYLE_PERSON_LABELS: Record<string, string> = {
-    short: 'ขาสั้น',
-    long: 'ขายาว',
-};
+const pantsPersonLabels = (): Record<string, string> => styleLabelsOf('pants');
 
 function escapeHtml(value: string | null | undefined): string {
     return String(value ?? '')
@@ -148,7 +146,7 @@ export function buildScreenRosterHtml(input: RosterSheetInput): string {
     );
     const sleeves = summarizePersonLengths(
         people.map((person) => person.shirt_style),
-        SHIRT_STYLE_PERSON_LABELS,
+        shirtPersonLabels(),
     );
     // Only people who ordered trousers have a leg length to count: a
     // keeper in a shirt alone is not one more pair of shorts.
@@ -161,7 +159,7 @@ export function buildScreenRosterHtml(input: RosterSheetInput): string {
         hasPants
             ? people.filter(wearsPants).map((person) => person.pants_style)
             : [],
-        PANTS_STYLE_PERSON_LABELS,
+        pantsPersonLabels(),
     );
     // Only a mixed list earns a column; a whole team in one length is said
     // once in the header instead of repeated down every row.

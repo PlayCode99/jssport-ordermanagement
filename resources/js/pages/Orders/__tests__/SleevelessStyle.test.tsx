@@ -3,12 +3,12 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-    PANTS_STYLES,
+    pantsStyles,
     readPantsStyle,
     readShirtStyle,
     resolveArtworkBatches,
     resolveIndividualArtworkBatches,
-    SHIRT_STYLES,
+    shirtStyles,
 } from '@/pages/Orders/Create';
 import OrderCreatePage from '@/pages/Orders/Create';
 
@@ -73,8 +73,8 @@ const props = {
 
 describe('the lengths a garment can be cut in', () => {
     it('offers a shirt three and a pair of trousers two', () => {
-        expect([...SHIRT_STYLES]).toEqual(['short', 'long', 'sleeveless']);
-        expect([...PANTS_STYLES]).toEqual(['short', 'long']);
+        expect([...shirtStyles()]).toEqual(['short', 'long', 'sleeveless']);
+        expect([...pantsStyles()]).toEqual(['short', 'long']);
     });
 
     it('brings a saved bill back as the length it was sold at', () => {
@@ -83,6 +83,8 @@ describe('the lengths a garment can be cut in', () => {
         expect(readShirtStyle('sleeveless')).toBe('sleeveless');
         expect(readShirtStyle('long')).toBe('long');
         expect(readShirtStyle(undefined)).toBe('short');
+        // Not a length on the shop's list — a shop that starts selling one
+        // adds it there, and only then does a bill come back as it.
         expect(readShirtStyle('three-quarter')).toBe('short');
 
         // Trousers have no sleeveless cut, so the value is not carried over.

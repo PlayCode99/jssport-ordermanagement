@@ -80,6 +80,11 @@ import {
 } from './counterGarmentSheets';
 import type { GarmentSheet } from './counterGarmentSheets';
 import { bahtText, deliveryNoteRows, deliveryNoteTotals } from './deliveryNote';
+import {
+    garmentStyleColumnLabel,
+    productionStyleLabel,
+    styleLabelsOf,
+} from './Orders/garmentTables';
 import { buildScreenRosterHtml } from './screenRosterSheet';
 
 export interface FloorStats {
@@ -1197,17 +1202,15 @@ const SPEC_BATCH_TIER_LABELS: Record<string, string> = {
     adults: 'ผู้ใหญ่',
 };
 
-const SPEC_BATCH_STYLE_LABELS: Record<string, Record<string, string>> = {
-    shirt: { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' },
-    pants: { short: 'ขาสั้น', long: 'ขายาว' },
-};
-
 /** What a sheet is called, read back from the key the bill stores it under. */
 function specBatchLabel(key: string): string {
     const [garment, tier, style] = key.split('_');
     const garmentLabel = garment === 'pants' ? 'กางเกง' : 'เสื้อ';
     const tierLabel = SPEC_BATCH_TIER_LABELS[tier] ?? '';
-    const styleLabel = SPEC_BATCH_STYLE_LABELS[garment]?.[style] ?? '';
+    const styleLabel = productionStyleLabel(
+        garment === 'pants' ? 'pants' : 'shirt',
+        style,
+    );
 
     return [garmentLabel + (tierLabel ? ` ${tierLabel}` : ''), styleLabel]
         .filter((part) => part !== '')
@@ -1272,16 +1275,6 @@ export function buildSpecBlocks(
     }));
 }
 
-const SHIRT_STYLE_PRINT_LABELS: Record<string, string> = {
-    short: 'แขนสั้น',
-    long: 'แขนยาว',
-    sleeveless: 'แขนกุด',
-};
-const PANTS_STYLE_PRINT_LABELS: Record<string, string> = {
-    short: 'ขาสั้น',
-    long: 'ขายาว',
-};
-
 /**
  * One colour per length, shared by shirts and pants, so the rule is a single
  * thing to learn: sky means short, violet means long. Kept clear of the size
@@ -1295,16 +1288,6 @@ const STYLE_CHIP_CLASSES: Record<string, string> = {
     // green and orange. It is far enough from the brand red that a length
     // never reads as a warning.
     sleeveless: 'bg-pink-100 text-pink-800 ring-1 ring-pink-200',
-};
-
-const SHIRT_STYLE_COLUMN_LABELS: Record<string, string> = {
-    short: 'เสื้อแขนสั้น',
-    long: 'เสื้อแขนยาว',
-    sleeveless: 'เสื้อแขนกุด',
-};
-const PANTS_STYLE_COLUMN_LABELS: Record<string, string> = {
-    short: 'กางเกงขาสั้น',
-    long: 'กางเกงขายาว',
 };
 
 /**
@@ -1401,10 +1384,9 @@ function buildGarmentLines(
         garment === 'shirt'
             ? ['separate_shirt', 'shirt']
             : ['separate_pants', 'pants'];
-    const styleLabels =
-        garment === 'shirt'
-            ? SHIRT_STYLE_PRINT_LABELS
-            : PANTS_STYLE_PRINT_LABELS;
+    // The shop's own lengths, in the order it reads them — so a length it
+    // added itself both prints and sorts like the rest.
+    const styleLabels = styleLabelsOf(garment);
     const sizeOrder = sizeOrderFor(sizeGroup);
     const rankOf = (label: string): number => {
         const rank = sizeOrder.indexOf(label.trim().toUpperCase());
@@ -1844,10 +1826,11 @@ function buildPrintSizeRows(
 ): PrintSizeRow[] {
     const rows: PrintSizeRow[] = [];
 
+    // The length as the bill saved it. Checked against spelled-out codes, a
+    // line sold at a length the shop added fell into the no-length bucket and
+    // its quantity was printed under a heading that named no length at all.
     const styleOf = (value: unknown): string =>
-        value === 'short' || value === 'long' || value === 'sleeveless'
-            ? value
-            : '';
+        typeof value === 'string' ? value.trim() : '';
 
     // 'garment' is the value used before the split existed and is read as a set,
     // which is what Form 1 wrote it for.
@@ -3285,10 +3268,14 @@ export default function Counter({
                     // states the length for a garment it actually contains --
                     // a shirt-only line leaves the leg column empty rather than
                     // borrowing the length off the set it sits next to.
-                    const shirtStyle =
-                        SHIRT_STYLE_PRINT_LABELS[row.shirtStyle] ?? '';
-                    const pantsStyle =
-                        PANTS_STYLE_PRINT_LABELS[row.pantsStyle] ?? '';
+                    const shirtStyle = productionStyleLabel(
+                        'shirt',
+                        row.shirtStyle,
+                    );
+                    const pantsStyle = productionStyleLabel(
+                        'pants',
+                        row.pantsStyle,
+                    );
 
                     const lines: Array<{
                         key: string;
@@ -3927,9 +3914,9 @@ export default function Counter({
             );
 
             const shirtHeading = (style: string): string =>
-                SHIRT_STYLE_COLUMN_LABELS[style] ?? 'เสื้อ';
+                garmentStyleColumnLabel('shirt', style);
             const pantsHeading = (style: string): string =>
-                PANTS_STYLE_COLUMN_LABELS[style] ?? 'กางเกง';
+                garmentStyleColumnLabel('pants', style);
 
             // A row carries one sleeve length and one leg length, so its counts
             // belong to a single column and the others read as empty.
@@ -4777,7 +4764,7 @@ export default function Counter({
             />
 
             <RescheduleDeliveryDialog
-                key={rescheduleTarget?.id ?? 'none'}
+                key={`reschedule-${rescheduleTarget?.id ?? 'none'}`}
                 target={rescheduleTarget}
                 today={deliveryCalendar.today}
                 loads={deliveryDateLoads}
@@ -4788,7 +4775,7 @@ export default function Counter({
             {/* Keyed by bill: opening a second one starts from its own
                 pictures rather than the previous bill's unsaved edits. */}
             <UpdateArtworkDialog
-                key={artworkTarget?.id ?? 'none'}
+                key={`artwork-${artworkTarget?.id ?? 'none'}`}
                 target={artworkTarget}
                 onClose={() => setArtworkTarget(null)}
             />

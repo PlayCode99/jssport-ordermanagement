@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\GarmentType;
+use App\Support\Orders\GarmentStyles;
 use App\Support\UserAccessControl;
 use App\Support\UserLandingPage;
 use Illuminate\Http\Request;
@@ -62,6 +63,21 @@ class HandleInertiaRequests extends Middleware
             'landingPath' => $user !== null ? UserLandingPage::routeFor($user) : null,
             'currentTeam' => fn () => $user?->currentTeam ? $user->toUserTeam($user->currentTeam) : null,
             'teams' => fn () => $user?->toUserTeams(includeCurrent: true) ?? [],
+            /**
+             * The lengths the shop sells, shared with every page.
+             *
+             * A length is named on the order form, on the counter, on the
+             * floor's sheets and on the roster, so sending it from here is
+             * what lets a shop add "แขนสามส่วน" once and have every screen
+             * know the word for it.
+             */
+            'garmentStyles' => function (): array {
+                if (! Schema::hasTable('garment_styles')) {
+                    return ['SHIRT' => [], 'PANTS' => []];
+                }
+
+                return GarmentStyles::forDisplay();
+            },
             'garmentSidebarShirtTypes' => function (): array {
                 if (! Schema::hasTable('garment_types')) {
                     return [];

@@ -3,16 +3,22 @@
 namespace App\Http\Controllers;
 
 use App\Domain\OrderManagement\Actions\GarmentPricing\DeleteGarmentOperationAction;
+use App\Domain\OrderManagement\Actions\GarmentPricing\DeleteGarmentStyleAction;
 use App\Domain\OrderManagement\Actions\GarmentPricing\DeleteGarmentTypeAction;
 use App\Domain\OrderManagement\Actions\GarmentPricing\ListGarmentOperationsAction;
+use App\Domain\OrderManagement\Actions\GarmentPricing\ListGarmentStylesAction;
 use App\Domain\OrderManagement\Actions\GarmentPricing\ListGarmentTypesAction;
 use App\Domain\OrderManagement\Actions\GarmentPricing\UpsertGarmentOperationAction;
+use App\Domain\OrderManagement\Actions\GarmentPricing\UpsertGarmentStyleAction;
 use App\Domain\OrderManagement\Actions\GarmentPricing\UpsertGarmentTypeAction;
 use App\Http\Requests\StoreGarmentOperationRequest;
+use App\Http\Requests\StoreGarmentStyleRequest;
 use App\Http\Requests\StoreGarmentTypeRequest;
 use App\Http\Requests\UpdateGarmentOperationRequest;
+use App\Http\Requests\UpdateGarmentStyleRequest;
 use App\Http\Requests\UpdateGarmentTypeRequest;
 use App\Models\GarmentOperation;
+use App\Models\GarmentStyle;
 use App\Models\GarmentType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,10 +36,16 @@ class GarmentPricingController extends Controller
         // neither when no category has been chosen yet.
         $style = $request->filled('style') ? (string) $request->string('style') : null;
 
+        $styles = app(ListGarmentStylesAction::class)->execute($category);
+        $styleCodes = array_column($styles, 'code');
+
         return Inertia::render('settings/data/garments/types', [
             'rows' => $listGarmentTypes->execute($category),
+            // The lengths are the shop's own list now, so the page is told
+            // what they are rather than knowing three of them by heart.
+            'styles' => $styles,
             'selectedCategory' => $category,
-            'selectedStyle' => in_array($style, ['short', 'long', 'sleeveless', 'all'], true) ? $style : null,
+            'selectedStyle' => in_array($style, [...$styleCodes, 'all'], true) ? $style : null,
         ]);
     }
 
@@ -73,6 +85,41 @@ class GarmentPricingController extends Controller
             'selectedGarmentTypeStyle' => $selectedTypeStyle,
             'selectedGarmentTypeCategory' => $selectedTypeCategory,
         ]);
+    }
+
+    /**
+     * The lengths themselves — "เซทใบงานเสื้อ" is the list of them, and the
+     * shop owns it now rather than the code.
+     */
+    public function storeStyle(
+        StoreGarmentStyleRequest $request,
+        UpsertGarmentStyleAction $upsertGarmentStyle,
+        ListGarmentStylesAction $listGarmentStyles,
+    ): JsonResponse {
+        $upsertGarmentStyle->execute($request->validated());
+
+        return response()->json(['styles' => $listGarmentStyles->execute()]);
+    }
+
+    public function updateStyle(
+        UpdateGarmentStyleRequest $request,
+        GarmentStyle $garmentStyle,
+        UpsertGarmentStyleAction $upsertGarmentStyle,
+        ListGarmentStylesAction $listGarmentStyles,
+    ): JsonResponse {
+        $upsertGarmentStyle->execute($request->validated(), $garmentStyle);
+
+        return response()->json(['styles' => $listGarmentStyles->execute()]);
+    }
+
+    public function destroyStyle(
+        GarmentStyle $garmentStyle,
+        DeleteGarmentStyleAction $deleteGarmentStyle,
+        ListGarmentStylesAction $listGarmentStyles,
+    ): JsonResponse {
+        $deleteGarmentStyle->execute($garmentStyle);
+
+        return response()->json(['styles' => $listGarmentStyles->execute()]);
     }
 
     public function storeType(

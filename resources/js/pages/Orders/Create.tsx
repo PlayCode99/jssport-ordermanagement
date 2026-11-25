@@ -55,12 +55,13 @@ import {
     normalizeHouseColor,
 } from '@/lib/houseColors';
 import {
-    PANTS_STYLE_LABELS,
-    PANTS_STYLES,
+    pantsStyleLabels,
+    productionStyleLabel,
+    pantsStyles,
     readPantsStyle,
     readShirtStyle,
-    SHIRT_STYLE_LABELS,
-    SHIRT_STYLES,
+    shirtStyleLabels,
+    shirtStyles,
     SIZE_TIER_LABELS,
     SIZE_TIERS,
     pricingGroupForTier,
@@ -237,10 +238,10 @@ type SavedArtwork = { id: number; url: string };
  * priced from its own card. Trousers have only the two lengths.
  */
 export {
-    PANTS_STYLES,
+    pantsStyles,
     readPantsStyle,
     readShirtStyle,
-    SHIRT_STYLES,
+    shirtStyles,
 } from './garmentTables';
 
 type SizeRowForm = {
@@ -689,7 +690,7 @@ function formatMoney(value: number): string {
     });
 }
 
-export { PANTS_STYLE_LABELS, SHIRT_STYLE_LABELS } from './garmentTables';
+export { pantsStyleLabels, shirtStyleLabels } from './garmentTables';
 
 /**
  * Number inputs default to 0, and a literal "0" sitting in the box means every
@@ -853,14 +854,6 @@ const BATCH_BASE_LABELS: Record<string, string> = {
     pants_adults: 'กางเกงผู้ใหญ่',
 };
 
-const BATCH_STYLE_LABELS: Record<
-    ProductionGarment,
-    Partial<Record<GarmentStyle, string>>
-> = {
-    shirt: { short: 'แขนสั้น', long: 'แขนยาว', sleeveless: 'แขนกุด' },
-    pants: { short: 'ขาสั้น', long: 'ขายาว' },
-};
-
 /**
  * Collects the sheets a bill will produce, keyed the way production keys them:
  * garment, size group and length. Every form that ends up as plain order items
@@ -889,26 +882,31 @@ function createBatchTotals() {
         totals.set(key, {
             key,
             garment,
-            label: `${BATCH_BASE_LABELS[base]} ${BATCH_STYLE_LABELS[garment][style]}`,
+            label: `${BATCH_BASE_LABELS[base]} ${productionStyleLabel(garment, style)}`,
             quantity,
         });
     };
 
-    // Shirts before trousers, kids before adults, short before long — the same
-    // order the sheets come off the printer in.
-    const rank = (batch: ArtworkBatch): number =>
-        [
-            'shirt_kids_short',
-            'shirt_kids_long',
-            'shirt_kids_sleeveless',
-            'shirt_adults_short',
-            'shirt_adults_long',
-            'shirt_adults_sleeveless',
-            'pants_kids_short',
-            'pants_kids_long',
-            'pants_adults_short',
-            'pants_adults_long',
-        ].indexOf(batch.key);
+    // Shirts before trousers, kids before adults, and the lengths in the order
+    // the shop lists them — the same order the sheets come off the printer in.
+    // Built from that list rather than spelled out, so a length the shop added
+    // takes its place in the run instead of sorting ahead of everything as an
+    // unfound -1 would.
+    const order: string[] = [];
+
+    for (const garment of ['shirt', 'pants'] as const) {
+        for (const tier of ['kids', 'adults'] as const) {
+            for (const style of stylesFor(garment)) {
+                order.push(`${garment}_${tier}_${style}`);
+            }
+        }
+    }
+
+    const rank = (batch: ArtworkBatch): number => {
+        const found = order.indexOf(batch.key);
+
+        return found === -1 ? order.length : found;
+    };
 
     const sorted = (): ArtworkBatch[] =>
         [...totals.values()].sort((left, right) => rank(left) - rank(right));
@@ -1021,7 +1019,7 @@ export function individualSheets(
     const rank = (sheet: IndividualSheet): number[] => [
         sheet.garment === 'pants' ? 1 : 0,
         sheet.tier === 'kids' ? 0 : 1,
-        (sheet.garment === 'pants' ? PANTS_STYLES : SHIRT_STYLES).indexOf(
+        (sheet.garment === 'pants' ? pantsStyles() : shirtStyles()).indexOf(
             sheet.style as PantsStyle,
         ),
     ];
@@ -1234,7 +1232,7 @@ function GarmentTable({
     onRemove: (rowId: string) => void;
 }) {
     const isShirt = garment === 'shirt';
-    const styleLabels = isShirt ? SHIRT_STYLE_LABELS : PANTS_STYLE_LABELS;
+    const styleLabels = isShirt ? shirtStyleLabels() : pantsStyleLabels();
     const sizeHeading = isShirt ? 'ไซซ์เสื้อ' : 'ไซซ์กางเกง';
     const styleHeading = isShirt ? 'แขน' : 'ขา';
     const totals = garmentRowsTotals(rows);
@@ -1352,8 +1350,8 @@ function GarmentTable({
                                         </SelectTrigger>
                                         <SelectContent>
                                             {(isShirt
-                                                ? SHIRT_STYLES
-                                                : PANTS_STYLES
+                                                ? shirtStyles()
+                                                : pantsStyles()
                                             ).map((styleOption) => (
                                                 <SelectItem
                                                     key={styleOption}
@@ -2697,16 +2695,19 @@ export function buildEditInitialFormData(
 
             // Style is stored per saved item; the first item that states one wins,
             // which keeps the single-choice-per-row rule when reopening an order.
-            if (
-                item.shirt_style === 'short' ||
-                item.shirt_style === 'long' ||
-                item.shirt_style === 'sleeveless'
-            ) {
-                row.shirt_style = item.shirt_style;
+            //
+            // Read through the shop's own list rather than against spelled-out
+            // codes: a bill sold at a length the shop added came back as the
+            // row's default and was saved as that instead, rewriting the bill.
+            const shirtStyle = (item.shirt_style ?? '').trim();
+            const pantsStyle = (item.pants_style ?? '').trim();
+
+            if (stylesFor('shirt').includes(shirtStyle)) {
+                row.shirt_style = shirtStyle;
             }
 
-            if (item.pants_style === 'short' || item.pants_style === 'long') {
-                row.pants_style = item.pants_style;
+            if (stylesFor('pants').includes(pantsStyle)) {
+                row.pants_style = pantsStyle;
             }
 
             rowMap.set(sizeLabel, row);
@@ -8347,7 +8348,7 @@ export default function OrderCreatePage({
                                                                                                         12
                                                                                                     }
                                                                                                 >
-                                                                                                    {SHIRT_STYLES.map(
+                                                                                                    {shirtStyles().map(
                                                                                                         (
                                                                                                             styleOption,
                                                                                                         ) => (
@@ -8360,7 +8361,7 @@ export default function OrderCreatePage({
                                                                                                                 }
                                                                                                             >
                                                                                                                 {
-                                                                                                                    SHIRT_STYLE_LABELS[
+                                                                                                                    shirtStyleLabels()[
                                                                                                                         styleOption
                                                                                                                     ]
                                                                                                                 }
@@ -8556,7 +8557,7 @@ export default function OrderCreatePage({
                                                                                         <div className="flex items-center gap-1">
                                                                                             <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
                                                                                                 {
-                                                                                                    SHIRT_STYLE_LABELS[
+                                                                                                    shirtStyleLabels()[
                                                                                                         row
                                                                                                             .shirt_style
                                                                                                     ]
@@ -8598,7 +8599,7 @@ export default function OrderCreatePage({
                                                                                         <div className="flex items-center gap-1">
                                                                                             <div className="w-[52px] shrink-0 truncate text-center text-[10px] text-slate-500">
                                                                                                 {
-                                                                                                    PANTS_STYLE_LABELS[
+                                                                                                    pantsStyleLabels()[
                                                                                                         row
                                                                                                             .pants_style
                                                                                                     ]
@@ -10863,7 +10864,7 @@ export default function OrderCreatePage({
                                                                                     12
                                                                                 }
                                                                             >
-                                                                                {SHIRT_STYLES.map(
+                                                                                {shirtStyles().map(
                                                                                     (
                                                                                         styleOption,
                                                                                     ) => (
@@ -10876,7 +10877,7 @@ export default function OrderCreatePage({
                                                                                             }
                                                                                         >
                                                                                             {
-                                                                                                SHIRT_STYLE_LABELS[
+                                                                                                shirtStyleLabels()[
                                                                                                     styleOption
                                                                                                 ]
                                                                                             }

@@ -96,6 +96,14 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('settings/data/heat-press-machines/{heatPressMachine}', [HeatPressMachineController::class, 'destroy'])->name('settings.data.heat-press-machines.destroy');
     Route::get('settings/data/production-capacity', [ProductionDailySettingController::class, 'index'])->name('settings.data.production-capacity.index');
     Route::put('settings/data/production-capacity', [ProductionDailySettingController::class, 'update'])->name('settings.data.production-capacity.update');
+    // The lengths a garment is cut to, which the shop maintains itself:
+    // "เซทใบงานเสื้อ" is this list, not a fixed three.
+    Route::post('settings/data/garments/styles', [GarmentPricingController::class, 'storeStyle'])
+        ->name('settings.data.garments.styles.store');
+    Route::put('settings/data/garments/styles/{garmentStyle}', [GarmentPricingController::class, 'updateStyle'])
+        ->name('settings.data.garments.styles.update');
+    Route::delete('settings/data/garments/styles/{garmentStyle}', [GarmentPricingController::class, 'destroyStyle'])
+        ->name('settings.data.garments.styles.destroy');
     Route::get('settings/data/garments/types', [GarmentPricingController::class, 'types'])
         ->name('settings.data.garments.types');
     Route::post('settings/data/garments/types', [GarmentPricingController::class, 'storeType'])

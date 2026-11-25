@@ -19,8 +19,8 @@
  * at another price but its own set of steps — nothing to attach at the
  * shoulder, an armhole to bind instead. Trousers have only the two lengths.
  */
-export type GarmentStyle = 'short' | 'long' | 'sleeveless';
-export type PantsStyle = Exclude<GarmentStyle, 'sleeveless'>;
+export type GarmentStyle = string;
+export type PantsStyle = string;
 
 export type GarmentKind = 'shirt' | 'pants';
 
@@ -44,49 +44,199 @@ export function pricingGroupForTier(tier: SizeTier): 'kids' | 'adults' {
     return tier === 'adults' ? 'adults' : 'kids';
 }
 
-export const SHIRT_STYLES: readonly GarmentStyle[] = [
-    'short',
-    'long',
-    'sleeveless',
-];
+/** One length as the shop keeps it: the code bills store, and its name. */
+export type GarmentStyleOption = {
+    code: string;
+    name: string;
+    is_active: boolean;
+};
 
-export const PANTS_STYLES: readonly PantsStyle[] = ['short', 'long'];
+/**
+ * The lengths the shop sells.
+ *
+ * These used to be three words written here, which meant a shop could not
+ * start selling a three-quarter sleeve without a developer. They are the
+ * shop's own list now, shared onto every page by the server and poured in
+ * once when the app boots.
+ *
+ * The five the shop has always had are the starting value, so anything that
+ * runs before the server has spoken — a unit test, a module loaded on its
+ * own — reads exactly as it did before.
+ */
+const DEFAULT_STYLES: Record<GarmentKind, GarmentStyleOption[]> = {
+    shirt: [
+        { code: 'short', name: 'แขนสั้น', is_active: true },
+        { code: 'long', name: 'แขนยาว', is_active: true },
+        { code: 'sleeveless', name: 'แขนกุด', is_active: true },
+    ],
+    pants: [
+        { code: 'short', name: 'ขาสั้น', is_active: true },
+        { code: 'long', name: 'ขายาว', is_active: true },
+    ],
+};
 
-/** The lengths a garment can be cut in, and so the tables it can have. */
-export function stylesFor(garment: GarmentKind): readonly GarmentStyle[] {
-    return garment === 'pants' ? PANTS_STYLES : SHIRT_STYLES;
+let styleRegistry: Record<GarmentKind, GarmentStyleOption[]> = {
+    shirt: [...DEFAULT_STYLES.shirt],
+    pants: [...DEFAULT_STYLES.pants],
+};
+
+/**
+ * Pour in the list the server shared. Called once where the app boots, so
+ * every module that labels a length reads the same answer without each page
+ * having to pass it down.
+ */
+export function setGarmentStyles(
+    shared:
+        | { SHIRT?: GarmentStyleOption[]; PANTS?: GarmentStyleOption[] }
+        | null
+        | undefined,
+): void {
+    const shirt = shared?.SHIRT ?? [];
+    const pants = shared?.PANTS ?? [];
+
+    styleRegistry = {
+        // An empty list means the server said nothing — on a page served
+        // before the table existed, say. The old five are better than none.
+        shirt: shirt.length > 0 ? shirt : [...DEFAULT_STYLES.shirt],
+        pants: pants.length > 0 ? pants : [...DEFAULT_STYLES.pants],
+    };
 }
 
-export const SHIRT_STYLE_LABELS: Record<GarmentStyle, string> = {
-    short: 'แขนสั้น',
-    long: 'แขนยาว',
-    sleeveless: 'แขนกุด',
-};
+/** Every length on file for a garment, switched-off ones included. */
+export function garmentStyleOptions(
+    garment: GarmentKind,
+): readonly GarmentStyleOption[] {
+    return styleRegistry[garment];
+}
 
-export const PANTS_STYLE_LABELS: Partial<Record<GarmentStyle, string>> = {
-    short: 'ขาสั้น',
-    long: 'ขายาว',
-};
-
-export function styleLabel(garment: GarmentKind, style: GarmentStyle): string {
-    return garment === 'pants'
-        ? (PANTS_STYLE_LABELS[style] ?? 'ขาสั้น')
-        : SHIRT_STYLE_LABELS[style];
+/** The lengths a counter may pick from when writing a bill. */
+export function activeGarmentStyleOptions(
+    garment: GarmentKind,
+): readonly GarmentStyleOption[] {
+    return styleRegistry[garment].filter((style) => style.is_active);
 }
 
 /**
- * The length a saved row was sold at. A bill reopened for editing must come
- * back as what it was: reading anything unrecognised as 'short' would quietly
- * turn a sleeveless order into a short-sleeved one the next time it is saved.
+ * The length codes for a garment, rebuilt from the shop's list each time.
+ *
+ * Plain arrays and objects rather than anything clever: these are spread,
+ * iterated and had their keys read all over the app, and a value that only
+ * answers direct lookups breaks all three in ways no type checker catches.
  */
+export function shirtStyles(): GarmentStyle[] {
+    return styleRegistry.shirt.map((style) => style.code);
+}
+
+export function pantsStyles(): PantsStyle[] {
+    return styleRegistry.pants.map((style) => style.code);
+}
+
+/** The lengths a garment can be cut in, and so the tables it can have. */
+export function stylesFor(garment: GarmentKind): readonly GarmentStyle[] {
+    return styleRegistry[garment].map((style) => style.code);
+}
+
+/** Every length of a garment as {code: name}, for a direct lookup. */
+export function styleLabelsOf(garment: GarmentKind): Record<string, string> {
+    return Object.fromEntries(
+        styleRegistry[garment].map((style) => [style.code, style.name]),
+    );
+}
+
+export function shirtStyleLabels(): Record<string, string> {
+    return styleLabelsOf('shirt');
+}
+
+export function pantsStyleLabels(): Record<string, string> {
+    return styleLabelsOf('pants');
+}
+
+/**
+ * What a length is called, for a garment, in a way that never comes back
+ * empty.
+ *
+ * Every screen that names a length used to keep its own table of three, so
+ * the first length the shop added itself read as "undefined" on the costing
+ * sheet and crashed the room that printed it. There is one lookup now, and
+ * it answers for the lengths on file, for 'unspecified' lines recorded
+ * before lengths existed, and for a length deleted since a bill was sold at
+ * it — that one by its code, which at least says which it was.
+ */
+export function productionStyleLabel(
+    garment: GarmentKind,
+    style: string | null | undefined,
+): string {
+    const code = (style ?? '').trim();
+
+    if (code === '' || code === 'unspecified') {
+        return garment === 'pants' ? 'ไม่ระบุขา' : 'ไม่ระบุแขน';
+    }
+
+    return styleLabelsOf(garment)[code] ?? code;
+}
+
+/**
+ * The same, with the garment named in front: "เสื้อแขนสั้น", for a column
+ * heading that has to stand on its own.
+ */
+export function garmentStyleColumnLabel(
+    garment: GarmentKind,
+    style: string | null | undefined,
+): string {
+    const prefix = garment === 'pants' ? 'กางเกง' : 'เสื้อ';
+
+    return prefix + productionStyleLabel(garment, style);
+}
+
+export function styleLabel(garment: GarmentKind, style: GarmentStyle): string {
+    const name = styleLabelsOf(garment)[style];
+
+    if (name !== undefined) {
+        return name;
+    }
+
+    // A length the shop has since deleted still has to print on the bill
+    // that was sold at it, so its code is shown rather than nothing.
+    return style === '' ? '' : style;
+}
+
+/**
+ * The length a saved row was sold at.
+ *
+ * A bill reopened for editing must come back as what it was. The lengths are
+ * the shop's own list, so this cannot be a check against spelled-out codes:
+ * reading anything unrecognised as 'short' turned a bill sold at a length the
+ * shop added — a three-quarter sleeve — into a short-sleeved one the next time
+ * it was saved, which is the bill being rewritten behind the counter's back.
+ *
+ * So the saved code is kept as it stands. A row carrying a code the shop no
+ * longer keeps still reopens as itself; the server's own validation is what
+ * decides whether it may be saved again, and it reads the same list.
+ */
+function readStyle(garment: GarmentKind, value: unknown): string {
+    const code = typeof value === 'string' ? value.trim() : '';
+
+    // Checked against the shop's list for THIS garment, so a sleeve length can
+    // never come back as a leg length and a table can never ask for sleeveless
+    // legs. The list is read rather than spelled out: against three written-in
+    // codes, a bill sold at a length the shop added came back as the first one
+    // and the next save rewrote the bill into a garment nobody ordered.
+    if (stylesFor(garment).includes(code)) {
+        return code;
+    }
+
+    // Nothing was recorded, or a code this garment does not have. The first
+    // length the shop lists is the one it sells by default, and 'short' is
+    // what that has always been.
+    return stylesFor(garment)[0] ?? 'short';
+}
+
 export function readShirtStyle(value: unknown): GarmentStyle {
-    return value === 'long' || value === 'sleeveless' || value === 'short'
-        ? value
-        : 'short';
+    return readStyle('shirt', value);
 }
 
 export function readPantsStyle(value: unknown): PantsStyle {
-    return value === 'long' ? 'long' : 'short';
+    return readStyle('pants', value);
 }
 
 /**
