@@ -545,7 +545,23 @@ export default function GarmentPricesPage() {
                     </div>
 
                     <div className="overflow-x-auto">
-                        <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                        {/*
+                            Five of the six columns are a fixed width adding up
+                            to 720px, so the one left over — the garment and
+                            its stitch point — is given whatever remains. On a
+                            narrow window that was 51px, and a rate read as a
+                            five-line ribbon of single syllables.
+
+                            table-fixed never lets content push the table
+                            wider, so the wrapper's overflow-x-auto had nothing
+                            to scroll. The floor is what the widest rate
+                            actually measures: 720px of fixed columns, 234px of
+                            text and the cell's own 32px of padding. Below that
+                            the table scrolls sideways, the way a wide table is
+                            read, instead of crushing the one column that
+                            carries the words.
+                        */}
+                        <table className="w-full min-w-[1000px] table-fixed divide-y divide-slate-200 text-sm">
                             <thead className="bg-slate-50">
                                 <tr>
                                     <th className="w-[90px] px-4 py-3 text-left font-semibold text-slate-700">
