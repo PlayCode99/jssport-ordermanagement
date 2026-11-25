@@ -30,7 +30,7 @@ class UpsertGarmentStyleAction
             'category' => $category,
             'code' => $code,
             'name' => trim((string) ($data['name'] ?? '')),
-            'display_order' => (int) ($data['display_order'] ?? 0),
+            'display_order' => $this->displayOrder($data, $style, $category),
             'is_active' => (bool) ($data['is_active'] ?? true),
         ]);
 
@@ -38,6 +38,34 @@ class UpsertGarmentStyleAction
         GarmentStyles::flushCache();
 
         return $model->fresh();
+    }
+
+    /**
+     * Where the length sits in the shop's list.
+     *
+     * The order is not decoration: it is the order the lengths are offered in,
+     * the order the sheets come off the printer in and the order the artwork
+     * batches run in. So a new length goes to the END of the list, where the
+     * shop just added it, rather than to 0 — which put a three-quarter sleeve
+     * added this morning ahead of แขนสั้น everywhere. And a length being
+     * renamed keeps the place it already had, instead of being sent to the
+     * front by a form that never asked about order.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function displayOrder(array $data, ?GarmentStyle $style, string $category): int
+    {
+        if (isset($data['display_order']) && $data['display_order'] !== '') {
+            return (int) $data['display_order'];
+        }
+
+        if ($style !== null) {
+            return (int) $style->display_order;
+        }
+
+        return ((int) GarmentStyle::query()
+            ->where('category', $category)
+            ->max('display_order')) + 1;
     }
 
     /**

@@ -177,6 +177,52 @@ class GarmentStyleCrudTest extends TestCase
         );
     }
 
+    public function test_a_new_length_goes_to_the_end_of_the_shop_list(): void
+    {
+        $owner = $this->owner();
+
+        $this->actingAs($owner)->post('/settings/data/garments/styles', [
+            'category' => 'SHIRT',
+            'name' => 'แขนสามส่วน',
+            'code' => 'three_quarter',
+        ])->assertSuccessful();
+
+        GarmentStyles::flushCache();
+
+        // The order is the order lengths are offered in, the order sheets come
+        // off the printer in and the order artwork batches run in. A length
+        // added this morning belongs after the ones the shop has always had,
+        // not ahead of แขนสั้น everywhere.
+        $this->assertSame(
+            ['short', 'long', 'sleeveless', 'three_quarter'],
+            GarmentStyles::codes('SHIRT'),
+        );
+    }
+
+    public function test_each_new_length_lands_after_the_last_one(): void
+    {
+        $owner = $this->owner();
+
+        foreach (['แขนสามส่วน', 'แขนห้าส่วน'] as $name) {
+            $this->actingAs($owner)->post('/settings/data/garments/styles', [
+                'category' => 'SHIRT',
+                'name' => $name,
+            ])->assertSuccessful();
+        }
+
+        GarmentStyles::flushCache();
+
+        $this->assertSame(
+            ['แขนสั้น', 'แขนยาว', 'แขนกุด', 'แขนสามส่วน', 'แขนห้าส่วน'],
+            GarmentStyle::query()
+                ->where('category', 'SHIRT')
+                ->orderBy('display_order')
+                ->orderBy('id')
+                ->pluck('name')
+                ->all(),
+        );
+    }
+
     // ---------------- editing one ----------------
 
     public function test_a_length_can_be_renamed(): void
@@ -190,6 +236,23 @@ class GarmentStyleCrudTest extends TestCase
             ->assertSuccessful();
 
         $this->assertSame('แขนกุด (เสื้อกล้าม)', $style->refresh()->name);
+    }
+
+    public function test_renaming_leaves_the_length_where_it_was_in_the_list(): void
+    {
+        $style = GarmentStyle::query()->where('category', 'SHIRT')->where('code', 'sleeveless')->firstOrFail();
+
+        // The form asks for a name, not for an order. Reading the missing
+        // field as 0 sent a renamed length to the front of the shop's list,
+        // which reorders the sheets the floor prints.
+        $this->actingAs($this->owner())
+            ->put("/settings/data/garments/styles/{$style->id}", ['name' => 'แขนกุด (เสื้อกล้าม)'])
+            ->assertSuccessful();
+
+        GarmentStyles::flushCache();
+
+        $this->assertSame(3, $style->refresh()->display_order);
+        $this->assertSame(['short', 'long', 'sleeveless'], GarmentStyles::codes('SHIRT'));
     }
 
     public function test_renaming_never_moves_the_code_bills_are_written_with(): void
