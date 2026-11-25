@@ -2267,7 +2267,9 @@ describe('production board timeline sync', () => {
 
         expect(screen.getAllByText('ทรงเข้ารูป')).toHaveLength(2);
         expect(screen.queryByText('ข้อความสกรีน')).not.toBeInTheDocument();
-        expect(screen.queryByText('รายละเอียดปัก')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('รายละเอียดเพิ่มเติม'),
+        ).not.toBeInTheDocument();
         expect(screen.queryByText(/shirt_specs/)).not.toBeInTheDocument();
     });
 

@@ -248,7 +248,7 @@ class DashboardController extends Controller
             ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
-            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
+            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดเพิ่มเติม', 'type' => 'text'],
         ];
     }
 
@@ -271,7 +271,7 @@ class DashboardController extends Controller
             ['key' => 'stripe_style_text', 'label' => 'แบบลา', 'type' => 'text'],
             ['key' => 'screen_text', 'label' => 'ข้อความสกรีน', 'type' => 'text'],
             ['key' => 'embroidery_code_text', 'label' => 'รหัสงานปัก', 'type' => 'text'],
-            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดปัก', 'type' => 'text'],
+            ['key' => 'embroidery_note_text', 'label' => 'รายละเอียดเพิ่มเติม', 'type' => 'text'],
         ];
     }
 

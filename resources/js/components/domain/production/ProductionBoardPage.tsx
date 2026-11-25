@@ -416,6 +416,21 @@ export function rosterHasPants(rows: PersonalizationPrintRow[]): boolean {
  * places: the sheet itself, and the header that offers to print the sheet.
  */
 /** The colour a Form 2 bill dresses its keeper in, '' when it names none. */
+/**
+ * A spec value too long to sit in a third of the row.
+ *
+ * The spec grid gives each field a third of the page, which suits a colour or
+ * a pattern name. A typed note — "รายละเอียดเพิ่มเติม" and its like — runs to
+ * a sentence or more, and in a third of the row it wraps into a tall narrow
+ * column between two dividing lines, which is what made it unreadable. Past
+ * this length the field takes the whole row.
+ */
+export function isLongSpecValue(
+    value: string | number | null | undefined,
+): boolean {
+    return String(value ?? '').trim().length > 36;
+}
+
 function readKeeperColor(order: Order): string {
     const raw = order.specification?.screen_print_detail;
 
@@ -757,7 +772,7 @@ const shirtSpecFields: SpecField[] = [
     { key: 'stripe_style_text', label: 'แบบลา', type: 'text' },
     { key: 'screen_text', label: 'ข้อความสกรีน', type: 'text' },
     { key: 'embroidery_code_text', label: 'รหัสงานปัก', type: 'text' },
-    { key: 'embroidery_note_text', label: 'รายละเอียดปัก', type: 'text' },
+    { key: 'embroidery_note_text', label: 'รายละเอียดเพิ่มเติม', type: 'text' },
 ];
 
 const pantsSpecFields: SpecField[] = [
@@ -814,7 +829,7 @@ const pantsSpecFields: SpecField[] = [
     { key: 'stripe_style_text', label: 'แบบลา', type: 'text' },
     { key: 'screen_text', label: 'ข้อความสกรีน', type: 'text' },
     { key: 'embroidery_code_text', label: 'รหัสงานปัก', type: 'text' },
-    { key: 'embroidery_note_text', label: 'รายละเอียดปัก', type: 'text' },
+    { key: 'embroidery_note_text', label: 'รายละเอียดเพิ่มเติม', type: 'text' },
 ];
 
 const PROCESS_TABLE_COLUMN_WIDTHS = {
@@ -4870,6 +4885,16 @@ export function ProductionBoardPage({
                                             .p-spec-grid-item:nth-child(3n) {
                                                 border-right: 0;
                                             }
+                                            /* A free-text note does not fit a third of the
+                                               row. Squeezed into one it wrapped to five or
+                                               six lines against neighbours one line tall,
+                                               and read as a column of text crushed between
+                                               two rules. It takes the whole row instead,
+                                               with no divider beside it to crush it. */
+                                            .p-spec-grid-item.is-wide {
+                                                grid-column: 1 / -1;
+                                                border-right: 0;
+                                            }
                                             .p-spec-grid-label {
                                                 flex: none;
                                                 font-size: 10px;
@@ -5989,7 +6014,13 @@ export function ProductionBoardPage({
                                                                                               ) => (
                                                                                                   <div
                                                                                                       key={`${group.key}-${specRow.label}`}
-                                                                                                      className="p-spec-grid-item"
+                                                                                                      className={
+                                                                                                          isLongSpecValue(
+                                                                                                              specRow.value,
+                                                                                                          )
+                                                                                                              ? 'p-spec-grid-item is-wide'
+                                                                                                              : 'p-spec-grid-item'
+                                                                                                      }
                                                                                                   >
                                                                                                       <span className="p-spec-grid-label">
                                                                                                           {

@@ -6188,7 +6188,7 @@ export default function OrderCreatePage({
             </label>
             <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                 <span className="font-semibold text-slate-600">
-                    รายละเอียดปัก
+                    รายละเอียดเพิ่มเติม
                 </span>
                 <textarea
                     rows={3}
@@ -6366,7 +6366,7 @@ export default function OrderCreatePage({
             </label>
             <label className="grid gap-1.5 text-xs md:col-span-2 xl:col-span-3">
                 <span className="font-semibold text-slate-600">
-                    รายละเอียดปัก
+                    รายละเอียดเพิ่มเติม
                 </span>
                 <textarea
                     rows={3}
