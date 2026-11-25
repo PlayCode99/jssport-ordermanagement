@@ -440,12 +440,187 @@ describe('the name list', () => {
         const written = capturePrint(/ปริ้นใบรายชื่อ/);
         const body = written.slice(written.indexOf('<body>'));
 
-        expect(written).toContain('ใบรายชื่อสกรีน ORD-122');
-        expect(body).toContain('รายชื่อสกรีนรายตัว');
+        // The floor now prints the counter's own sheet, so the document is
+        // the customer's one: same title, same masthead, same columns.
+        expect(written).toContain('ใบรายชื่อ ORD-122');
+        expect(body).toContain('ใบรายชื่อสกรีน');
         expect(body).toContain('สุวรรณชารี');
         // The costing sheets belong to the other button.
         expect(body).not.toContain('รายการค่าแรง');
         expect(body).not.toContain('เสื้อไซต์ผู้ใหญ่');
+
+        vi.restoreAllMocks();
+    });
+
+    /**
+     * The floor's copy and the counter's copy are checked against each other,
+     * so they are read in one order: kids before adults, small sizes before
+     * large, numbers running up. A list in the order the names happened to be
+     * typed has to be re-sorted by hand at the press.
+     */
+    const mixedListOrder = (id: number) =>
+        makeOrder(id, {
+            specification: {
+                screen_print_detail: JSON.stringify({
+                    schema: 'spec-v2',
+                    mode: 'individual',
+                    personalization_rows: [
+                        {
+                            name: 'ผู้ใหญ่เอ็ม',
+                            number: '9',
+                            size: 'M',
+                            size_group: 'adults',
+                            quantity: 1,
+                        },
+                        {
+                            name: 'เด็กเจเอ็ม',
+                            number: '10',
+                            size: 'JM',
+                            size_group: 'kids',
+                            quantity: 1,
+                        },
+                        {
+                            name: 'เด็กเจเอส',
+                            number: '4',
+                            size: 'JS',
+                            size_group: 'kids',
+                            quantity: 1,
+                        },
+                        {
+                            name: 'ผู้ใหญ่เอส',
+                            number: '2',
+                            size: 'S',
+                            size_group: 'adults',
+                            quantity: 1,
+                        },
+                        {
+                            name: 'เด็กเจเอ็มสอง',
+                            number: '2',
+                            size: 'JM',
+                            size_group: 'kids',
+                            quantity: 1,
+                        },
+                    ],
+                }),
+            },
+        });
+
+    it('reads kids first, then size, then number', () => {
+        renderBoard([mixedListOrder(130)]);
+        openDetail();
+
+        const body = capturePrint(/ปริ้นใบรายชื่อ/);
+        const order = [
+            'เด็กเจเอส',
+            'เด็กเจเอ็มสอง',
+            'เด็กเจเอ็ม',
+            'ผู้ใหญ่เอส',
+            'ผู้ใหญ่เอ็ม',
+        ];
+
+        expect(order.map((name) => body.indexOf(name))).toEqual(
+            [...order.map((name) => body.indexOf(name))].sort((a, b) => a - b),
+        );
+
+        vi.restoreAllMocks();
+    });
+
+    it('carries the sleeve length through, so short comes before long', () => {
+        // The floor's parser used to drop the length entirely, which left the
+        // two mixed on the sheet however the module sorted them.
+        const order = makeOrder(135, {
+            specification: {
+                screen_print_detail: JSON.stringify({
+                    schema: 'spec-v2',
+                    mode: 'individual',
+                    personalization_rows: [
+                        {
+                            name: 'ยาวหนึ่ง',
+                            number: '2',
+                            size: 'JM',
+                            size_group: 'kids',
+                            shirt_style: 'long',
+                            quantity: 1,
+                        },
+                        {
+                            name: 'สั้นสิบ',
+                            number: '10',
+                            size: 'JM',
+                            size_group: 'kids',
+                            shirt_style: 'short',
+                            quantity: 1,
+                        },
+                    ],
+                }),
+            },
+        });
+
+        renderBoard([order]);
+        openDetail();
+
+        const body = capturePrint(/ปริ้นใบรายชื่อ/);
+
+        expect(body.indexOf('สั้นสิบ')).toBeLessThan(body.indexOf('ยาวหนึ่ง'));
+        // And a mixed bill earns its own length column.
+        expect(body).toContain('แขนสั้น');
+        expect(body).toContain('แขนยาว');
+
+        vi.restoreAllMocks();
+    });
+
+    it('says how many of each size each group takes, and the whole sheet', () => {
+        renderBoard([mixedListOrder(131)]);
+        openDetail();
+
+        const body = capturePrint(/ปริ้นใบรายชื่อ/);
+
+        // The summary is a table: a row per group, its sizes as chips, the
+        // group's own total, then the sheet's.
+        expect(body).toContain('สรุปจำนวนตามไซซ์');
+        expect(body).toContain('<b>JS</b>1');
+        expect(body).toContain('<b>JM</b>2');
+        expect(body).toContain('รวมทั้งสิ้น');
+        expect(body).toContain('<strong>5</strong> ตัว');
+
+        vi.restoreAllMocks();
+    });
+
+    it('prints the very sheet the counter prints', () => {
+        renderBoard([nameListOrder(134)]);
+        openDetail();
+
+        const written = capturePrint(/ปริ้นใบรายชื่อ/);
+
+        // The masthead, the check column and the signature line are the
+        // counter's: the two copies are checked against each other.
+        expect(written).toContain('class="masthead"');
+        expect(written).toContain('เจ.เอส.สปอร์ต');
+        expect(written).toContain('ผู้ตรวจสอบรายชื่อ');
+        // And none of this page's own sheet markup came with it.
+        expect(written).not.toContain('p-personalization-table');
+
+        vi.restoreAllMocks();
+    });
+
+    it('prints the name list upright, the way the counter prints its copy', () => {
+        renderBoard([nameListOrder(132)]);
+        openDetail();
+
+        const written = capturePrint(/ปริ้นใบรายชื่อ/);
+
+        expect(written).toContain('size: A4 portrait');
+        expect(written).not.toContain('size: A4 landscape');
+
+        vi.restoreAllMocks();
+    });
+
+    it('leaves the costing sheets across the page, where they need the width', () => {
+        renderBoard([nameListOrder(133)]);
+        openDetail();
+
+        const written = capturePrint(/Print เอกสาร/);
+
+        expect(written).toContain('size: A4 landscape');
 
         vi.restoreAllMocks();
     });

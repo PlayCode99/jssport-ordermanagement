@@ -22,10 +22,12 @@ import {
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import DeliveryCalendarDialog from '@/components/domain/counter/DeliveryCalendarDialog';
 import type { DeliveryCalendar } from '@/components/domain/counter/DeliveryCalendarDialog';
-import type { RescheduleTarget } from '@/components/domain/counter/RescheduleDeliveryDialog';
+import type { DeliveryNoteTarget } from '@/components/domain/counter/DeliveryNoteDialog';
+import { DeliveryNoteDialog } from '@/components/domain/counter/DeliveryNoteDialog';
 import RescheduleDeliveryDialog, {
     thaiDate,
 } from '@/components/domain/counter/RescheduleDeliveryDialog';
+import type { RescheduleTarget } from '@/components/domain/counter/RescheduleDeliveryDialog';
 import type { ArtworkTarget } from '@/components/domain/counter/UpdateArtworkDialog';
 import { UpdateArtworkDialog } from '@/components/domain/counter/UpdateArtworkDialog';
 import type {
@@ -77,6 +79,8 @@ import {
     specDifferences,
 } from './counterGarmentSheets';
 import type { GarmentSheet } from './counterGarmentSheets';
+import { bahtText, deliveryNoteRows, deliveryNoteTotals } from './deliveryNote';
+import { buildScreenRosterHtml } from './screenRosterSheet';
 
 export interface FloorStats {
     print_room: {
@@ -208,6 +212,8 @@ export interface OrderTableRow {
             discount_percent: number;
             discount_amount: number;
             net_amount: number;
+            /** The delivery note's own reduction, off net_amount and nothing else. */
+            delivery_discount_percent?: number;
             paid_amount: number;
         };
         specification: Record<string, string | number | null> | null;
@@ -280,6 +286,7 @@ export interface OrderTableRow {
         /** Whether this user may move the delivery date ("เลื่อนส่ง"). */
         can_reschedule?: boolean;
         can_update_artwork?: boolean;
+        can_discount_delivery_note?: boolean;
         /** The date it was due before its latest move, when it moved. */
         postponed_from?: string | null;
         /** Every move of the delivery date, oldest first. */
@@ -1304,64 +1311,6 @@ const PANTS_STYLE_COLUMN_LABELS: Record<string, string> = {
  * The same lengths without the garment in front, for the person lists where the
  * column already says which garment it is.
  */
-const SHIRT_STYLE_PERSON_LABELS: Record<string, string> = {
-    short: 'แขนสั้น',
-    long: 'แขนยาว',
-    sleeveless: 'แขนกุด',
-};
-const PANTS_STYLE_PERSON_LABELS: Record<string, string> = {
-    short: 'ขาสั้น',
-    long: 'ขายาว',
-};
-
-/**
- * How a person list wears one garment's length.
- *
- * A bill where everyone matches needs no column of its own — saying the length
- * once in the header is shorter and reads better — while a mixed bill needs one
- * so the customer can see who differs. A bill saved before lengths existed
- * carries none at all and prints exactly as it always did.
- */
-type PersonLengthSummary = {
-    /** True when the list carries both lengths and needs its own column. */
-    mixed: boolean;
-    /** e.g. "แขนสั้น 20 คน · แขนยาว 10 คน", '' when the bill says nothing. */
-    caption: string;
-    /** The label for one person's cell. */
-    labelOf: (style: string | undefined) => string;
-};
-
-function summarizePersonLengths(
-    styles: Array<string | undefined>,
-    labels: Record<string, string>,
-): PersonLengthSummary {
-    const counts = new Map<string, number>();
-
-    // Which lengths exist is the label table's business, not this function's.
-    // Written out as a pair, it printed a dash for a sleeveless shirt — the
-    // bill said แขนกุด and the sheet said nothing.
-    for (const style of styles) {
-        if (!style || labels[style] === undefined) {
-            continue;
-        }
-
-        counts.set(style, (counts.get(style) ?? 0) + 1);
-    }
-
-    const used = Object.keys(labels).filter((style) => counts.has(style));
-
-    return {
-        mixed: used.length > 1,
-        caption: used
-            .map(
-                (style) =>
-                    `${labels[style]} ${(counts.get(style) ?? 0).toLocaleString('th-TH')} คน`,
-            )
-            .join(' · '),
-        labelOf: (style) =>
-            style && labels[style] !== undefined ? labels[style] : '-',
-    };
-}
 
 /**
  * The order-item types a garment table can show: one garment, one size, one
@@ -2886,42 +2835,6 @@ function OrdersTable({
     );
 }
 
-/**
- * The roster carries the shop logo and a barcode. Printing the moment the
- * markup is written caught them mid-download, so the first print of the day
- * came out with an empty masthead and only a reprint -- once the browser had
- * them cached -- looked right. Wait for them, and never wait forever.
- */
-function buildRosterPrintScript(): string {
-    return `
-    (function () {
-        var images = Array.prototype.slice.call(document.images);
-        var pending = images.length;
-        var printed = false;
-
-        function go() {
-            if (printed) { return; }
-            printed = true;
-            window.focus();
-            window.print();
-        }
-
-        if (pending === 0) { go(); return; }
-
-        var finish = function () { pending -= 1; if (pending <= 0) { go(); } };
-
-        images.forEach(function (image) {
-            if (image.complete) { finish(); return; }
-            image.addEventListener('load', finish, { once: true });
-            image.addEventListener('error', finish, { once: true });
-        });
-
-        // A stalled image must not hold the sheet hostage.
-        setTimeout(go, 3000);
-    })();
-`;
-}
-
 export default function Counter({
     pendingInvitations = [],
     branches,
@@ -3570,12 +3483,64 @@ export default function Counter({
         );
     };
 
-    const handlePrintDeliveryNote = (row: OrderTableRow) => {
+    /**
+     * "ใบจัดส่ง" opens the note before the paper. The counter decides the
+     * note's own discount here, and only then is anything printed.
+     */
+    const [deliveryNoteTarget, setDeliveryNoteTarget] =
+        useState<DeliveryNoteTarget | null>(null);
+
+    const openDeliveryNote = (row: OrderTableRow) => {
         const order = row.details;
 
         if (!order) {
             return;
         }
+
+        setDeliveryNoteTarget({
+            id: row.id,
+            orderCode: row.order_code,
+            customerName: order.customer.name || row.customer_name || '-',
+            jobName: order.job_name || '-',
+            dueDate: row.due_date ?? '',
+            deliveryMethod: deliveryMethodLabel(order.delivery_method),
+            shippingAddress: order.shipping_address ?? '',
+            rows: deliveryNoteRows(order.items ?? []),
+            charges: order.pricing.charges ?? [],
+            gross: order.pricing.total_amount,
+            billDiscountPercent: order.pricing.discount_percent,
+            billDiscountAmount: order.pricing.discount_amount,
+            billNet: order.pricing.net_amount,
+            discountPercent: order.pricing.delivery_discount_percent ?? 0,
+            canDiscount: order.can_discount_delivery_note ?? false,
+        });
+    };
+
+    const handlePrintDeliveryNote = (
+        row: OrderTableRow,
+        deliveryDiscountPercent: number,
+    ) => {
+        const order = row.details;
+
+        if (!order) {
+            return;
+        }
+
+        const noteRows = deliveryNoteRows(order.items ?? []);
+        const noteCharges = order.pricing.charges ?? [];
+        const notePieces = noteRows.reduce(
+            (sum, noteRow) => sum + noteRow.quantity,
+            0,
+        );
+        const noteTotals = deliveryNoteTotals(
+            {
+                gross: order.pricing.total_amount,
+                billDiscountPercent: order.pricing.discount_percent,
+                billDiscountAmount: order.pricing.discount_amount,
+                billNet: order.pricing.net_amount,
+            },
+            deliveryDiscountPercent,
+        );
 
         const deliveryInfo = order.shipping_delivery_info;
         const deliveryDetails =
@@ -3595,29 +3560,196 @@ export default function Counter({
             return;
         }
 
+        const noteLines = [
+            ...noteRows.map((noteRow) => ({
+                name: noteRow.type,
+                size: noteRow.size,
+                quantity: noteRow.quantity.toLocaleString('th-TH'),
+                unitPrice: formatMoney(noteRow.unitPrice),
+                total: noteRow.total,
+            })),
+            // The bill's extra charges are money on the note too, with no
+            // size and no unit price to give.
+            ...noteCharges.map((charge) => ({
+                name: charge.label,
+                size: '',
+                quantity: '',
+                unitPrice: '',
+                total: charge.amount,
+            })),
+        ];
+        const summaryRow = (label: string, value: string, modifier = '') =>
+            `<tr class="${modifier}"><th>${escapeHtml(label)}</th><td>${value}</td></tr>`;
+
         printWindow.document
-            .write(`<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งมอบสินค้า ${escapeHtml(row.order_code)}</title><style>
-            @page { size: A4 portrait; margin: 8mm; }
+            .write(`<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งสินค้า ${escapeHtml(row.order_code)}</title><style>
+            @page { size: A4 portrait; margin: 10mm 10mm 8mm; }
             * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            html, body { width: 210mm; height: 297mm; margin: 0; }
-            body { color: #172554; font-family: 'TH Sarabun New', 'Noto Sans Thai', Arial, sans-serif; font-size: 15px; }
-            .note { height: 281mm; overflow: hidden; border: 0.55mm solid #486581; border-radius: 3mm; padding: 3.5mm; }
-            .header { display: grid; grid-template-columns: 1fr 62mm; gap: 4mm; }
-            .top { display: grid; grid-template-columns: minmax(0, 1fr) 76mm; gap: 4mm; }
-            .logo { width: 38mm; }.tax, .original { margin: 1mm 0; color: #a04848; font-weight: 700; }
-            .title { border: 0.55mm solid #486581; border-radius: 2.5mm; padding: 2mm; text-align: center; font-size: 24px; font-weight: 700; }
-            .original { text-align: center; }.top { margin-top: 2mm; }
-            .box { min-height: 34mm; border: 0.55mm solid #486581; border-radius: 4.5mm; padding: 3mm 4mm; }
-            .line { margin: 0 0 1.5mm; font-size: 16px; }.meta { display: grid; grid-template-columns: 32mm minmax(0, 1fr); gap: 1mm 2mm; margin: 0; font-size: 14px; }.meta dt, .meta dd { margin: 0; }.meta dt { white-space: nowrap; }.meta dd { min-width: 0; overflow-wrap: anywhere; text-align: right; font-weight: 700; }
-            table { width: 100%; margin-top: 2.5mm; border: 0.55mm solid #486581; border-collapse: separate; border-spacing: 0; border-radius: 3.5mm; overflow: hidden; }
-            th, td { border-right: 0.3mm solid #486581; border-bottom: 0.3mm solid #486581; padding: 2mm 2.5mm; vertical-align: top; } th:last-child, td:last-child { border-right: 0; } tbody tr:last-child td { border-bottom: 0; } th { background: #f8fafc; text-align: center; font-weight: 700; }
-            .center { text-align: center; white-space: nowrap; }.item td { height: 96mm; }.summary { text-align: right; font-weight: 700; }.received { padding: 3mm; text-align: center; font-weight: 700; }
-            .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 3mm; }.signature { min-height: 34mm; border: 0.55mm solid #486581; border-radius: 3.5mm; padding: 3mm; }.sign-line { margin: 16mm 4mm 0; border-bottom: 0.3mm dotted #172554; }.sign-date { margin-top: 2mm; text-align: center; }
-        </style></head><body><main class="note">
-            <header class="header"><div><img class="logo" src="/images/logo/logo.png" alt="J.S. Sport"><p class="tax">ไม่ใช่ใบกำกับภาษี</p></div><div><div class="title">ใบส่งมอบสินค้า</div><p class="original">ต้นฉบับ</p></div></header>
-            <section class="top"><div class="box"><p class="line"><strong>ลูกค้า</strong> ${escapeHtml(order.customer.name || row.customer_name || '-')}</p><p class="line"><strong>ที่อยู่</strong> ${escapeHtml(order.shipping_address || '-')}</p><p class="line"><strong>วิธีส่งมอบ</strong> ${escapeHtml(deliveryMethodLabel(order.delivery_method))}</p><p class="line"><strong>รายละเอียดขนส่ง</strong> ${escapeHtml(deliveryDetails || '-')}</p></div><div class="box"><dl class="meta"><dt>เลขที่ออเดอร์</dt><dd>${escapeHtml(row.order_code)}</dd><dt>วันที่ส่งมอบ</dt><dd>${escapeHtml(formatTableDate(row.due_date))}</dd><dt>ชื่อหน่วยงาน, ชื่องาน</dt><dd>${escapeHtml(order.job_name || '-')}</dd></dl></div></section>
-            <table><thead><tr><th style="width:9%">ลำดับ</th><th>รายการ</th><th style="width:13%">จำนวน</th><th style="width:18%">จำนวนเงิน</th></tr></thead><tbody><tr class="item"><td class="center">1</td><td>${escapeHtml(order.job_type || row.job_type || '-')}: ${escapeHtml(order.job_name || '-')}</td><td class="center">${(row.order_item_count ?? 0).toLocaleString('th-TH')}</td><td class="center">${formatMoney(order.pricing.net_amount)}</td></tr><tr><td colspan="2" class="received">ได้รับสินค้าตามรายการข้างบนนี้ถูกต้องแล้ว</td><td class="summary">รวม</td><td class="summary">${formatMoney(order.pricing.net_amount)}</td></tr></tbody></table>
-            <section class="signatures"><div class="signature"><strong>ผู้รับสินค้า</strong><div class="sign-line"></div><div class="sign-date">วันที่ ................................</div></div><div class="signature"><strong>ผู้ส่งสินค้า</strong><div class="sign-line"></div><div class="sign-date">${escapeHtml(deliveryInfo?.sender_signature || '-')}<br>วันที่ ${escapeHtml(formatTableDate(row.due_date))}</div></div></section>
+            html, body { margin: 0; padding: 0; }
+            body {
+                width: 190mm; color: #0f172a;
+                font-family: 'TH Sarabun New', 'Noto Sans Thai', 'Sarabun', Arial, sans-serif;
+                font-size: 14px; line-height: 1.45;
+            }
+            .sheet { display: flex; min-height: 277mm; flex-direction: column; }
+            .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; border-bottom: 0.7mm solid #0f172a; padding-bottom: 3mm; }
+            .brand { display: flex; align-items: center; gap: 4mm; }
+            .brand img { width: 30mm; }
+            .brand-name { font-size: 19px; font-weight: 700; letter-spacing: 0.2px; }
+            .brand-line { color: #475569; font-size: 13px; }
+            .doc { text-align: right; }
+            .doc-title { font-size: 25px; font-weight: 700; letter-spacing: 1px; line-height: 1.1; }
+            .doc-sub { color: #64748b; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
+            .doc-tags { margin-top: 1.5mm; display: flex; justify-content: flex-end; gap: 2mm; }
+            .tag { border: 0.3mm solid #94a3b8; border-radius: 1mm; padding: 0.6mm 2mm; color: #475569; font-size: 11px; }
+            .tag.is-original { border-color: #0f172a; color: #0f172a; font-weight: 700; }
+
+            .parties { display: grid; grid-template-columns: minmax(0, 1fr) 72mm; gap: 6mm; margin-top: 4mm; }
+            .party-label { color: #64748b; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+            .party-name { font-size: 16px; font-weight: 700; }
+            .party p { margin: 0.6mm 0 0; color: #334155; }
+            .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.8mm 3mm; margin: 0; }
+            .facts dt { margin: 0; color: #64748b; white-space: nowrap; }
+            .facts dd { margin: 0; text-align: right; font-weight: 700; overflow-wrap: anywhere; }
+
+            .items { width: 100%; margin-top: 5mm; border-collapse: collapse; }
+            .items thead { display: table-header-group; }
+            .items th { border-bottom: 0.5mm solid #0f172a; padding: 2mm 2.5mm; color: #0f172a; font-size: 12px; letter-spacing: 0.4px; text-align: left; }
+            .items td { border-bottom: 0.2mm solid #e2e8f0; padding: 2.2mm 2.5mm; vertical-align: top; }
+            .items tbody tr { break-inside: avoid; }
+            .num { width: 10mm; text-align: center; }
+            .size { width: 18mm; text-align: center; }
+            .qty { width: 20mm; text-align: right; }
+            .price { width: 26mm; text-align: right; }
+            .amount { width: 30mm; text-align: right; }
+            .money { font-variant-numeric: tabular-nums; }
+            .is-charge .name { color: #334155; }
+            .dash { color: #94a3b8; }
+            .count-row td { border-bottom: 0.5mm solid #0f172a; padding-top: 2.5mm; font-weight: 700; }
+
+            .fill { flex: 1 1 auto; min-height: 6mm; }
+
+            .close { display: grid; grid-template-columns: minmax(0, 1fr) 78mm; gap: 6mm; margin-top: 4mm; break-inside: avoid; }
+            .in-words { align-self: end; border: 0.3mm solid #cbd5e1; border-radius: 1.5mm; padding: 2.5mm 3mm; background: #f8fafc; }
+            .in-words .party-label { margin-bottom: 0.8mm; }
+            .in-words strong { font-size: 15px; }
+            .totals { width: 100%; border-collapse: collapse; }
+            .totals th { padding: 1.2mm 0; color: #475569; font-weight: 400; text-align: left; }
+            .totals td { padding: 1.2mm 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+            .totals .is-less td { color: #b91c1c; }
+            .totals .is-payable th, .totals .is-payable td { border-top: 0.5mm solid #0f172a; padding-top: 2mm; font-size: 17px; font-weight: 700; }
+            .totals .is-payable th { color: #0f172a; }
+
+            .consent { margin-top: 4mm; border: 0.3mm dashed #94a3b8; border-radius: 1.5mm; padding: 2.5mm 3mm; color: #334155; break-inside: avoid; }
+            .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; margin-top: 6mm; break-inside: avoid; }
+            .sign-title { font-weight: 700; }
+            .sign-line { margin-top: 14mm; border-bottom: 0.3mm dotted #0f172a; }
+            .sign-caption { margin-top: 1.5mm; color: #64748b; font-size: 12px; text-align: center; }
+            .foot { margin-top: 5mm; border-top: 0.2mm solid #e2e8f0; padding-top: 2mm; color: #94a3b8; font-size: 11px; display: flex; justify-content: space-between; }
+        </style></head><body><main class="sheet">
+            <header class="masthead">
+                <div class="brand">
+                    <img src="/images/logo/logo.png" alt="J.S. Sport">
+                    <div>
+                        <div class="brand-name">เจ.เอส.สปอร์ต</div>
+                        <div class="brand-line">สาขา${escapeHtml(order.branch_name || '-')}${order.branch_phone ? ` · โทร ${escapeHtml(order.branch_phone)}` : ''}</div>
+                    </div>
+                </div>
+                <div class="doc">
+                    <div class="doc-title">ใบส่งสินค้า</div>
+                    <div class="doc-sub">Delivery Note</div>
+                    <div class="doc-tags"><span class="tag">ไม่ใช่ใบกำกับภาษี</span><span class="tag is-original">ต้นฉบับ</span></div>
+                </div>
+            </header>
+
+            <section class="parties">
+                <div class="party">
+                    <div class="party-label">ผู้รับสินค้า</div>
+                    <div class="party-name">${escapeHtml(order.customer.name || row.customer_name || '-')}</div>
+                    ${order.customer.phone ? `<p>โทร ${escapeHtml(order.customer.phone)}</p>` : ''}
+                    <p>${escapeHtml(order.shipping_address || '-')}</p>
+                    <p>วิธีส่งมอบ: ${escapeHtml(deliveryMethodLabel(order.delivery_method))}${deliveryDetails ? ` · ${escapeHtml(deliveryDetails)}` : ''}</p>
+                </div>
+                <dl class="facts">
+                    <dt>เลขที่ออเดอร์</dt><dd>${escapeHtml(row.order_code)}</dd>
+                    <dt>วันที่เปิดบิล</dt><dd>${escapeHtml(formatTableDate(row.billing_date))}</dd>
+                    <dt>วันที่ส่งมอบ</dt><dd>${escapeHtml(formatTableDate(row.due_date))}</dd>
+                    <dt>ชื่องาน</dt><dd>${escapeHtml(order.job_name || '-')}</dd>
+                    <dt>ประเภทงาน</dt><dd>${escapeHtml(order.job_type || row.job_type || '-')}</dd>
+                </dl>
+            </section>
+
+            <table class="items">
+                <thead><tr>
+                    <th class="num">#</th><th>รายการ</th><th class="size">ไซส์</th>
+                    <th class="qty">จำนวน</th><th class="price">ราคา/หน่วย</th><th class="amount">จำนวนเงิน</th>
+                </tr></thead>
+                <tbody>
+                    ${
+                        noteLines.length === 0
+                            ? `<tr><td class="num">1</td><td class="name">${escapeHtml(order.job_type || row.job_type || '-')}: ${escapeHtml(order.job_name || '-')}</td><td class="size dash">-</td><td class="qty money">${(row.order_item_count ?? 0).toLocaleString('th-TH')}</td><td class="price dash">-</td><td class="amount money">${formatMoney(order.pricing.net_amount)}</td></tr>`
+                            : noteLines
+                                  .map(
+                                      (
+                                          line,
+                                          index,
+                                      ) => `<tr class="${line.size === '' && line.quantity === '' ? 'is-charge' : ''}">
+                            <td class="num">${index + 1}</td>
+                            <td class="name">${escapeHtml(line.name)}</td>
+                            <td class="size">${line.size === '' ? '<span class="dash">-</span>' : escapeHtml(line.size)}</td>
+                            <td class="qty money">${line.quantity === '' ? '<span class="dash">-</span>' : line.quantity}</td>
+                            <td class="price money">${line.unitPrice === '' ? '<span class="dash">-</span>' : line.unitPrice}</td>
+                            <td class="amount money">${formatMoney(line.total)}</td>
+                        </tr>`,
+                                  )
+                                  .join('')
+                    }
+                    <!-- One figure, used here and in the summary below:
+                         a note that states two different totals is one
+                         the customer is entitled to argue with. The
+                         lines above are the bill's own goods and
+                         charges, which is what this adds up to. -->
+                    <tr class="count-row">
+                        <td colspan="3">รวม ${noteLines.length.toLocaleString('th-TH')} รายการ</td>
+                        <td class="qty money">${notePieces.toLocaleString('th-TH')}</td>
+                        <td class="price"></td>
+                        <td class="amount money">${formatMoney(noteTotals.gross)}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="fill"></div>
+
+            <section class="close">
+                <div class="in-words">
+                    <div class="party-label">จำนวนเงินเป็นตัวอักษร</div>
+                    <strong>(${escapeHtml(bahtText(noteTotals.payable))})</strong>
+                </div>
+                <table class="totals">
+                    ${summaryRow('รวมเป็นเงิน', formatMoney(noteTotals.gross))}
+                    ${noteTotals.billDiscountPercent > 0 ? summaryRow(`ส่วนลดตามบิล ${noteTotals.billDiscountPercent}%`, `- ${formatMoney(noteTotals.billDiscountAmount)}`, 'is-less') : ''}
+                    ${noteTotals.billDiscountPercent > 0 ? summaryRow('ยอดสุทธิตามบิล', formatMoney(noteTotals.billNet)) : ''}
+                    ${noteTotals.discountPercent > 0 ? summaryRow(`ส่วนลดใบส่งของ ${noteTotals.discountPercent}%`, `- ${formatMoney(noteTotals.discountAmount)}`, 'is-less') : ''}
+                    ${summaryRow('ยอดที่ต้องชำระ', formatMoney(noteTotals.payable), 'is-payable')}
+                </table>
+            </section>
+
+            <div class="consent">ได้รับสินค้าตามรายการข้างบนนี้ไว้ถูกต้องครบถ้วนแล้ว</div>
+
+            <section class="signatures">
+                <div>
+                    <div class="sign-title">ผู้ส่งสินค้า</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-caption">${escapeHtml(deliveryInfo?.sender_signature || '(ลงชื่อ)')} · วันที่ ${escapeHtml(formatTableDate(row.due_date))}</div>
+                </div>
+                <div>
+                    <div class="sign-title">ผู้รับสินค้า</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-caption">(ลงชื่อ) · วันที่ ............/............/............</div>
+                </div>
+            </section>
+
+            <footer class="foot"><span>${escapeHtml(row.order_code)} · ${escapeHtml(order.customer.name || row.customer_name || '-')}</span><span>เอกสารนี้ไม่ใช่ใบกำกับภาษี</span></footer>
         </main></body></html>`);
         printWindow.document.close();
         printWindow.focus();
@@ -3652,107 +3784,27 @@ export default function Counter({
             return;
         }
 
-        const keeperColor = (order.individual_keeper_color ?? '').trim();
-        const hasPants = people.some(
-            (person) =>
-                (person.pants_size ?? '').trim() !== '' ||
-                (person.pants_number ?? '').trim() !== '',
-        );
-        const sleeves = summarizePersonLengths(
-            people.map((person) => person.shirt_style),
-            SHIRT_STYLE_PERSON_LABELS,
-        );
-        // Only people who ordered trousers have a leg length to count: a
-        // keeper in a shirt alone is not one more pair of shorts.
-        const wearsPants = (person: (typeof people)[number]): boolean =>
-            person.pants_quantity !== undefined
-                ? person.pants_quantity > 0
-                : (person.pants_size ?? '').trim() !== '' ||
-                  (person.pants_number ?? '').trim() !== '';
-        const legs = summarizePersonLengths(
-            hasPants
-                ? people.filter(wearsPants).map((person) => person.pants_style)
-                : [],
-            PANTS_STYLE_PERSON_LABELS,
-        );
-        // Only a mixed list earns a column; a whole team in one length is said
-        // once in the header instead of repeated down every row.
-        const showSleeveColumn = sleeves.mixed;
-        const showLegColumn = legs.mixed;
-        const rosterColumnCount =
-            7 +
-            (hasPants ? 2 : 0) +
-            (showSleeveColumn ? 1 : 0) +
-            (showLegColumn ? 1 : 0);
-        const cell = (value: string | undefined): string => {
-            const text = (value ?? '').trim();
-
-            return text === '' || text === '-'
-                ? '<span class="r-blank">·</span>'
-                : escapeHtml(text);
-        };
-
-        const bodyRows = people
-            .map((person, index) => {
-                const isKeeper = person.role === 'keeper';
-
-                return `<tr class="${isKeeper ? 'is-keeper' : ''}">
-                    <td class="r-index">${index + 1}</td>
-                    <td class="r-role">${isKeeper ? 'ผู้รักษาประตู' : 'ผู้เล่น'}</td>
-                    <td class="r-group">${person.size_group === 'kids' ? 'เด็ก' : 'ผู้ใหญ่'}</td>
-                    <td class="r-size">${cell(person.size)}</td>
-                    <td class="r-name">${cell(person.name)}</td>
-                    <td class="r-num">${cell(person.number)}</td>
-                    ${showSleeveColumn ? `<td class="r-len${person.shirt_style === 'long' ? ' is-long' : ''}">${escapeHtml(sleeves.labelOf(person.shirt_style))}</td>` : ''}
-                    ${hasPants ? `<td class="r-size">${cell(person.pants_size)}</td><td class="r-num">${cell(person.pants_number)}</td>` : ''}
-                    ${showLegColumn ? `<td class="r-len${wearsPants(person) && person.pants_style === 'long' ? ' is-long' : ''}">${escapeHtml(wearsPants(person) ? legs.labelOf(person.pants_style) : '-')}</td>` : ''}
-                    <td class="r-check"></td>
-                </tr>`;
-            })
-            .join('');
-
-        const keeperCount = people.filter(
-            (person) => person.role === 'keeper',
-        ).length;
-        // The same masthead the work receipt prints, so the two sheets read as
-        // one document family instead of two systems.
-        const branchHeaderColor = resolveBranchHeaderColor(
-            order.branch_header_color,
-        );
-        const barcodeMarkup = createOrderCodeBarcodeSvg(order.order_code);
-        const mastheadMarkup = `
-            <div class="masthead">
-                <div class="masthead-bar">
-                    <span class="masthead-title">ใบรายชื่อสกรีน</span>
-                    <span class="masthead-code">${escapeHtml(order.order_code)}</span>
-                </div>
-                <div class="masthead-body">
-                    <div class="masthead-logo"><img src="/images/logo/logo.png" alt="logo" /></div>
-                    <div class="masthead-company">
-                        <div class="company-title">เจ.เอส.สปอร์ต</div>
-                        <div class="subtitle">กรุณาตรวจสอบรายชื่อ ไซซ์ และเบอร์ ให้ถูกต้องก่อนเซ็นรับ</div>
-                    </div>
-                    <div class="masthead-branch">
-                        <div><span class="branch-label">สาขา</span> ${escapeHtml(order.branch_name || '-')}</div>
-                        <div class="small">โทร: ${escapeHtml(order.branch_phone || '-')}</div>
-                        <div class="barcode-wrap">
-                            ${barcodeMarkup || `<div class="barcode-fallback">${escapeHtml(order.order_code)}</div>`}
-                        </div>
-                    </div>
-                </div>
-                <div class="masthead-job">
-                    <div><span class="job-label">ชื่อหน่วยงาน, ชื่องาน</span> <span class="job-value">${escapeHtml(order.job_name || '-')}</span></div>
-                    <div><span class="job-label">ลูกค้า</span> <span class="job-value">${escapeHtml(order.customer.name || '-')}${order.customer.phone ? ` · โทร ${escapeHtml(order.customer.phone)}` : ''}</span></div>
-                    <div><span class="job-label">วันที่ต้องส่ง</span> <span class="job-value is-date">${escapeHtml(formatTableDate(order.due_date ?? ''))}${order.postponed_from ? ` (เลื่อนจาก ${escapeHtml(thaiDate(order.postponed_from))})` : ''}</span></div>
-                </div>
-                <div class="masthead-roster">
-                    <span>รวม <strong>${people.length.toLocaleString('th-TH')}</strong> รายชื่อ</span>
-                    ${keeperCount > 0 ? `<span>ผู้รักษาประตู <strong>${keeperCount.toLocaleString('th-TH')}</strong> คน</span>` : ''}
-                    ${sleeves.caption !== '' ? `<span class="r-length-note">${escapeHtml(sleeves.caption)}</span>` : ''}
-                    ${legs.caption !== '' ? `<span class="r-length-note">${escapeHtml(legs.caption)}</span>` : ''}
-                    ${keeperColor !== '' ? `<span class="r-keeper-note">เสื้อผู้รักษาประตู: ${escapeHtml(keeperColor)}</span>` : ''}
-                </div>
-            </div>`;
+        // Built by the module the floor's copy is built by, so the sheet the
+        // customer checks and the sheet the press works from are the same
+        // document down to the column order.
+        const html = buildScreenRosterHtml({
+            orderCode: order.order_code,
+            jobName: order.job_name ?? '',
+            customerName: order.customer.name ?? '',
+            customerPhone: order.customer.phone,
+            branchName: order.branch_name ?? '',
+            branchPhone: order.branch_phone,
+            branchHeaderColor: resolveBranchHeaderColor(
+                order.branch_header_color,
+            ),
+            dueDateLabel: formatTableDate(order.due_date ?? ''),
+            postponedFromLabel: order.postponed_from
+                ? thaiDate(order.postponed_from)
+                : null,
+            keeperColor: order.individual_keeper_color,
+            barcodeMarkup: createOrderCodeBarcodeSvg(order.order_code),
+            people,
+        });
 
         const printWindow = window.open('', '_blank', 'width=900,height=1100');
 
@@ -3760,120 +3812,7 @@ export default function Counter({
             return;
         }
 
-        printWindow.document.write(`
-            <html>
-                <head>
-                    <meta charset="utf-8" />
-                    <meta name="viewport" content="width=device-width, initial-scale=1" />
-                    <title>ใบรายชื่อ ${escapeHtml(order.order_code)}</title>
-                    <style>
-                        @page { size: A4 portrait; margin: 10mm; }
-                        * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                        /* Paint the ground explicitly: a print window that inherits
-                           a dark scheme would otherwise render white cells dark and
-                           swallow the names. */
-                        body { margin: 0; background: #ffffff; font-family: "Noto Sans Thai", Arial, sans-serif; color: #0f172a; font-size: 12px; }
-                        td { background: #ffffff; }
-                        table { width: 100%; border-collapse: collapse; }
-                        /* thead repeats on every printed page, so the bill it
-                           belongs to travels with each loose sheet. */
-                        thead { display: table-header-group; }
-                        tr { page-break-inside: avoid; }
-                        .r-caption td { border: none; padding: 0 0 5px; background: #ffffff; }
-                        /* The work receipt's masthead, used as-is so the two sheets
-                           read as one document instead of two systems. */
-                        .masthead { border: 1px solid ${branchHeaderColor}; }
-                        .masthead-bar { background: ${branchHeaderColor}; color: #ffffff; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 3px 7px; }
-                        .masthead-title { font-size: 14px; font-weight: 700; letter-spacing: 0.03em; }
-                        .masthead-code { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.92; }
-                        .masthead-body { display: grid; grid-template-columns: 38mm minmax(0, 1fr) 46mm; align-items: center; gap: 6px; padding: 3px 7px; }
-                        .masthead-logo { height: 15mm; overflow: hidden; }
-                        .masthead-logo img { display: block; width: 100%; height: 100%; object-fit: cover; }
-                        .masthead-company { text-align: center; min-width: 0; }
-                        .company-title { font-size: 15px; font-weight: 800; color: #E21E26; line-height: 1.05; }
-                        .subtitle { font-size: 9px; color: #374151; margin-top: 1px; line-height: 1.15; }
-                        .masthead-branch { font-size: 10px; line-height: 1.2; }
-                        .masthead-branch .branch-label { color: #E21E26; font-weight: 700; }
-                        /* Sized the same way as the work sheet's masthead: the
-                           customer and the due date get the width their text needs
-                           and the job name takes what is left, rather than fixed
-                           fractions that starve one cell while another keeps half a
-                           column of white. Each track can still give way when every
-                           field is long, the job name first. */
-                        .masthead-job { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) max-content; gap: 6px; align-items: baseline; border-top: 1px solid ${branchHeaderColor}; padding: 2px 7px 3px; }
-                        .masthead-job > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-                        .job-label { font-size: 9px; color: ${branchHeaderColor}; font-weight: 700; }
-                        .job-value { font-size: 13px; color: #111827; font-weight: 800; }
-                        .job-value.is-date { color: #E21E26; }
-                        .barcode-wrap { margin-top: 2px; border: 1px solid #000000; padding: 1px; text-align: center; }
-                        .barcode-wrap svg { display: block; width: 100%; height: 8mm; }
-                        .barcode-fallback { margin-top: 2px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
-                        .masthead-roster { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid ${branchHeaderColor}; padding: 3px 7px; font-size: 11px; color: #334155; }
-                        .masthead-roster strong { color: #0f172a; font-size: 13px; }
-                        .r-keeper-note { border: 1px solid #f59e0b; background: #fffbeb; color: #92400e; border-radius: 4px; padding: 0 6px; font-weight: 700; }
-                        th, td { border: 0.3mm solid #94a3b8; padding: 4px 6px; }
-                        th { background: #1e3a8a; color: #ffffff; font-weight: 700; }
-                        tbody tr:nth-child(even) td { background: #f8fafc; }
-                        tbody tr.is-keeper td { background: #fffbeb; }
-                        tbody tr.is-keeper .r-role { font-weight: 700; color: #92400e; }
-                        .r-index { width: 8%; text-align: center; color: #64748b; }
-                        .r-role { width: 14%; }
-                        .r-group { width: 10%; text-align: center; }
-                        .r-size { width: 10%; text-align: center; font-weight: 700; }
-                        .r-name { width: 26%; }
-                        .r-num { width: 10%; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
-                        .r-check { width: 9%; }
-                        /* nowrap so a length never breaks across two lines: the
-                           table lays out automatically, so the column takes the
-                           width it needs and the name column gives it up. */
-                        .r-len { width: 11%; text-align: center; white-space: nowrap; }
-                        /* Long is the exception on most bills, so it is the one
-                           that gets picked out of the column. */
-                        .r-len.is-long { font-weight: 700; color: #3730a3; }
-                        .r-length-note { border: 1px solid #c7d2fe; background: #eef2ff; color: #3730a3; border-radius: 4px; padding: 0 6px; font-weight: 700; }
-                        .r-blank { color: #cbd5e1; }
-                        .r-foot { margin-top: 8mm; display: flex; justify-content: space-between; gap: 10mm; }
-                        .r-sign { flex: 1; }
-                        .r-line { margin-top: 14mm; border-bottom: 0.3mm dotted #334155; }
-                        .r-sign-label { margin-top: 2px; text-align: center; color: #475569; }
-                    </style>
-                </head>
-                <body>
-                    <table>
-                        <thead>
-                            <tr class="r-caption">
-                                <td colspan="${rosterColumnCount}">${mastheadMarkup}</td>
-                            </tr>
-                            <tr>
-                                <th>ลำดับ</th>
-                                <th>ประเภท</th>
-                                <th>เด็ก/ผู้ใหญ่</th>
-                                <th>ไซซ์เสื้อ</th>
-                                <th>ชื่อสกรีน</th>
-                                <th>เบอร์เสื้อ</th>
-                                ${showSleeveColumn ? '<th>แขน</th>' : ''}
-                                ${hasPants ? '<th>ไซซ์กางเกง</th><th>เบอร์กางเกง</th>' : ''}
-                                ${showLegColumn ? '<th>ขา</th>' : ''}
-                                <th>ตรวจ</th>
-                            </tr>
-                        </thead>
-                        <tbody>${bodyRows}</tbody>
-                    </table>
-
-                    <div class="r-foot">
-                        <div class="r-sign">
-                            <div class="r-line"></div>
-                            <div class="r-sign-label">ผู้ตรวจสอบรายชื่อ (ลูกค้า)</div>
-                        </div>
-                        <div class="r-sign">
-                            <div class="r-line"></div>
-                            <div class="r-sign-label">วันที่</div>
-                        </div>
-                    </div>
-                    <script>${buildRosterPrintScript()}<\u002Fscript>
-                </body>
-            </html>
-        `);
+        printWindow.document.write(html);
         printWindow.document.close();
         printWindow.focus();
     };
@@ -4854,6 +4793,23 @@ export default function Counter({
                 onClose={() => setArtworkTarget(null)}
             />
 
+            {/* Keyed by bill so the discount box opens on the saved figure
+                rather than the previous bill's unsaved one. */}
+            <DeliveryNoteDialog
+                key={`note-${deliveryNoteTarget?.id ?? 'none'}`}
+                target={deliveryNoteTarget}
+                onClose={() => setDeliveryNoteTarget(null)}
+                onPrint={(percent) => {
+                    const row = orders.find(
+                        (order) => order.id === deliveryNoteTarget?.id,
+                    );
+
+                    if (row) {
+                        handlePrintDeliveryNote(row, percent);
+                    }
+                }}
+            />
+
             <div className="min-h-screen bg-slate-100 text-slate-900">
                 <div className="mx-auto flex w-full max-w-[1700px] flex-col gap-3 px-4 py-4 md:px-6 md:py-5">
                     <section className="pt-1">
@@ -5091,7 +5047,7 @@ export default function Counter({
                             onPageChange={handlePageChange}
                             onOpenDetail={setSelectedOrder}
                             onOpenTimeline={setTimelineOrder}
-                            onOpenPdf={handlePrintDeliveryNote}
+                            onOpenPdf={openDeliveryNote}
                             isAdmin={isAdmin}
                             onDuplicate={handleDuplicateOrder}
                             onDelete={setPendingDelete}

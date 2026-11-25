@@ -1134,6 +1134,8 @@ class DashboardController extends Controller
                     // changing after the floor has started, and a finished job
                     // often gets a photograph of what actually shipped.
                     'can_update_artwork' => $actor->can('updateArtwork', $order),
+                    // "ใบจัดส่ง": who may move the figure the customer signs for.
+                    'can_discount_delivery_note' => $actor->can('discountDeliveryNote', $order),
                     'postponed_from' => $order->postponed_from,
                     'due_date_changes' => $order->dueDateChanges
                         ->map(fn (OrderDueDateChange $change): array => $change->toDisplay())
@@ -1165,6 +1167,10 @@ class DashboardController extends Controller
                         'discount_percent' => (float) $order->discount_percent,
                         'discount_amount' => (float) $order->discount_amount,
                         'net_amount' => (float) $order->net_amount,
+                        // The delivery note's own reduction, off the net
+                        // above. Deliberately not folded into it: the bill
+                        // and the books keep the figure they were written with.
+                        'delivery_discount_percent' => (float) $order->delivery_discount_percent,
                         'paid_amount' => $totalPaid,
                     ],
                     'specification' => $specification,

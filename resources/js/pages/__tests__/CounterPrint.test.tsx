@@ -1323,6 +1323,94 @@ describe('counter work-sheet PDF', () => {
         expect(html).toContain('setTimeout(go, 3000)');
     });
 
+    /**
+     * The customer's copy is checked against the floor's, so both are read in
+     * one order: kids before adults, small sizes before large, then numbers.
+     */
+    const mixedRosterRow = () =>
+        makeRow({
+            details: {
+                personalization_rows: [
+                    {
+                        role: 'player' as const,
+                        name: 'ผู้ใหญ่เอ็ม',
+                        size_group: 'adults' as const,
+                        size: 'M',
+                        number: '9',
+                        quantity: 1,
+                        unit_price: 0,
+                        total_price: 0,
+                    },
+                    {
+                        role: 'player' as const,
+                        name: 'เด็กเจเอ็ม',
+                        size_group: 'kids' as const,
+                        size: 'JM',
+                        number: '10',
+                        quantity: 1,
+                        unit_price: 0,
+                        total_price: 0,
+                    },
+                    {
+                        role: 'player' as const,
+                        name: 'เด็กเจเอส',
+                        size_group: 'kids' as const,
+                        size: 'JS',
+                        number: '4',
+                        quantity: 1,
+                        unit_price: 0,
+                        total_price: 0,
+                    },
+                    {
+                        role: 'player' as const,
+                        name: 'ผู้ใหญ่เอส',
+                        size_group: 'adults' as const,
+                        size: 'S',
+                        number: '2',
+                        quantity: 1,
+                        unit_price: 0,
+                        total_price: 0,
+                    },
+                    {
+                        role: 'player' as const,
+                        name: 'เด็กเจเอ็มสอง',
+                        size_group: 'kids' as const,
+                        size: 'JM',
+                        number: '2',
+                        quantity: 1,
+                        unit_price: 0,
+                        total_price: 0,
+                    },
+                ],
+            },
+        });
+
+    it('reads kids first, then size, then number', () => {
+        const html = rosterHtml(mixedRosterRow());
+        const order = [
+            'เด็กเจเอส',
+            'เด็กเจเอ็มสอง',
+            'เด็กเจเอ็ม',
+            'ผู้ใหญ่เอส',
+            'ผู้ใหญ่เอ็ม',
+        ];
+        const positions = order.map((name) => html.indexOf(name));
+
+        expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    });
+
+    it('says how many of each size each group takes, and the whole sheet', () => {
+        const html = rosterHtml(mixedRosterRow());
+
+        // The summary is a table: a row per group, its sizes as chips, the
+        // group's own total, then the sheet's.
+        expect(html).toContain('สรุปจำนวนตามไซซ์');
+        expect(html).toContain('<b>JS</b>1');
+        expect(html).toContain('<b>JM</b>2');
+        expect(html).toContain('รวมทั้งสิ้น');
+        expect(html).toContain('<strong>5</strong> ตัว');
+    });
+
     it('repeats the bill it belongs to on every printed page', () => {
         const html = rosterHtml();
 

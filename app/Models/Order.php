@@ -84,6 +84,7 @@ class Order extends Model implements HasMedia
             'discount_percent' => 'float',
             'discount_amount' => 'float',
             'net_amount' => 'float',
+            'delivery_discount_percent' => 'float',
             'shipping_delivery_info' => 'array',
             'order_status' => OrderStatus::class,
         ];

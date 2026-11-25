@@ -66,6 +66,27 @@ class OrderPolicy
     }
 
     /**
+     * The delivery note's own discount.
+     *
+     * Open while the bill is in production and after it closes, because that
+     * is when goods are handed over and when a reprint is asked for — but
+     * only to the people who write bills, since it is money coming off what
+     * the customer is asked to sign for. A cancelled bill hands over nothing.
+     */
+    public function discountDeliveryNote(User $user, Order $order): bool
+    {
+        if (! in_array($user->role, [UserRole::Admin, UserRole::Sales], true)) {
+            return false;
+        }
+
+        if (! UserAccessControl::canAccessBranch($user, (int) $order->branch_id)) {
+            return false;
+        }
+
+        return $order->order_status !== OrderStatus::Cancelled;
+    }
+
+    /**
      * Updating a bill's pictures is deliberately wider than editing it.
      *
      * Editing closes as soon as the floor starts cutting, because the sizes

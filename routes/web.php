@@ -4,6 +4,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GarmentPricingController;
 use App\Http\Controllers\OrderArtworkController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\OrderDeliveryNoteController;
 use App\Http\Controllers\OrderDueDateController;
 use App\Http\Controllers\OwnerDashboardController;
 use App\Http\Controllers\Production\CuttingTaskController;
@@ -45,6 +46,10 @@ Route::middleware(['auth'])->group(function () {
     // "อัปเดตรูป" on the counter: artwork alone, so a bill already on the floor
     // can have its pictures brought up to date without its sizes or prices
     // being reopened. Separate from orders.update for exactly that reason.
+    // The delivery note's own discount, which comes off what the bill came
+    // to and changes nothing about the bill itself.
+    Route::post('orders/{order}/delivery-discount', [OrderDeliveryNoteController::class, 'updateDiscount'])
+        ->name('orders.delivery-discount.update');
     Route::get('orders/{order}/artwork', [OrderArtworkController::class, 'show'])->name('orders.artwork.show');
     Route::post('orders/{order}/artwork', [OrderArtworkController::class, 'update'])->name('orders.artwork.update');
     Route::delete('orders/{order}', [OrderController::class, 'destroy'])->name('orders.destroy');

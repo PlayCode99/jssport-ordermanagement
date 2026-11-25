@@ -121,7 +121,7 @@ function sheetTitle(
     return lengthLabel ? `${name} · ${lengthLabel}` : name;
 }
 
-function sizeRank(label: string): number {
+export function sizeRank(label: string): number {
     const rank = SIZE_ORDER.indexOf(label.trim().toUpperCase());
 
     return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;

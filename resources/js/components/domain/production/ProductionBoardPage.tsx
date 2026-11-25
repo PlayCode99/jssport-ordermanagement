@@ -34,6 +34,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { resolveBranchHeaderColor } from '@/lib/branchHeaderColor';
 import { houseColorTheme, normalizeHouseColor } from '@/lib/houseColors';
+import {
+    rosterGroupLine,
+    rosterSummary,
+    sortRoster,
+} from '@/pages/screenRoster';
+import { buildScreenRosterHtml } from '@/pages/screenRosterSheet';
 import type {
     CuttingTeam,
     EmbroideryTeam,
@@ -325,6 +331,14 @@ function readGarmentAvailability(order: Order): {
 type PersonalizationPrintRow = {
     name: string;
     number: string;
+    /**
+     * 'kids' or 'adults'. Optional because a row can be built without it —
+     * the order treats anything that is not 'kids' as adults' anyway.
+     */
+    size_group?: string;
+    /** The lengths, absent on a bill saved before lengths were recorded. */
+    shirt_style?: string;
+    pants_style?: string;
     size: string;
     quantity: number;
     /** The person's trousers, '-' and 0 when they ordered none. */
@@ -401,6 +415,28 @@ export function rosterHasPants(rows: PersonalizationPrintRow[]): boolean {
  * order_items has no column for a person, and the dialog needs it in two
  * places: the sheet itself, and the header that offers to print the sheet.
  */
+/** The colour a Form 2 bill dresses its keeper in, '' when it names none. */
+function readKeeperColor(order: Order): string {
+    const raw = order.specification?.screen_print_detail;
+
+    if (!raw || typeof raw !== 'string') {
+        return '';
+    }
+
+    try {
+        const firstPass = JSON.parse(raw) as unknown;
+        const parsed = (
+            typeof firstPass === 'string' ? JSON.parse(firstPass) : firstPass
+        ) as { individual_keeper_color?: unknown };
+
+        return typeof parsed.individual_keeper_color === 'string'
+            ? parsed.individual_keeper_color.trim()
+            : '';
+    } catch {
+        return '';
+    }
+}
+
 function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
     const raw = order.specification?.screen_print_detail;
 
@@ -417,6 +453,9 @@ function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
             personalization_rows?: Array<{
                 name?: unknown;
                 number?: unknown;
+                size_group?: unknown;
+                shirt_style?: unknown;
+                pants_style?: unknown;
                 size?: unknown;
                 quantity?: unknown;
                 pants_size?: unknown;
@@ -447,6 +486,18 @@ function readPersonalizationRows(order: Order): PersonalizationPrintRow[] {
                 return {
                     name: text(row.name),
                     number: text(row.number),
+                    size_group: row.size_group === 'kids' ? 'kids' : 'adults',
+                    // The sheet puts the short sleeves before the long ones
+                    // and names the length when a bill mixes them, so the
+                    // length has to be carried rather than dropped here.
+                    shirt_style:
+                        typeof row.shirt_style === 'string'
+                            ? row.shirt_style
+                            : undefined,
+                    pants_style:
+                        typeof row.pants_style === 'string'
+                            ? row.pants_style
+                            : undefined,
                     size: text(row.size),
                     quantity:
                         Number.isFinite(quantity) && quantity > 0
@@ -1467,7 +1518,13 @@ export function ProductionBoardPage({
                 <head>
                     <title>${title} ${detailOrder.order_code}</title>
                     <style>
-                        @page { size: A4 landscape; margin: 5mm; }
+                        /* The group sheets are laid out across the page and
+                           need its width. The name list is a narrow column of
+                           people, so it prints upright — the same way the
+                           counter prints the customer's copy, which is what
+                           the floor checks it against. */
+                        @page { size: A4 ${scope === 'roster' ? 'portrait' : 'landscape'}; margin: 5mm; }
+                        ${scope === 'roster' ? '.p-print-page-flow { min-height: 275mm; }' : ''}
                         * { box-sizing: border-box; }
                         body { font-family: "Noto Sans Thai", Arial, sans-serif; margin: 0; padding: 0; color: #0f172a; font-size: 13px; }
                         .p-sheet { width: 100%; }
@@ -1627,7 +1684,53 @@ export function ProductionBoardPage({
 
     const handlePrintDocument = () => printSheets('all', 'ใบรับงาน');
 
-    const handlePrintRoster = () => printSheets('roster', 'ใบรายชื่อสกรีน');
+    /**
+     * The floor's name list is the counter's name list. Built by the same
+     * module rather than cloned out of this page's own sheet, so the copy the
+     * customer signs and the copy at the press cannot differ by a column, an
+     * order or a total — which is the whole point of checking one against the
+     * other at handover.
+     */
+    const handlePrintRoster = () => {
+        if (!detailOrder) {
+            return;
+        }
+
+        const people = readPersonalizationRows(detailOrder);
+
+        if (people.length === 0) {
+            return;
+        }
+
+        const html = buildScreenRosterHtml({
+            orderCode: detailOrder.order_code,
+            jobName: detailOrder.job_name ?? '',
+            customerName: detailOrder.customer?.customer_name ?? '',
+            customerPhone: detailOrder.customer?.phone ?? null,
+            branchName: detailOrder.branch?.branch_name ?? '',
+            branchPhone: detailOrder.branch?.phone ?? null,
+            branchHeaderColor: resolveBranchHeaderColor(
+                detailOrder.branch?.header_color,
+            ),
+            dueDateLabel: counterDate(detailOrder.due_date),
+            postponedFromLabel: detailOrder.postponed_from
+                ? counterDate(detailOrder.postponed_from)
+                : null,
+            keeperColor: readKeeperColor(detailOrder),
+            barcodeMarkup: createOrderCodeBarcodeSvg(detailOrder.order_code),
+            people,
+        });
+
+        const printWindow = window.open('', '_blank', 'width=900,height=1100');
+
+        if (!printWindow) {
+            return;
+        }
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.focus();
+    };
 
     const resolveCsrfToken = (): string | null => {
         const metaToken = document
@@ -3083,8 +3186,15 @@ export function ProductionBoardPage({
                                     ...explicitPantsRows,
                                 ];
                                 const orderItems = detailOrder.items ?? [];
-                                const personalizationRows =
-                                    readPersonalizationRows(detailOrder);
+                                // Kids before adults, small sizes before
+                                // large, numbers running up — the same order
+                                // the counter's copy is read in, so the press
+                                // and the counter never hold two orders.
+                                const personalizationRows = sortRoster(
+                                    readPersonalizationRows(detailOrder),
+                                );
+                                const rosterCounts =
+                                    rosterSummary(personalizationRows);
                                 const withPants =
                                     rosterHasPants(personalizationRows);
                                 const isIndividualOrder =
@@ -4359,6 +4469,22 @@ export function ProductionBoardPage({
                                                it flows and breaks across pages rather than being
                                                cut off at the height of a single sheet. It stays a
                                                flex column so a short list still fills its page. */
+                                            .p-roster-counts {
+                                                display: flex;
+                                                flex-wrap: wrap;
+                                                gap: 1.5mm 2.5mm;
+                                                font-size: 12px;
+                                            }
+                                            .p-roster-count {
+                                                border: 0.3mm solid #cbd5e1;
+                                                border-radius: 1mm;
+                                                padding: 0.5mm 2mm;
+                                                background: #f8fafc;
+                                            }
+                                            .p-roster-count-total {
+                                                border-color: #0f172a;
+                                                font-weight: 700;
+                                            }
                                             .p-print-page-flow {
                                                 height: auto;
                                                 min-height: 195mm;
@@ -6194,6 +6320,36 @@ export function ProductionBoardPage({
                                                                 </div>
                                                             </div>
                                                         </header>
+
+                                                        {/* What to pull before a shirt is printed:
+                                                            how many of each size each group takes,
+                                                            and what the sheet comes to. */}
+                                                        {rosterCounts.groups
+                                                            .length > 0 ? (
+                                                            <div className="p-roster-counts">
+                                                                {rosterCounts.groups.map(
+                                                                    (group) => (
+                                                                        <span
+                                                                            key={
+                                                                                group.group
+                                                                            }
+                                                                            className="p-roster-count"
+                                                                        >
+                                                                            {rosterGroupLine(
+                                                                                group,
+                                                                            )}
+                                                                        </span>
+                                                                    ),
+                                                                )}
+                                                                <span className="p-roster-count p-roster-count-total">
+                                                                    รวมทั้งหมด{' '}
+                                                                    {rosterCounts.total.toLocaleString(
+                                                                        'th-TH',
+                                                                    )}{' '}
+                                                                    ตัว
+                                                                </span>
+                                                            </div>
+                                                        ) : null}
 
                                                         <div className="p-roster-card">
                                                             <table className="p-personalization-table">
